@@ -1,6 +1,6 @@
 # Executive Command Center
 
-**Roadmap** for MLabs portfolio companies: goals, projects, milestones, and leadership review signals. Data lives in a single JSON file (`data/tracker.json`) with atomic writes; a database can replace the repository layer later. On the project grid, **Next milestone** is computed from milestones (first not done in list order), not stored separately.
+**Roadmap** for MLabs portfolio companies: goals, projects, milestones, and leadership review signals. **Locally**, data lives in `data/tracker.json` with atomic file writes. **On Vercel**, when `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) are set, the app stores the same JSON document in **Upstash Redis** instead—serverless-friendly and shared across instances. Company and people images use **`public/uploads/`** locally and **Vercel Blob** (`BLOB_READ_WRITE_TOKEN`) in production when configured. On the project grid, **Next milestone** is computed from milestones (first not done in list order), not stored separately.
 
 While you scroll the Roadmap, the **company** header stays pinned below the main toolbar (title + filters) for the **whole company section**; **goal** and **project** column labels and each **goal** row stack beneath in a cascade (measured toolbar + row heights). Project title rows scroll normally so the company header remains the clear section anchor.
 
@@ -29,6 +29,7 @@ While you scroll the Roadmap, the **company** header stays pinned below the main
    - Set `AUTH_USER_1_USERNAME`, `AUTH_USER_1_PASSWORD`, `AUTH_USER_2_USERNAME`, `AUTH_USER_2_PASSWORD` to long passphrases (the app compares against these values; they are not stored in the JSON file).
    - Set `SESSION_SECRET` to a long random string used only to sign the session cookie.
    - Set `ANTHROPIC_API_KEY` to enable the **AI assistant** (floating button on the dashboard) and **Companies → description generator** (scrape a site via Jina Reader with parallel page fetches, then summarize with Claude). Without a key, assistant requests and description generation return a configuration error. Optionally set `ANTHROPIC_MODEL` to override the default Claude model.
+   - **Vercel / Upstash:** copy Redis and Blob env vars from the Vercel project (Storage). For a first deploy, run `npm run seed:kv` once with those vars in `.env.local` to upload `data/tracker.json` to Redis (see **Data** below).
 
 4. Start the dev server:
 
@@ -40,8 +41,9 @@ While you scroll the Roadmap, the **company** header stays pinned below the main
 
 ## Data
 
-- **Location:** `data/tracker.json` (committed so changes are versioned).
-- **Backup:** copy this file before risky bulk edits.
+- **Location:** `data/tracker.json` in git for local development and as the source of truth you can seed from. **Production (Vercel)** uses Upstash Redis when Redis env vars are present (see `.env.example`); otherwise the app falls back to the JSON file (not persistent on Vercel—use Redis for real deploys).
+- **Seed Redis from this repo:** with Redis credentials in `.env.local`, run `npm run seed:kv` to write the current `data/tracker.json` to the `ecc:tracker:data` key.
+- **Backup:** copy `data/tracker.json` before risky bulk edits; for cloud data, use your Redis provider’s backup/export if needed.
 - **Companies:** each company has a **short name** (e.g. VD, 1L) for labels and search, optional **website** (`https://…`), optional **description** (same inline pattern as goal **Description** on Roadmap). When editing the description, **Generate from website…** opens a dialog with a single **starting URL** (the company website is prefilled when set). The server uses **Jina Reader** on the homepage, discovers up to nine same-origin links, then **scrapes those pages in parallel** (up to six at a time, ten pages total), then **Claude** writes the description (`ANTHROPIC_API_KEY` required). You can **Stop** a long run to cancel. **monthly MRR in thousands of USD** (0–999 in JSON, e.g. `220` = $220K; used to sort companies), optional **development start** and **launch** dates (shown relatively on the tracker, like target dates), plus logo files on the Companies page. The Companies page **groups** rows by **MRR tier**: Idea → Startup → PMF → Pre-scale → Scale. You can **Sort by momentum** to order companies by a composite score (active goals/projects, spotlight and at-risk counts, milestone completion, recent reviews); each row shows a **momentum bar**, optional **spotlight/at-risk dots** next to goal and project counts, and a **left border** tint by tier.
 - **People / companies:** profile photos and logos are **uploaded image files** saved under `public/uploads/people/` and `public/uploads/companies/`. Paths like `/uploads/people/robby.png` are stored in `data/tracker.json`. Each person’s **`name`** is their full name on **Team**; Roadmap owner pickers and filters show **first name** only for compact labels. Each person may include a **department**, optional **`slackHandle`** (Slack **member user ID** only: `U` + 10 characters, e.g. `U09684T0D0X`), and **`employment`** (`inhouse_salaried` — shown as **In-house**, `inhouse_hourly` — **In-house (hourly)**, or `outsourced`) for Roadmap owner filtering. Legacy JSON with **`outsourced`** (boolean) is still accepted and mapped into `employment`. The label **Founders** is reserved for persons `robby` and `nadav` only; the repository normalizes their department to **Founders** and clears that label if it appears on anyone else. On Roadmap, the **Owner** column shows photo + department when a photo exists, otherwise name and department; project **type** is kept in data but not shown on the grid.
 - **Slack:** goals have optional channel + link fields; projects have optional channel, thread label, and link — edited on **Roadmap** when a goal or project is expanded.
@@ -54,6 +56,7 @@ While you scroll the Roadmap, the **company** header stays pinned below the main
 | `npm run dev`  | Next.js development server |
 | `npm run lint` | ESLint (Next.js config)  |
 | `npm run build`| Production build (run when you want a release build) |
+| `npm run seed:kv` | Upload `data/tracker.json` to Upstash (needs Redis env in `.env.local`) |
 
 ## Documentation
 

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "seed:kv": "tsx scripts/seed-kv.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",
@@ -15,6 +16,8 @@
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@upstash/redis": "^1.37.0",
+    "@vercel/blob": "^2.3.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "eslint": "^9.39.4",
@@ -37,6 +40,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/uuid": "^11.0.0",
+    "dotenv": "^17.4.1",
     "tsx": "^4.21.0"
   }
 }

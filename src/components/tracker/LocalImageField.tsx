@@ -13,7 +13,7 @@ type Variant = "company" | "person";
 interface LocalImageFieldProps {
   variant: Variant;
   entityId: string;
-  /** Stored path, e.g. /uploads/companies/voicedrop.png */
+  /** Local path `/uploads/...` or production Blob `https://…` URL */
   path: string;
 }
 

@@ -1,6 +1,7 @@
 import { mkdir, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+import { del, put } from "@vercel/blob";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -14,6 +15,14 @@ const MIME_TO_EXT: Record<string, string> = {
 
 const ALLOWED = new Set(Object.keys(MIME_TO_EXT));
 
+function useBlobUploads(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+function isBlobPublicUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url) && url.includes("blob.vercel-storage.com");
+}
+
 export function webPathToAbsolute(webPath: string): string | null {
   if (!webPath.startsWith("/uploads/")) return null;
   const rel = webPath.replace(/^\//, "");
@@ -21,7 +30,20 @@ export function webPathToAbsolute(webPath: string): string | null {
 }
 
 export async function deleteFileIfInUploads(webPath: string | undefined): Promise<void> {
-  if (!webPath?.startsWith("/uploads/")) return;
+  if (!webPath) return;
+
+  if (isBlobPublicUrl(webPath)) {
+    try {
+      await del(webPath, {
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  if (!webPath.startsWith("/uploads/")) return;
   const abs = webPathToAbsolute(webPath);
   if (!abs) return;
   try {
@@ -64,6 +86,17 @@ export async function saveUploadedImage(args: {
   const ext = MIME_TO_EXT[mime];
   const safe = sanitizeId(entityId);
   const sub = kind === "company" ? "companies" : "people";
+
+  if (useBlobUploads()) {
+    const pathname = `uploads/${sub}/${safe}.${ext}`;
+    const blob = await put(pathname, file, {
+      access: "public",
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: true,
+    });
+    return { ok: true, webPath: blob.url };
+  }
+
   const webPath = `/uploads/${sub}/${safe}.${ext}`;
   const absDir = join(process.cwd(), "public", "uploads", sub);
   const absFile = join(absDir, `${safe}.${ext}`);

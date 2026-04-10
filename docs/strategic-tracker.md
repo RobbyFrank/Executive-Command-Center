@@ -4,7 +4,7 @@
 
 Hierarchy: **Company → Goal → Project → Milestone**. Each **Company** has a **short name** (e.g. `VD`, `1L`) used in labels and for new goal id prefixes, and **revenue** (monthly MRR in **thousands of USD**, 0–999 in JSON — e.g. `220` means $220K/month) used to order companies in Roadmap and on the Companies page (highest first). Optional **`website`** (full `https://` URL) and **`description`** (free text; edited like goal **Description** / `measurableTarget` on Roadmap) are stored on the company record. On **Companies**, the description edit panel includes **Generate from website…**: a single **starting URL** is scraped with **Jina Reader**; the server discovers up to nine same-origin links and fetches those pages **in parallel**, then **Claude** summarizes (`ANTHROPIC_API_KEY` required). The client can **cancel** a run in progress. Optional **development start** and **launch** dates (`developmentStartDate`, `launchDate`, `YYYY-MM-DD`) appear on the Companies page (editable) and on the Roadmap company header as **relative** labels (same rules as project/milestone target dates: days, weeks, months, years). On **Companies**, rows are **grouped by MRR tier**: Idea ($0), Startup ($1–$1K), PMF ($1K–$10K), Pre-scale ($10K–$25K), Scale ($25K+). The same page can **sort by momentum** (composite score from In Progress goals/projects, spotlight vs at-risk, milestone completion, and reviews in the last 14 days) and shows a **momentum bar**, optional **dots** for spotlight/at-risk on goal and project counts, and a **left border** tint by score tier. **Person** records live on **Team**; each person may have a **department** chosen from a dropdown (every distinct department already used on the team appears, merged with a small default list so new teams can assign departments before any custom labels exist), except the label **Founders**, which is reserved for the fixed founder person ids `robby` and `nadav` (read-only on Team for them; cleared for anyone else if present in JSON), and a **Team** employment control (**In-house**, **In-house (hourly)**, or **Outsourced**). The **Team** page lists **founders** (fixed person records) first, then groups remaining rows by **autonomy score** (1–5), with section headers per autonomy level (the score uses neutral blocks in the Autonomy column), and shows each person’s **workload**: total owned projects, P0/P1 counts, and **companies** where they own projects (logos from the Companies page when set; otherwise short names). **Goals** can store an optional **Slack channel** name and **URL**; **projects** can store **Slack channel**, **thread** (label/title), and **URL** (inline when each goal/project row is expanded).
 
-Stored in `data/tracker.json` and validated with Zod (`src/lib/schemas/tracker.ts`). Company logos and people profile photos are stored as files under `public/uploads/companies/` and `public/uploads/people/`; JSON stores site paths such as `/uploads/companies/voicedrop.png`.
+Stored in `data/tracker.json` (local) or Upstash Redis key `ecc:tracker:data` when Redis env vars are set (`KV_REST_*` or `UPSTASH_REDIS_REST_*`), validated with Zod (`src/lib/schemas/tracker.ts`). Company logos and people profile photos are files under `public/uploads/…` locally or **Vercel Blob** URLs in production when `BLOB_READ_WRITE_TOKEN` is set; JSON stores either a path like `/uploads/companies/voicedrop.png` or an `https://…blob.vercel-storage.com/…` URL.
 
 ## Editing
 
@@ -24,7 +24,7 @@ Use the **search** field at the top of Roadmap to filter by substring across com
 
 Goals within a company and projects within **Async** goals are sorted by **priority** (P0 first). **Sync** goals preserve project **storage order** as the sequential pipeline.
 
-Changes persist through server actions and rewrite the JSON file atomically (write to a temp file, then rename).
+Changes persist through server actions: locally, the JSON file is rewritten atomically (temp file, then rename); with Redis configured, the full document is saved with `JSON.stringify` to the Upstash key.
 
 ## Auth
 
@@ -32,9 +32,9 @@ Two accounts are configured via environment variables (`AUTH_USER_*`). Sessions 
 
 ## AI assistant
 
-The dashboard includes a floating **Assistant** control (bottom-right). It calls `POST /api/assistant` with `{ question, history? }`; the handler loads `data/tracker.json` via `getRepository().load()`, embeds it in the Claude system prompt, and streams the reply as `text/plain`. Requires `ANTHROPIC_API_KEY` in `.env.local` (optional `ANTHROPIC_MODEL`). The route is protected by the same session middleware as other app routes.
+The dashboard includes a floating **Assistant** control (bottom-right). It calls `POST /api/assistant` with `{ question, history? }`; the handler loads tracker data via `getRepository().load()` (file or Redis), embeds it in the Claude system prompt, and streams the reply as `text/plain`. Requires `ANTHROPIC_API_KEY` in `.env.local` (optional `ANTHROPIC_MODEL`). The route is protected by the same session middleware as other app routes.
 
 ## Future
 
-- Replace `JsonTrackerRepository` with a Postgres-backed implementation behind the same `TrackerRepository` interface.
+- Optional: Postgres or another store behind the same `TrackerRepository` interface if Redis JSON blobs become limiting.
 - Optional: persist or sync auto-calculated confidence; richer zombie detection if milestone completion timestamps are added.
