@@ -62,12 +62,15 @@ interface CompanyFilterMultiSelectProps {
   companies: CompanyFilterOption[];
   selectedIds: string[];
   onChange: (ids: string[]) => void;
+  /** When set, shown as a tabular badge per company row (faceted roster counts). */
+  optionCounts?: Map<string, number>;
 }
 
 export function CompanyFilterMultiSelect({
   companies,
   selectedIds,
   onChange,
+  optionCounts,
 }: CompanyFilterMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const [nameSearch, setNameSearch] = useState("");
@@ -218,7 +221,7 @@ export function CompanyFilterMultiSelect({
                       )}
                     >
                       <CompanyMark company={company} selected={selected} />
-                      <span className="flex min-w-0 flex-col items-start gap-0">
+                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0">
                         <span>{company.name}</span>
                         <span className="text-[10px] text-zinc-500">
                           {company.shortName}
@@ -226,6 +229,14 @@ export function CompanyFilterMultiSelect({
                           {formatMrrFromThousands(company.revenue)}
                         </span>
                       </span>
+                      {optionCounts?.has(company.id) ? (
+                        <span
+                          className="shrink-0 tabular-nums text-[11px] text-zinc-500"
+                          aria-label={`${optionCounts.get(company.id)} team matches`}
+                        >
+                          {optionCounts.get(company.id)}
+                        </span>
+                      ) : null}
                     </button>
                   );
                 })

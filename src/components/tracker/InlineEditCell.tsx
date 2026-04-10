@@ -5,6 +5,7 @@ import {
   useRef,
   useEffect,
   useCallback,
+  useId,
   type ReactNode,
 } from "react";
 import { ChevronDown, Pencil } from "lucide-react";
@@ -15,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   CellHoverTooltip,
+  type CellHoverTooltipEditExtrasContext,
   type CellHoverTooltipHandle,
 } from "./CellHoverTooltip";
 
@@ -71,6 +73,16 @@ interface InlineEditCellProps {
   displayTruncateSingleLine?: boolean;
   /** Tooltip body when `displayTruncateSingleLine`; defaults to raw `value`. */
   tooltipLabel?: string;
+  /** Extra controls in the floating edit panel (Companies description: generate from websites). */
+  truncateTooltipEditExtras?: (
+    ctx: CellHoverTooltipEditExtrasContext
+  ) => ReactNode;
+  /** When true, hover always opens the readonly panel when label is non-empty (e.g. character-capped preview). */
+  truncateTooltipAlwaysHover?: boolean;
+  /**
+   * When set, `draft` is checked before save. Return an error message to block commit and keep editing.
+   */
+  validate?: (draft: string) => string | undefined;
 }
 
 export function InlineEditCell({
@@ -94,11 +106,16 @@ export function InlineEditCell({
   selectPresentation = "always",
   displayTruncateSingleLine = false,
   tooltipLabel,
+  truncateTooltipEditExtras,
+  truncateTooltipAlwaysHover = false,
+  validate,
 }: InlineEditCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [validationError, setValidationError] = useState<string | undefined>();
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
   const truncateTooltipRef = useRef<CellHoverTooltipHandle>(null);
+  const validationHintId = `${useId()}-validation`;
 
   useEffect(() => {
     onEditingChange?.(editing);
@@ -106,6 +123,7 @@ export function InlineEditCell({
 
   useEffect(() => {
     setDraft(value);
+    setValidationError(undefined);
   }, [value]);
 
   useEffect(() => {
@@ -117,16 +135,29 @@ export function InlineEditCell({
     }
   }, [editing]);
 
+  useEffect(() => {
+    if (validationError && editing && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [validationError, editing]);
+
   const commit = useCallback(() => {
+    const err = validate?.(draft);
+    if (err) {
+      setValidationError(err);
+      return;
+    }
+    setValidationError(undefined);
     setEditing(false);
     if (draft !== value) {
       onSave(draft);
     }
-  }, [draft, value, onSave]);
+  }, [draft, value, onSave, validate]);
 
   const cancel = useCallback(() => {
     setEditing(false);
     setDraft(value);
+    setValidationError(undefined);
   }, [value]);
 
   const handleKeyDown = useCallback(
@@ -252,7 +283,7 @@ export function InlineEditCell({
             "hover:bg-zinc-800/50 hover:px-1.5 hover:py-0.5 hover:-mx-1.5 hover:cursor-text",
             "focus-visible:outline-none focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:cursor-text focus-visible:ring-1 focus-visible:ring-zinc-500/35"
           )
-        : "text-left w-full px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm";
+        : "text-left w-full px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm cursor-pointer";
 
     const trimmed = value.trim();
     if (linkBehavior && trimmed && isValidHttpUrl(trimmed)) {
@@ -266,9 +297,10 @@ export function InlineEditCell({
               collapsedLayout,
               displayClassName,
               collapsedButtonClassName,
-              "inline-flex items-center justify-center no-underline text-inherit"
+              "inline-flex items-center no-underline text-inherit min-w-0",
+              formatDisplay ? "justify-start gap-1" : "justify-center"
             )}
-            title="Open link in new tab"
+            title={trimmed}
             onClick={(e) => e.stopPropagation()}
           >
             {formatDisplay ? formatDisplay(trimmed) : trimmed}
@@ -355,6 +387,8 @@ export function InlineEditCell({
             label={tooltipSource}
             onSave={onSave}
             placeholder={placeholder}
+            editExtras={truncateTooltipEditExtras}
+            alwaysHoverReadonly={truncateTooltipAlwaysHover}
           >
             {collapsedInner}
           </CellHoverTooltip>
@@ -402,34 +436,67 @@ export function InlineEditCell({
 
   if (type === "textarea") {
     return (
-      <textarea
-        ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") cancel();
-        }}
-        rows={2}
-        placeholder={placeholder}
-        className={cn(inputClasses, "resize-none", className)}
-      />
+      <div className="w-full min-w-0">
+        <textarea
+          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (validationError) setValidationError(undefined);
+          }}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") cancel();
+          }}
+          rows={2}
+          placeholder={placeholder}
+          aria-invalid={validationError ? true : undefined}
+          aria-describedby={validationError ? validationHintId : undefined}
+          className={cn(
+            inputClasses,
+            "resize-none",
+            validationError && "border-red-600 focus:ring-red-600",
+            className
+          )}
+        />
+        {validationError ? (
+          <p id={validationHintId} className="mt-1 text-xs text-red-400">
+            {validationError}
+          </p>
+        ) : null}
+      </div>
     );
   }
 
   return (
-    <input
-      ref={inputRef as React.RefObject<HTMLInputElement>}
-      type={type === "number" ? "number" : type === "date" ? "date" : "text"}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={handleKeyDown}
-      min={min}
-      max={max}
-      step={step}
-      placeholder={placeholder}
-      className={cn(inputClasses, className)}
-    />
+    <div className="w-full min-w-0">
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          if (validationError) setValidationError(undefined);
+        }}
+        onBlur={commit}
+        onKeyDown={handleKeyDown}
+        min={min}
+        max={max}
+        step={step}
+        placeholder={placeholder}
+        aria-invalid={validationError ? true : undefined}
+        aria-describedby={validationError ? validationHintId : undefined}
+        className={cn(
+          inputClasses,
+          validationError && "border-red-600 focus:ring-red-600",
+          className
+        )}
+      />
+      {validationError ? (
+        <p id={validationHintId} className="mt-1 text-xs text-red-400">
+          {validationError}
+        </p>
+      ) : null}
+    </div>
   );
 }

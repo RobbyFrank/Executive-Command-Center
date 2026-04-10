@@ -5,9 +5,14 @@ import type { TrackerStatusTagId } from "@/lib/tracker-search-filter";
 import {
   AlertCircle,
   ChevronDown,
+  Eye,
   Flag,
+  Ghost,
+  Hourglass,
   Sparkles,
   Tags,
+  TrendingDown,
+  TrendingUp,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -40,8 +45,38 @@ const OPTIONS: {
   {
     id: "need_review",
     label: "Need review",
-    hint: "Stale last-reviewed (goal 72h / project 24h)",
+    hint: "Stale last-reviewed — window depends on owner autonomy",
     Icon: AlertCircle,
+  },
+  {
+    id: "close_watch",
+    label: "Close watch",
+    hint: "P0/P1 project owned by someone with autonomy 1–2",
+    Icon: Eye,
+  },
+  {
+    id: "zombie",
+    label: "Zombie",
+    hint: "In progress, no milestone done, review stale 21+ days",
+    Icon: Ghost,
+  },
+  {
+    id: "high_leverage",
+    label: "High leverage",
+    hint: "High impact goal (4–5) with low-complexity project (1–2)",
+    Icon: TrendingUp,
+  },
+  {
+    id: "low_leverage",
+    label: "Low leverage",
+    hint: "Low impact goal (1–2) with high-complexity project (4–5)",
+    Icon: TrendingDown,
+  },
+  {
+    id: "time_sensitive",
+    label: "Time-sensitive",
+    hint: "High cost of delay but goal not In Progress",
+    Icon: Hourglass,
   },
 ];
 
@@ -79,7 +114,7 @@ export function StatusTagFilterMultiSelect({
     selectedIds.length === 0 ? (
       <>
         <Tags className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden />
-        <span className="truncate">All statuses</span>
+        <span className="truncate">All signals</span>
       </>
     ) : selectedIds.length === 1 ? (
       <>
@@ -95,15 +130,15 @@ export function StatusTagFilterMultiSelect({
     ) : (
       <>
         <Tags className="h-3.5 w-3.5 text-zinc-400 shrink-0" aria-hidden />
-        <span className="truncate">{selectedIds.length} statuses</span>
+        <span className="truncate">{selectedIds.length} signals</span>
       </>
     );
 
   return (
     <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
-        Filter goals and projects by status: at risk, spotlight, unassigned, need
-        review
+        Filter goals and projects by signals: at risk, spotlight, leverage, zombie,
+        time-sensitive, and more
       </span>
       <button
         type="button"

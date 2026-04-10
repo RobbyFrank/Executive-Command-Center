@@ -1,12 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import type { ProjectWithMilestones, Person } from "@/lib/types/tracker";
 import { StatusEnum, PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
-import { OwnerSelectDisplay } from "./OwnerSelectDisplay";
+import { OwnerPickerCell } from "./OwnerPickerCell";
 import { ProgressBar } from "./ProgressBar";
 import { SCORE_BAND_OPTIONS, parseScoreBand } from "@/lib/tracker-score-bands";
+import {
+  computeProjectConfidenceFromProject,
+  explainProjectConfidence,
+} from "@/lib/confidenceScore";
+import { prioritySelectTextClass } from "@/lib/prioritySort";
+import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import { MilestoneRow } from "./MilestoneRow";
 import {
@@ -19,10 +33,18 @@ import { ChevronRight, Flag, Link2, Plus, Sparkles } from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewAction } from "./ReviewAction";
 import { cn } from "@/lib/utils";
+
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import type { Priority, Status } from "@/lib/types/tracker";
 import { CollapsePanel } from "./CollapsePanel";
 import { getNextPendingMilestone } from "@/lib/next-milestone";
+import { projectMatchesCloseWatch } from "@/lib/closeWatch";
+import {
+  AUTONOMY_GROUP_LABEL,
+  clampAutonomy,
+  isFounderPersonId,
+} from "@/lib/autonomyRoster";
+import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 
 interface ProjectRowProps {
   /** Parent goal id — used in single-project expansion mode */
@@ -30,6 +52,9 @@ interface ProjectRowProps {
   project: ProjectWithMilestones;
   people: Person[];
   expandForSearch?: boolean;
+  /** Parent goal's cost-of-delay score (1–5) for autonomy risk warnings. */
+  goalCostOfDelay?: number;
+  ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
 }
 
 export function ProjectRow({
@@ -37,6 +62,8 @@ export function ProjectRow({
   project,
   people,
   expandForSearch = false,
+  goalCostOfDelay,
+  ownerWorkloadMap,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
@@ -151,20 +178,72 @@ export function ProjectRow({
 
   const statusOptions = StatusEnum.options.map((s) => ({ value: s, label: s }));
   const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
-  const ownerOptions = [
-    { value: "", label: "Unassigned" },
-    ...people.map((p) => ({ value: p.id, label: p.name })),
-  ];
-
+  const peopleById = useMemo(
+    () => new Map(people.map((p) => [p.id, p])),
+    [people]
+  );
+  const projectConfidenceAuto = useMemo(
+    () => computeProjectConfidenceFromProject(project, peopleById),
+    [project, peopleById]
+  );
+  const projectConfidenceExplain = useMemo(
+    () => explainProjectConfidence(project, peopleById),
+    [project, peopleById]
+  );
   const ownerPerson = people.find((p) => p.id === project.ownerId);
-  const ownerName = ownerPerson?.name ?? "";
-  const ownerDept = ownerPerson?.department?.trim();
   const isUnassigned = !project.ownerId;
 
   const nextPendingMilestone = useMemo(
     () => getNextPendingMilestone(project.milestones),
     [project.milestones]
   );
+
+  const missingTargetDate = useMemo(() => {
+    const raw = project.targetDate?.trim() ?? "";
+    if (!raw) return true;
+    return parseCalendarDateString(raw) === null;
+  }, [project.targetDate]);
+
+  const hasMilestoneMissingDate = useMemo(
+    () =>
+      project.milestones.some(
+        (ms) => ms.status !== "Done" && !ms.targetDate?.trim()
+      ),
+    [project.milestones]
+  );
+
+  const highCodLowAutonomy = useMemo(() => {
+    if (!goalCostOfDelay || goalCostOfDelay < 4) return false;
+    if (!ownerPerson || isFounderPersonId(ownerPerson.id)) return false;
+    return clampAutonomy(ownerPerson.autonomyScore) < 4;
+  }, [goalCostOfDelay, ownerPerson]);
+
+  const warnings = useMemo(() => {
+    const list: { label: string; title: string }[] = [];
+    if (project.milestones.length === 0)
+      list.push({ label: "No milestones", title: "No milestones yet — add checkpoints to track delivery" });
+    if (hasMilestoneMissingDate)
+      list.push({ label: "Milestone undated", title: "One or more active milestones have no target date" });
+    if (missingTargetDate)
+      list.push({ label: "No due date", title: "No target date — set one in the Date column" });
+    if (isUnassigned)
+      list.push({ label: "Unassigned", title: "No owner assigned" });
+    if (highCodLowAutonomy)
+      list.push({ label: "Low autonomy / high CoD", title: "Owner autonomy is under 4 on a goal with high cost of delay — consider reassigning or increasing oversight" });
+    return list;
+  }, [project.milestones.length, hasMilestoneMissingDate, missingTargetDate, isUnassigned, highCodLowAutonomy]);
+
+  const showCloseWatch = useMemo(
+    () => projectMatchesCloseWatch(project, people),
+    [project, people]
+  );
+
+  const lowAutonomyOwnerHint = useMemo(() => {
+    if (!ownerPerson || isFounderPersonId(ownerPerson.id)) return null;
+    const level = clampAutonomy(ownerPerson.autonomyScore);
+    if (level > 2) return null;
+    return AUTONOMY_GROUP_LABEL[level].title;
+  }, [ownerPerson]);
 
   return (
     <div
@@ -186,7 +265,7 @@ export function ProjectRow({
         }
         onClick={onProjectRowClick}
         className={cn(
-          "group flex items-center gap-2 pl-12 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer",
+          "group flex items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer",
           project.atRisk
             ? "hover:bg-amber-950/55"
             : project.spotlight
@@ -194,16 +273,18 @@ export function ProjectRow({
               : "hover:bg-zinc-900/50"
         )}
       >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 ease-out pointer-events-none motion-reduce:transition-none",
-            expanded && "rotate-90"
-          )}
-          aria-hidden
-        />
+        <div className="w-8 shrink-0 flex items-center justify-center">
+          <ChevronRight
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 ease-out pointer-events-none motion-reduce:transition-none",
+              expanded && "rotate-90"
+            )}
+            aria-hidden
+          />
+        </div>
 
         {/* Name */}
-        <div className="w-64 min-w-0 shrink-0">
+        <div className="w-[280px] min-w-0 shrink-0">
           <InlineEditCell
             value={project.name}
             onSave={(name) => updateProject(project.id, { name })}
@@ -212,20 +293,12 @@ export function ProjectRow({
 
         {/* Owner */}
         <div className="w-40 min-w-0 shrink-0">
-          <InlineEditCell
+          <OwnerPickerCell
+            people={people}
             value={project.ownerId}
             onSave={(ownerId) => updateProject(project.id, { ownerId })}
-            type="select"
-            options={ownerOptions}
-            emptyLabel="Unassigned"
-            formatDisplay={(id) => (
-              <OwnerSelectDisplay people={people} ownerId={id} />
-            )}
-            displayTitle={
-              ownerName
-                ? `${ownerName}${ownerDept ? ` · ${ownerDept}` : ""} — Click to change owner`
-                : "Click to assign owner"
-            }
+            priority={project.priority}
+            workloadMap={ownerWorkloadMap}
           />
         </div>
 
@@ -238,6 +311,7 @@ export function ProjectRow({
             }
             type="select"
             options={priorityOptions}
+            displayClassName={cn("font-medium", prioritySelectTextClass(project.priority))}
           />
         </div>
 
@@ -255,32 +329,49 @@ export function ProjectRow({
 
         {/* Next milestone — derived from first milestone not Done */}
         <div
-          className="w-44 shrink-0 min-w-0 py-1.5"
+          className="group/next-ms w-44 shrink-0 min-w-0 py-1.5"
           onClick={(e) => e.stopPropagation()}
         >
-          <p
-            className={cn(
-              "truncate text-left text-sm font-medium leading-snug",
-              nextPendingMilestone
-                ? "text-zinc-100"
-                : project.milestones.length === 0
-                  ? "text-zinc-500"
-                  : "text-zinc-400"
-            )}
-            title={
-              nextPendingMilestone
-                ? nextPendingMilestone.name
-                : project.milestones.length === 0
-                  ? "Add milestones when you expand this project"
+          {project.milestones.length === 0 ? (
+            <button
+              type="button"
+              className="truncate text-left text-sm font-medium leading-snug text-zinc-500 cursor-pointer"
+              onClick={() => {
+                createMilestone({
+                  projectId: project.id,
+                  name: "New milestone",
+                  status: "Not Done",
+                  targetDate: "",
+                });
+                setExpanded(true);
+                setShowMilestones(true);
+              }}
+            >
+              <span className="block truncate group-hover/next-ms:hidden">
+                No milestones
+              </span>
+              <span className="hidden min-w-0 items-center gap-1 truncate text-zinc-200 group-hover/next-ms:flex">
+                <Plus className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden />
+                Create milestone
+              </span>
+            </button>
+          ) : (
+            <p
+              className={cn(
+                "truncate text-left text-sm font-medium leading-snug",
+                nextPendingMilestone ? "text-zinc-100" : "text-zinc-400"
+              )}
+              title={
+                nextPendingMilestone
+                  ? nextPendingMilestone.name
                   : "All milestones are done"
-            }
-          >
-            {project.milestones.length === 0
-              ? "No milestones"
-              : nextPendingMilestone
+              }
+            >
+              {nextPendingMilestone
                 ? nextPendingMilestone.name
                 : "All milestones done"}
-          </p>
+            </p>
+          )}
         </div>
 
         {/* Done when — same interaction as goal Current */}
@@ -313,8 +404,15 @@ export function ProjectRow({
           />
         </div>
 
+        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+          <AutoConfidencePercent
+            score={projectConfidenceAuto}
+            explanation={projectConfidenceExplain}
+          />
+        </div>
+
         {/* Progress */}
-        <div className="w-24 shrink-0">
+        <div className="w-32 shrink-0">
           <ProgressBar percent={project.progress} />
         </div>
 
@@ -322,7 +420,9 @@ export function ProjectRow({
         <div className="w-28 shrink-0">
           <InlineEditCell
             value={project.targetDate}
-            onSave={(targetDate) => updateProject(project.id, { targetDate })}
+            onSave={(targetDate) =>
+              updateProject(project.id, { targetDate })
+            }
             type="date"
             emptyLabel="No date"
           />
@@ -334,7 +434,7 @@ export function ProjectRow({
             "shrink-0 transition-[min-width,max-width] duration-150 ease-out",
             slackUrlEditing
               ? "min-w-[min(28rem,calc(100vw-5rem))] max-w-[calc(100vw-5rem)] w-[min(28rem,calc(100vw-5rem))] z-20 relative"
-              : "w-10"
+              : "w-44"
           )}
           onClick={(e) => e.stopPropagation()}
         >
@@ -368,7 +468,7 @@ export function ProjectRow({
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
 
-        {/* At risk / Spotlight + Unassigned — right cluster */}
+        {/* Status flags + warnings — right cluster */}
         <div className="flex shrink-0 items-center justify-end gap-1.5">
           {project.atRisk && (
             <span
@@ -386,20 +486,23 @@ export function ProjectRow({
               Spotlight
             </span>
           )}
-          {project.milestones.length === 0 && (
+          {warnings.length === 1 && (
             <span
               className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
-              title="No milestones yet — add checkpoints to track delivery"
+              title={warnings[0].title}
             >
-              No milestones
+              {warnings[0].label}
             </span>
           )}
-          {isUnassigned && (
+          {warnings.length > 1 && (
+            <WarningsBadge warnings={warnings} />
+          )}
+          {showCloseWatch && (
             <span
-              className="whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300/85"
-              title="No owner assigned"
+              className="whitespace-nowrap rounded-md border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/95"
+              title="P0/P1 with owner autonomy 1–2 — stay closer on delivery"
             >
-              Unassigned
+              Close watch
             </span>
           )}
         </div>
@@ -409,6 +512,7 @@ export function ProjectRow({
             kind="project"
             lastReviewed={project.lastReviewed}
             onConfirm={() => markProjectReviewed(project.id)}
+            ownerAutonomy={ownerPerson?.autonomyScore}
           />
         </div>
 
@@ -430,7 +534,7 @@ export function ProjectRow({
       <CollapsePanel open={expanded && showMilestones}>
         <div
           className={cn(
-            "border-l-2 ml-14",
+            "border-l-2 ml-8",
             project.atRisk
               ? "border-amber-800/45"
               : project.spotlight
@@ -438,26 +542,182 @@ export function ProjectRow({
                 : "border-zinc-800"
           )}
         >
-          {project.milestones.map((ms) => (
-            <MilestoneRow key={ms.id} milestone={ms} />
-          ))}
-          <button
-            type="button"
-            onClick={() =>
-              createMilestone({
-                projectId: project.id,
-                name: "New milestone",
-                status: "Not Done",
-                targetDate: "",
-              })
-            }
-            className="flex items-center gap-2 pl-20 pr-4 py-1.5 text-xs text-zinc-600 hover:text-zinc-400 transition-colors w-full"
-          >
-            <Plus className="h-3 w-3" />
-            Add milestone
-          </button>
+          {lowAutonomyOwnerHint ? (
+            <div className="pl-14 pr-4 pt-1 pb-2 border-b border-zinc-800/80 mb-0.5">
+              <p className="text-[11px] leading-snug text-zinc-400">
+                <span className="font-medium text-amber-200/90">Owner — </span>
+                {lowAutonomyOwnerHint}
+              </p>
+            </div>
+          ) : null}
+          {project.milestones.length === 0 ? (
+            <div className="mx-4 my-3 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-6 sm:pl-8">
+              <p className="mb-3 max-w-md text-sm text-zinc-500">
+                No milestones yet. Add a milestone to track delivery
+                checkpoints for this project.
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  createMilestone({
+                    projectId: project.id,
+                    name: "New milestone",
+                    status: "Not Done",
+                    targetDate: "",
+                  })
+                }
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add milestone
+              </button>
+            </div>
+          ) : (
+            <>
+              {project.milestones.map((ms) => (
+                <MilestoneRow key={ms.id} milestone={ms} />
+              ))}
+              <div
+                className={cn(
+                  "py-1.5 pl-14 pr-4",
+                  "opacity-0 pointer-events-none transition-opacity duration-150",
+                  "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
+                  "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
+                  "focus-within:pointer-events-auto focus-within:opacity-100"
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    createMilestone({
+                      projectId: project.id,
+                      name: "New milestone",
+                      status: "Not Done",
+                      targetDate: "",
+                    })
+                  }
+                  className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add milestone
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </CollapsePanel>
     </div>
+  );
+}
+
+const WARNINGS_HOVER_CLOSE_MS = 120;
+
+function WarningsBadge({
+  warnings,
+}: {
+  warnings: { label: string; title: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  const cancelScheduledClose = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    cancelScheduledClose();
+    closeTimerRef.current = setTimeout(() => {
+      setOpen(false);
+      closeTimerRef.current = null;
+    }, WARNINGS_HOVER_CLOSE_MS);
+  }, [cancelScheduledClose]);
+
+  const handlePointerEnter = useCallback(() => {
+    cancelScheduledClose();
+    setOpen(true);
+  }, [cancelScheduledClose]);
+
+  const reposition = useCallback(() => {
+    if (!open || !anchorRef.current) {
+      setPos(null);
+      return;
+    }
+    const rect = anchorRef.current.getBoundingClientRect();
+    const panelW = 200;
+    const vw = window.innerWidth;
+    const margin = 8;
+    let left = rect.right - panelW;
+    left = Math.max(margin, Math.min(left, vw - panelW - margin));
+    setPos({ top: rect.bottom + 4, left });
+  }, [open]);
+
+  useLayoutEffect(() => reposition(), [reposition]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open, reposition]);
+
+  const overlay =
+    mounted && open ? (
+      <>
+        {pos && (
+          <div
+            className="fixed z-[110] min-w-[180px] rounded-md border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg"
+            style={{ top: pos.top, left: pos.left }}
+            onMouseEnter={handlePointerEnter}
+            onMouseLeave={scheduleClose}
+          >
+            {warnings.map((w) => (
+              <p
+                key={w.label}
+                className="flex items-center gap-2 whitespace-nowrap px-2 py-1 text-[11px] text-zinc-300"
+                title={w.title}
+              >
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400/80" />
+                {w.label}
+              </p>
+            ))}
+          </div>
+        )}
+      </>
+    ) : null;
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-expanded={open}
+        onClick={(e) => e.stopPropagation()}
+        onMouseEnter={handlePointerEnter}
+        onMouseLeave={scheduleClose}
+        onFocus={handlePointerEnter}
+        onBlur={scheduleClose}
+        className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95 cursor-help"
+      >
+        {warnings.length} warnings
+      </button>
+      {mounted && overlay ? createPortal(overlay, document.body) : null}
+    </>
   );
 }

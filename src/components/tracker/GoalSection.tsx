@@ -1,16 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { GoalWithProjects, Person } from "@/lib/types/tracker";
-import type { Priority, CostOfDelay } from "@/lib/types/tracker";
+import type { Priority } from "@/lib/types/tracker";
 import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
-import { OwnerSelectDisplay } from "./OwnerSelectDisplay";
+import { OwnerPickerCell } from "./OwnerPickerCell";
 import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import {
   SCORE_BAND_OPTIONS,
   parseScoreBand,
 } from "@/lib/tracker-score-bands";
+import { computeGoalConfidence, explainGoalConfidence } from "@/lib/confidenceScore";
+import { prioritySelectTextClass } from "@/lib/prioritySort";
+import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { ProjectRow } from "./ProjectRow";
 import {
   updateGoal,
@@ -20,6 +30,7 @@ import {
   markGoalReviewed,
 } from "@/server/actions/tracker";
 import {
+  AlertTriangle,
   ChevronRight,
   Plus,
   ArrowRightLeft,
@@ -29,23 +40,32 @@ import {
 } from "lucide-react";
 import { ReviewAction } from "./ReviewAction";
 import { cn } from "@/lib/utils";
+import { clampAutonomy, isFounderPersonId } from "@/lib/autonomyRoster";
+import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { getSequentialQueueProjects } from "@/lib/sequentialProjects";
 import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
 import { formatSlackChannelHash } from "@/lib/slackDisplay";
+
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { CollapsePanel } from "./CollapsePanel";
+import { TRACKER_GOAL_HEADER_ROW_FALLBACK_PX } from "@/lib/tracker-sticky-layout";
 
 interface GoalSectionProps {
   goal: GoalWithProjects;
   people: Person[];
   expandForSearch?: boolean;
+  ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
+  /** Cumulative sticky offset for the goal header row (toolbar + company + goals labels). */
+  roadmapGoalRowStickyTopPx: number;
 }
 
 export function GoalSection({
   goal,
   people,
   expandForSearch = false,
+  ownerWorkloadMap,
+  roadmapGoalRowStickyTopPx,
 }: GoalSectionProps) {
   const [expanded, setExpanded] = useState(true);
   const [sequentialShowAll, setSequentialShowAll] = useState(false);
@@ -97,6 +117,28 @@ export function GoalSection({
     () => goal.projects.filter((p) => p.spotlight).length,
     [goal.projects]
   );
+
+  const collapsedSummary = useMemo(() => {
+    const projects = goal.projects;
+    const projectCount = projects.length;
+    let warningCount = 0;
+    const highCod = goal.costOfDelay >= 4;
+
+    for (const p of projects) {
+      if (p.milestones.length === 0) warningCount++;
+      if (p.milestones.some((ms) => ms.status !== "Done" && !ms.targetDate?.trim()))
+        warningCount++;
+      const raw = p.targetDate?.trim() ?? "";
+      if (!raw || parseCalendarDateString(raw) === null) warningCount++;
+      if (!p.ownerId) warningCount++;
+      if (highCod && p.ownerId) {
+        const owner = people.find((o) => o.id === p.ownerId);
+        if (owner && !isFounderPersonId(owner.id) && clampAutonomy(owner.autonomyScore) < 4)
+          warningCount++;
+      }
+    }
+    return { projectCount, warningCount };
+  }, [goal.projects, goal.costOfDelay, people]);
 
   useEffect(() => {
     if (bulkTick === 0) return;
@@ -152,21 +194,45 @@ export function GoalSection({
   );
 
   const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
-  /** High → Low — dropdown order (values must stay in sync with `CostOfDelay` in schema). */
-  const codOptions: { value: string; label: string }[] = [
-    { value: "High", label: "High" },
-    { value: "Medium", label: "Medium" },
-    { value: "Low", label: "Low" },
-  ];
-  const ownerOptions = [
-    { value: "", label: "Unassigned" },
-    ...people.map((p) => ({ value: p.id, label: p.name })),
-  ];
-
+  const peopleById = useMemo(
+    () => new Map(people.map((p) => [p.id, p])),
+    [people]
+  );
+  const goalConfidenceAuto = useMemo(
+    () => computeGoalConfidence(goal.projects, peopleById),
+    [goal.projects, peopleById]
+  );
+  const goalConfidenceExplain = useMemo(
+    () => explainGoalConfidence(goal, peopleById),
+    [goal, peopleById]
+  );
   const ownerPerson = people.find((p) => p.id === goal.ownerId);
-  const ownerName = ownerPerson?.name ?? "";
-  const ownerDept = ownerPerson?.department?.trim();
   const isUnassigned = !goal.ownerId;
+
+  const goalHeaderRef = useRef<HTMLDivElement>(null);
+  const [goalHeaderPx, setGoalHeaderPx] = useState(
+    TRACKER_GOAL_HEADER_ROW_FALLBACK_PX
+  );
+
+  useLayoutEffect(() => {
+    const el = goalHeaderRef.current;
+    if (!el) return;
+    const apply = () =>
+      setGoalHeaderPx(Math.round(el.getBoundingClientRect().height));
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [
+    goal.description,
+    goal.measurableTarget,
+    goal.currentValue,
+    goal.atRisk,
+    goal.spotlight,
+    expanded,
+  ]);
+
+  const projectsColumnStackTopPx = roadmapGoalRowStickyTopPx + goalHeaderPx;
 
   return (
     <div
@@ -181,26 +247,31 @@ export function GoalSection({
     >
       {/* Goal header — click row (not inline controls) to expand/collapse */}
       <div
+        ref={goalHeaderRef}
         onClick={onGoalHeaderClick}
+        style={{ top: roadmapGoalRowStickyTopPx }}
         className={cn(
-          "group flex items-center gap-2 pl-6 pr-4 py-2 transition-colors rounded-md cursor-pointer",
+          "sticky z-[27] group flex items-center gap-2 pl-6 pr-4 py-2 transition-colors rounded-md cursor-pointer",
+          "shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           goal.atRisk
-            ? "bg-amber-950/30 hover:bg-amber-950/55"
+            ? "bg-amber-950/85 hover:bg-amber-950/55"
             : goal.spotlight
-              ? "bg-emerald-950/25 hover:bg-emerald-950/48"
-              : "bg-zinc-900/30 hover:bg-zinc-900/60"
+              ? "bg-emerald-950/80 hover:bg-emerald-950/48"
+              : "bg-zinc-950/90 hover:bg-zinc-900/60"
         )}
       >
-        <ChevronRight
-          className={cn(
-            "h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-300 ease-out pointer-events-none motion-reduce:transition-none",
-            expanded && "rotate-90"
-          )}
-          aria-hidden
-        />
+        <div className="w-8 shrink-0 flex items-center justify-center">
+          <ChevronRight
+            className={cn(
+              "h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-300 ease-out pointer-events-none motion-reduce:transition-none",
+              expanded && "rotate-90"
+            )}
+            aria-hidden
+          />
+        </div>
 
         {/* Description */}
-        <div className="w-64 min-w-0 shrink-0">
+        <div className="w-[280px] min-w-0 shrink-0">
           <InlineEditCell
             value={goal.description}
             onSave={(description) => updateGoal(goal.id, { description })}
@@ -210,20 +281,12 @@ export function GoalSection({
 
         {/* Owner */}
         <div className="w-40 min-w-0 shrink-0">
-          <InlineEditCell
+          <OwnerPickerCell
+            people={people}
             value={goal.ownerId}
             onSave={(ownerId) => updateGoal(goal.id, { ownerId })}
-            type="select"
-            options={ownerOptions}
-            emptyLabel="Unassigned"
-            formatDisplay={(id) => (
-              <OwnerSelectDisplay people={people} ownerId={id} />
-            )}
-            displayTitle={
-              ownerName
-                ? `${ownerName}${ownerDept ? ` · ${ownerDept}` : ""} — Click to change owner`
-                : "Click to assign owner"
-            }
+            priority={goal.priority}
+            workloadMap={ownerWorkloadMap}
           />
         </div>
 
@@ -234,6 +297,7 @@ export function GoalSection({
             onSave={(priority) => updateGoal(goal.id, { priority: priority as Priority })}
             type="select"
             options={priorityOptions}
+            displayClassName={cn("font-medium", prioritySelectTextClass(goal.priority))}
           />
         </div>
 
@@ -243,7 +307,7 @@ export function GoalSection({
             onSave={(measurableTarget) =>
               updateGoal(goal.id, { measurableTarget })
             }
-            placeholder="Target metric"
+            placeholder="Add description"
             displayClassName="text-zinc-100 font-medium"
             displayTruncateSingleLine
           />
@@ -263,7 +327,7 @@ export function GoalSection({
 
         {/* Impact (higher = better) */}
         <div
-          className="w-24 shrink-0"
+          className="w-44 shrink-0"
           title="Impact — higher is more valuable"
         >
           <InlineEditCell
@@ -276,32 +340,31 @@ export function GoalSection({
           />
         </div>
 
-        {/* Confidence — goal-level */}
-        <div className="w-28 shrink-0" title="Confidence in achieving this goal">
-          <InlineEditCell
-            value={String(goal.confidenceScore)}
-            onSave={(v) =>
-              updateGoal(goal.id, { confidenceScore: parseScoreBand(v) })
-            }
-            type="select"
-            options={SCORE_BAND_OPTIONS}
+        {/* Pad to align with project Complexity column */}
+        <div className="w-28 shrink-0" aria-hidden />
+
+        {/* Confidence — auto: average of project scores */}
+        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+          <AutoConfidencePercent
+            score={goalConfidenceAuto}
+            explanation={goalConfidenceExplain}
           />
         </div>
 
         {/* Cost of Delay */}
         <div className="w-32 shrink-0">
           <InlineEditCell
-            value={goal.costOfDelay}
-            onSave={(costOfDelay) =>
-              updateGoal(goal.id, { costOfDelay: costOfDelay as CostOfDelay })
+            value={String(goal.costOfDelay)}
+            onSave={(v) =>
+              updateGoal(goal.id, { costOfDelay: parseScoreBand(v) })
             }
             type="select"
-            options={codOptions}
+            options={SCORE_BAND_OPTIONS}
           />
         </div>
 
         {/* Execution Mode */}
-        <div className="w-16 shrink-0" title={`Execution: ${goal.executionMode}`}>
+        <div className="w-28 shrink-0" title={`Execution: ${goal.executionMode}`}>
           <button
             type="button"
             onClick={() =>
@@ -391,6 +454,23 @@ export function GoalSection({
               </span>
             </span>
           )}
+          {!expanded && collapsedSummary.projectCount > 0 && (
+            <span
+              className="whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-medium text-zinc-500"
+              title={`${collapsedSummary.projectCount} project${collapsedSummary.projectCount === 1 ? "" : "s"} — click to expand`}
+            >
+              {collapsedSummary.projectCount} project{collapsedSummary.projectCount === 1 ? "" : "s"}
+            </span>
+          )}
+          {!expanded && collapsedSummary.warningCount > 0 && (
+            <span
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-orange-400/30 bg-orange-500/8 px-1.5 py-0.5 text-[10px] font-medium text-orange-300/80"
+              title={`${collapsedSummary.warningCount} warning${collapsedSummary.warningCount === 1 ? "" : "s"} across projects — expand to review`}
+            >
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              {collapsedSummary.warningCount} warning{collapsedSummary.warningCount === 1 ? "" : "s"}
+            </span>
+          )}
           {isUnassigned && (
             <span
               className="whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300/85"
@@ -407,6 +487,7 @@ export function GoalSection({
             kind="goal"
             lastReviewed={goal.lastReviewed}
             onConfirm={() => markGoalReviewed(goal.id)}
+            ownerAutonomy={ownerPerson?.autonomyScore}
           />
         </div>
 
@@ -434,10 +515,12 @@ export function GoalSection({
         )}
       >
         <div>
-          <ProjectsColumnHeaders />
+          <ProjectsColumnHeaders
+            stackTopPx={projectsColumnStackTopPx}
+            stickyZClass="z-[26]"
+          />
 
-          {goal.projects.map((project) => {
-            const idx = goal.projects.findIndex((p) => p.id === project.id);
+          {goal.projects.map((project, idx) => {
             const rowRevealed =
               !isSequentialMulti ||
               sequentialShowAll ||
@@ -446,7 +529,7 @@ export function GoalSection({
             const rowInner = (
               <div className="relative">
                 {isSequentialMulti && (
-                  <span className="absolute left-8 top-3 text-xs text-purple-400/40 font-mono">
+                  <span className="absolute left-6 top-3 text-xs text-purple-400/40 font-mono">
                     {idx + 1}.
                   </span>
                 )}
@@ -455,6 +538,8 @@ export function GoalSection({
                   project={project}
                   people={people}
                   expandForSearch={expandForSearch}
+                  goalCostOfDelay={goal.costOfDelay}
+                  ownerWorkloadMap={ownerWorkloadMap}
                 />
               </div>
             );
@@ -473,8 +558,8 @@ export function GoalSection({
               >
                 <div
                   className={cn(
-                    "min-h-0 overflow-hidden transition-opacity duration-[320ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
-                    rowRevealed ? "opacity-100" : "opacity-0"
+                    "min-h-0 transition-opacity duration-[320ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
+                    rowRevealed ? "overflow-visible opacity-100" : "overflow-hidden opacity-0"
                   )}
                   inert={rowRevealed ? undefined : true}
                   aria-hidden={!rowRevealed}
@@ -486,7 +571,7 @@ export function GoalSection({
           })}
 
           {isSequentialMulti && goal.projects.length > 0 && (
-            <div className="pl-14 pr-4 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-1.5 text-[11px] leading-snug">
+            <div className="pl-6 pr-4 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-1.5 text-[11px] leading-snug">
               <span
                 className="text-zinc-500"
                 title="Runs in dependency order: finished work, current step, then what is next"
@@ -515,7 +600,7 @@ export function GoalSection({
 
           <div
             className={cn(
-              "flex flex-wrap items-center gap-x-4 gap-y-1 pl-14 pr-4 py-1.5",
+              "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
               "opacity-0 pointer-events-none transition-opacity duration-150",
               "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
               "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
@@ -558,7 +643,7 @@ export function GoalSection({
                   currentValue: "",
                   impactScore: 3,
                   confidenceScore: 3,
-                  costOfDelay: "Medium",
+                  costOfDelay: 3,
                   ownerId: "",
                   priority: "P2",
                   executionMode: "Async",

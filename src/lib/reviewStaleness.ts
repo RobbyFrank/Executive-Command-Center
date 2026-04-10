@@ -1,24 +1,72 @@
+import { clampAutonomy } from "@/lib/autonomyRoster";
+
 const HOUR_MS = 60 * 60 * 1000;
 
-/** Goals need a check-in less often than active project work. */
+/** Baseline when owner autonomy is unknown — matches previous fixed windows. */
 export const REVIEW_STALE_HOURS: Record<"goal" | "project", number> = {
   goal: 72,
   project: 24,
 };
 
 /**
+ * Review cadence by owner autonomy: lower autonomy → shorter stale window
+ * (goal/project). Unassigned owners use level 3 (baseline).
+ */
+export function getReviewStaleWindowHours(
+  kind: "goal" | "project",
+  ownerAutonomy: number | null | undefined
+): number {
+  const level =
+    ownerAutonomy === undefined || ownerAutonomy === null
+      ? 3
+      : clampAutonomy(ownerAutonomy);
+  if (kind === "project") {
+    switch (level) {
+      case 1:
+        return 12;
+      case 2:
+        return 18;
+      case 3:
+        return 24;
+      case 4:
+        return 48;
+      case 5:
+        return 72;
+      default:
+        return REVIEW_STALE_HOURS.project;
+    }
+  }
+  switch (level) {
+    case 1:
+      return 48;
+    case 2:
+      return 60;
+    case 3:
+      return 72;
+    case 4:
+      return 96;
+    case 5:
+      return 120;
+    default:
+      return REVIEW_STALE_HOURS.goal;
+  }
+}
+
+/**
  * `lastReviewed` is ISO from mark-as-reviewed (legacy rows may be date-only).
- * Returns true if missing, unparseable, or past the window for that entity
- * (72h goals, 24h projects).
+ * Returns true if missing, unparseable, or past the window for that entity.
+ * Optional `ownerAutonomy` tightens or relaxes the window vs baseline.
  */
 export function isReviewStale(
   lastReviewed: string | undefined,
-  kind: "goal" | "project"
+  kind: "goal" | "project",
+  ownerAutonomy?: number | null
 ): boolean {
   if (!lastReviewed?.trim()) return true;
   const d = parseLastReviewed(lastReviewed);
   if (!d) return true;
-  const maxAgeMs = REVIEW_STALE_HOURS[kind] * HOUR_MS;
+  const hours = getReviewStaleWindowHours(kind, ownerAutonomy);
+  const maxAgeMs = hours * HOUR_MS;
   return Date.now() - d.getTime() > maxAgeMs;
 }
 

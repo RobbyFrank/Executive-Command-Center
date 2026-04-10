@@ -34,7 +34,13 @@ export function CollapsePanel({
       )}
     >
       <div
-        className={cn("min-h-0 overflow-hidden", innerClassName, className)}
+        className={cn(
+          "min-h-0",
+          /* `overflow-hidden` breaks nested `position: sticky` vs the page scroll; when open, allow sticky rows (e.g. Roadmap project headers). */
+          open ? "overflow-visible" : "overflow-hidden",
+          innerClassName,
+          className
+        )}
         inert={open ? undefined : true}
         aria-hidden={!open}
       >

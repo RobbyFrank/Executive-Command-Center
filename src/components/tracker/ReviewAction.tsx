@@ -3,8 +3,8 @@
 import { AlertCircle, CheckCircle } from "lucide-react";
 import {
   formatLastReviewedHint,
+  getReviewStaleWindowHours,
   isReviewStale,
-  REVIEW_STALE_HOURS,
 } from "@/lib/reviewStaleness";
 import { cn } from "@/lib/utils";
 
@@ -13,15 +13,18 @@ interface ReviewActionProps {
   onConfirm: () => void;
   /** "goal" | "project" for aria-label */
   kind: "goal" | "project";
+  /** Team autonomy score for the row owner — adjusts stale window when set. */
+  ownerAutonomy?: number | null;
 }
 
 export function ReviewAction({
   lastReviewed,
   onConfirm,
   kind,
+  ownerAutonomy,
 }: ReviewActionProps) {
-  const stale = isReviewStale(lastReviewed, kind);
-  const windowHours = REVIEW_STALE_HOURS[kind];
+  const stale = isReviewStale(lastReviewed, kind, ownerAutonomy);
+  const windowHours = getReviewStaleWindowHours(kind, ownerAutonomy);
   const label =
     kind === "goal" ? "Confirm goal reviewed" : "Confirm project reviewed";
 

@@ -1,6 +1,7 @@
 import { getSession } from "@/server/auth";
 import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/tracker/Sidebar";
+import { AiAssistantButton } from "@/components/ai-assistant/AiAssistantButton";
 
 export default async function DashboardLayout({
   children,
@@ -13,7 +14,8 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen">
       <Sidebar username={session.username} />
-      <main className="flex-1 overflow-auto p-6">{children}</main>
+      <main className="flex-1 overflow-auto px-6 pb-6 pt-0">{children}</main>
+      <AiAssistantButton />
     </div>
   );
 }

@@ -1,22 +1,28 @@
 import { getHierarchy, getPeople } from "@/server/actions/tracker";
 import { TrackerView } from "@/components/tracker/TrackerView";
+import { parseRoadmapSearchParams } from "@/lib/roadmap-query";
 
-export default async function RoadmapPage() {
+export default async function RoadmapPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const { initialFocus, filters: initialFilters } = parseRoadmapSearchParams(sp);
+
   const [hierarchy, people] = await Promise.all([
     getHierarchy(),
     getPeople(),
   ]);
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-zinc-100">Roadmap</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Company → Goal → Project → Milestone.
-        </p>
-      </div>
-
-      <TrackerView hierarchy={hierarchy} people={people} />
+    <div className="-mx-6 -mb-6 min-h-0">
+      <TrackerView
+        hierarchy={hierarchy}
+        people={people}
+        initialFocus={initialFocus}
+        initialFilters={initialFilters}
+      />
     </div>
   );
 }

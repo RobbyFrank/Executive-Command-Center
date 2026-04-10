@@ -8,28 +8,45 @@ import type {
 import { isReviewStale } from "@/lib/reviewStaleness";
 import { scoreBandSearchTokens } from "@/lib/tracker-score-bands";
 import { resolveOwnerFilterTokensToOwnerIds } from "@/lib/owner-filter";
+import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
+import { projectMatchesCloseWatchByOwnerMap } from "@/lib/closeWatch";
+import { isProjectZombie } from "@/lib/zombie";
 
 /** Multi-select status filters on the tracker (OR within selection). */
 export type TrackerStatusTagId =
   | "at_risk"
   | "spotlight"
   | "unassigned"
-  | "need_review";
+  | "need_review"
+  | "close_watch"
+  | "zombie"
+  | "high_leverage"
+  | "low_leverage"
+  | "time_sensitive";
 
 export function normalizeTrackerSearchQuery(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-function personName(peopleById: Map<string, string>, id: string): string {
+function personName(peopleById: Map<string, Person>, id: string): string {
   if (!id) return "";
-  return peopleById.get(id) ?? "";
+  return peopleById.get(id)?.name ?? "";
 }
 
 function joinAssigneeNames(
-  peopleById: Map<string, string>,
+  peopleById: Map<string, Person>,
   ids: string[]
 ): string {
   return ids.map((id) => personName(peopleById, id)).filter(Boolean).join(" ");
+}
+
+function ownerAutonomy(
+  ownerId: string | undefined,
+  peopleById: Map<string, Person>
+): number | null {
+  if (!ownerId) return null;
+  const v = peopleById.get(ownerId)?.autonomyScore;
+  return v === undefined ? null : v;
 }
 
 /** Text for matching a milestone row (names, dates, status, id). */
@@ -40,7 +57,7 @@ function milestoneSearchText(m: Milestone): string {
 /** Project fields only — excludes milestone bodies (handled in filter). */
 function projectSearchTextSelf(
   p: ProjectWithMilestones,
-  peopleById: Map<string, string>
+  peopleById: Map<string, Person>
 ): string {
   return [
     p.id,
@@ -59,13 +76,16 @@ function projectSearchTextSelf(
     p.lastReviewed,
     p.atRisk ? "at risk" : "",
     p.spotlight ? "spotlight momentum win" : "",
+    projectMatchesCloseWatchByOwnerMap(p, peopleById)
+      ? "close watch low autonomy oversight"
+      : "",
   ].join(" ");
 }
 
 /** Goal fields only — excludes projects (handled in filter). */
 function goalSearchTextSelf(
   g: GoalWithProjects,
-  peopleById: Map<string, string>
+  peopleById: Map<string, Person>
 ): string {
   return [
     g.id,
@@ -75,7 +95,7 @@ function goalSearchTextSelf(
     g.currentValue,
     scoreBandSearchTokens(g.impactScore),
     scoreBandSearchTokens(g.confidenceScore),
-    g.costOfDelay,
+    scoreBandSearchTokens(g.costOfDelay),
     personName(peopleById, g.ownerId),
     g.priority,
     g.executionMode,
@@ -110,7 +130,7 @@ function computeProgress(milestones: Milestone[]): number {
 function filterProject(
   p: ProjectWithMilestones,
   q: string,
-  peopleById: Map<string, string>
+  peopleById: Map<string, Person>
 ): ProjectWithMilestones | null {
   const self = projectSearchTextSelf(p, peopleById).toLowerCase();
   if (self.includes(q)) return p;
@@ -130,7 +150,7 @@ function filterProject(
 function filterGoal(
   g: GoalWithProjects,
   q: string,
-  peopleById: Map<string, string>
+  peopleById: Map<string, Person>
 ): GoalWithProjects | null {
   const self = goalSearchTextSelf(g, peopleById).toLowerCase();
   if (self.includes(q)) return g;
@@ -146,7 +166,7 @@ function filterGoal(
 function filterCompany(
   c: CompanyWithGoals,
   q: string,
-  peopleById: Map<string, string>
+  peopleById: Map<string, Person>
 ): CompanyWithGoals | null {
   const self = companySearchTextSelf(c).toLowerCase();
   if (self.includes(q)) return c;
@@ -172,7 +192,7 @@ export function filterTrackerHierarchy(
   const q = normalizeTrackerSearchQuery(rawQuery);
   if (!q) return hierarchy;
 
-  const peopleById = new Map(people.map((p) => [p.id, p.name]));
+  const peopleById = new Map(people.map((p) => [p.id, p]));
 
   return hierarchy
     .map((c) => filterCompany(c, q, peopleById))
@@ -247,36 +267,154 @@ export function filterTrackerHierarchyByCompanyIds(
   return hierarchy.filter((c) => idSet.has(c.id));
 }
 
+/**
+ * Keeps goals whose priority matches OR projects whose priority matches (OR).
+ * If the goal matches, the full goal is kept; otherwise only matching projects.
+ */
+export function filterTrackerHierarchyByPriority(
+  hierarchy: CompanyWithGoals[],
+  priorities: string[] | null
+): CompanyWithGoals[] {
+  if (!priorities || priorities.length === 0) return hierarchy;
+
+  const set = new Set(priorities);
+
+  function filterGoal(g: GoalWithProjects): GoalWithProjects | null {
+    if (set.has(g.priority)) return g;
+    const projects = g.projects.filter((p) => set.has(p.priority));
+    if (projects.length === 0) return null;
+    return { ...g, projects };
+  }
+
+  return hierarchy
+    .map((c) => {
+      const goals = c.goals
+        .map((g) => filterGoal(g))
+        .filter((g): g is GoalWithProjects => g !== null);
+      if (goals.length === 0) return null;
+      return { ...c, goals };
+    })
+    .filter((c): c is CompanyWithGoals => c !== null);
+}
+
+/**
+ * Keeps goals whose status matches OR projects whose status matches (OR).
+ */
+export function filterTrackerHierarchyByStatusEnum(
+  hierarchy: CompanyWithGoals[],
+  statuses: string[] | null
+): CompanyWithGoals[] {
+  if (!statuses || statuses.length === 0) return hierarchy;
+
+  const set = new Set(statuses);
+
+  function filterGoal(g: GoalWithProjects): GoalWithProjects | null {
+    if (set.has(g.status)) return g;
+    const projects = g.projects.filter((p) => set.has(p.status));
+    if (projects.length === 0) return null;
+    return { ...g, projects };
+  }
+
+  return hierarchy
+    .map((c) => {
+      const goals = c.goals
+        .map((g) => filterGoal(g))
+        .filter((g): g is GoalWithProjects => g !== null);
+      if (goals.length === 0) return null;
+      return { ...c, goals };
+    })
+    .filter((c): c is CompanyWithGoals => c !== null);
+}
+
 function goalMatchesStatusTags(
   g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  peopleById: Map<string, Person>
 ): boolean {
   if (tags.has("at_risk") && g.atRisk) return true;
   if (tags.has("spotlight") && g.spotlight) return true;
   if (tags.has("unassigned") && !g.ownerId) return true;
-  if (tags.has("need_review") && isReviewStale(g.lastReviewed, "goal"))
+  if (
+    tags.has("need_review") &&
+    isReviewStale(
+      g.lastReviewed,
+      "goal",
+      ownerAutonomy(g.ownerId, peopleById)
+    )
+  )
+    return true;
+  if (
+    tags.has("close_watch") &&
+    g.projects.some((proj) =>
+      projectMatchesCloseWatchByOwnerMap(proj, peopleById)
+    )
+  )
+    return true;
+  if (
+    tags.has("time_sensitive") &&
+    g.costOfDelay >= 4 &&
+    g.status !== "In Progress"
+  )
+    return true;
+  if (tags.has("zombie") && g.projects.some((proj) => isProjectZombie(proj)))
+    return true;
+  if (
+    tags.has("high_leverage") &&
+    g.projects.some(
+      (proj) => g.impactScore >= 4 && proj.complexityScore <= 2
+    )
+  )
+    return true;
+  if (
+    tags.has("low_leverage") &&
+    g.projects.some(
+      (proj) => g.impactScore <= 2 && proj.complexityScore >= 4
+    )
+  )
     return true;
   return false;
 }
 
 function projectMatchesStatusTags(
   p: ProjectWithMilestones,
-  tags: Set<TrackerStatusTagId>
+  g: GoalWithProjects,
+  tags: Set<TrackerStatusTagId>,
+  peopleById: Map<string, Person>
 ): boolean {
   if (tags.has("at_risk") && p.atRisk) return true;
   if (tags.has("spotlight") && p.spotlight) return true;
   if (tags.has("unassigned") && !p.ownerId) return true;
-  if (tags.has("need_review") && isReviewStale(p.lastReviewed, "project"))
+  if (
+    tags.has("need_review") &&
+    isReviewStale(
+      p.lastReviewed,
+      "project",
+      ownerAutonomy(p.ownerId, peopleById)
+    )
+  )
+    return true;
+  if (
+    tags.has("close_watch") &&
+    projectMatchesCloseWatchByOwnerMap(p, peopleById)
+  )
+    return true;
+  if (tags.has("zombie") && isProjectZombie(p)) return true;
+  if (tags.has("high_leverage") && g.impactScore >= 4 && p.complexityScore <= 2)
+    return true;
+  if (tags.has("low_leverage") && g.impactScore <= 2 && p.complexityScore >= 4)
     return true;
   return false;
 }
 
 function filterGoalByStatusTags(
   g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  peopleById: Map<string, Person>
 ): GoalWithProjects | null {
-  const goalMatches = goalMatchesStatusTags(g, tags);
-  const projects = g.projects.filter((p) => projectMatchesStatusTags(p, tags));
+  const goalMatches = goalMatchesStatusTags(g, tags, peopleById);
+  const projects = g.projects.filter((p) =>
+    projectMatchesStatusTags(p, g, tags, peopleById)
+  );
   if (goalMatches) return g;
   if (projects.length > 0) return { ...g, projects };
   return null;
@@ -284,10 +422,11 @@ function filterGoalByStatusTags(
 
 function filterCompanyByStatusTags(
   c: CompanyWithGoals,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  peopleById: Map<string, Person>
 ): CompanyWithGoals | null {
   const goals = c.goals
-    .map((g) => filterGoalByStatusTags(g, tags))
+    .map((g) => filterGoalByStatusTags(g, tags, peopleById))
     .filter((g): g is GoalWithProjects => g !== null);
   if (goals.length === 0) return null;
   return { ...c, goals };
@@ -300,12 +439,176 @@ function filterCompanyByStatusTags(
  */
 export function filterTrackerHierarchyByStatusTags(
   hierarchy: CompanyWithGoals[],
-  tagIds: TrackerStatusTagId[] | null
+  tagIds: TrackerStatusTagId[] | null,
+  people: Person[]
 ): CompanyWithGoals[] {
   if (!tagIds || tagIds.length === 0) return hierarchy;
 
+  const peopleById = new Map(people.map((p) => [p.id, p]));
   const tags = new Set(tagIds);
   return hierarchy
-    .map((c) => filterCompanyByStatusTags(c, tags))
+    .map((c) => filterCompanyByStatusTags(c, tags, peopleById))
+    .filter((c): c is CompanyWithGoals => c !== null);
+}
+
+// ---------------------------------------------------------------------------
+// Due-date proximity filter
+// ---------------------------------------------------------------------------
+
+export type DueDateFilterId =
+  | "overdue"
+  | "next_7d"
+  | "next_2w"
+  | "next_month"
+  | "next_3m"
+  | "later"
+  | "no_date";
+
+export const DUE_DATE_FILTER_OPTIONS: {
+  id: DueDateFilterId;
+  label: string;
+}[] = [
+  { id: "overdue", label: "Overdue" },
+  { id: "next_7d", label: "7 days" },
+  { id: "next_2w", label: "2 weeks" },
+  { id: "next_month", label: "30 days" },
+  { id: "next_3m", label: "3 months" },
+  { id: "later", label: "After 3 months" },
+  { id: "no_date", label: "No date" },
+];
+
+function calendarDayDiff(target: Date, today: Date): number {
+  const t = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  const r = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((t - r) / 86400000);
+}
+
+/**
+ * Calendar days from today to target (local): negative = past.
+ * `null` = missing or unparseable target date.
+ */
+function dueDateDiffDays(
+  targetDate: string,
+  now: Date
+): number | null {
+  if (!targetDate.trim()) return null;
+  const d = parseCalendarDateString(targetDate);
+  if (!d) return null;
+  return calendarDayDiff(d, now);
+}
+
+/** Whether a project’s target date matches one filter option (cumulative horizons for future due dates). */
+export function projectMatchesDueDateOption(
+  targetDate: string,
+  id: DueDateFilterId,
+  now?: Date
+): boolean {
+  const today = now ?? new Date();
+  const diff = dueDateDiffDays(targetDate, today);
+
+  switch (id) {
+    case "no_date":
+      return diff === null;
+    case "overdue":
+      return diff !== null && diff < 0;
+    case "next_7d":
+      return diff !== null && diff >= 0 && diff <= 7;
+    case "next_2w":
+      return diff !== null && diff >= 0 && diff <= 14;
+    case "next_month":
+      return diff !== null && diff >= 0 && diff <= 30;
+    case "next_3m":
+      return diff !== null && diff >= 0 && diff <= 90;
+    case "later":
+      return diff !== null && diff > 90;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Counts per option: future horizons are **cumulative** (a project due in 3 days
+ * increments the 7 days, 2 weeks, 30 days, and 3 months counts).
+ */
+export function countProjectsByDueDateBucket(
+  hierarchy: CompanyWithGoals[],
+  now?: Date
+): Record<DueDateFilterId, number> {
+  const counts: Record<DueDateFilterId, number> = {
+    overdue: 0,
+    next_7d: 0,
+    next_2w: 0,
+    next_month: 0,
+    next_3m: 0,
+    later: 0,
+    no_date: 0,
+  };
+  const today = now ?? new Date();
+  for (const c of hierarchy) {
+    for (const g of c.goals) {
+      for (const p of g.projects) {
+        const diff = dueDateDiffDays(p.targetDate, today);
+        if (diff === null) {
+          counts.no_date++;
+          continue;
+        }
+        if (diff < 0) counts.overdue++;
+        if (diff >= 0 && diff <= 7) counts.next_7d++;
+        if (diff >= 0 && diff <= 14) counts.next_2w++;
+        if (diff >= 0 && diff <= 30) counts.next_month++;
+        if (diff >= 0 && diff <= 90) counts.next_3m++;
+        if (diff > 90) counts.later++;
+      }
+    }
+  }
+  return counts;
+}
+
+function projectMatchesDueDateFilter(
+  p: ProjectWithMilestones,
+  selected: Set<DueDateFilterId>,
+  now: Date
+): boolean {
+  for (const id of selected) {
+    if (projectMatchesDueDateOption(p.targetDate, id, now)) return true;
+  }
+  return false;
+}
+
+function filterGoalByDueDate(
+  g: GoalWithProjects,
+  selected: Set<DueDateFilterId>,
+  now: Date
+): GoalWithProjects | null {
+  const projects = g.projects.filter((p) =>
+    projectMatchesDueDateFilter(p, selected, now)
+  );
+  if (projects.length === 0) return null;
+  return { ...g, projects };
+}
+
+function filterCompanyByDueDate(
+  c: CompanyWithGoals,
+  selected: Set<DueDateFilterId>,
+  now: Date
+): CompanyWithGoals | null {
+  const goals = c.goals
+    .map((g) => filterGoalByDueDate(g, selected, now))
+    .filter((g): g is GoalWithProjects => g !== null);
+  if (goals.length === 0) return null;
+  return { ...c, goals };
+}
+
+export function filterTrackerHierarchyByDueDate(
+  hierarchy: CompanyWithGoals[],
+  filterIds: DueDateFilterId[] | null,
+  now?: Date
+): CompanyWithGoals[] {
+  if (!filterIds || filterIds.length === 0) return hierarchy;
+
+  const buckets = new Set(filterIds);
+  const today = now ?? new Date();
+  return hierarchy
+    .map((c) => filterCompanyByDueDate(c, buckets, today))
     .filter((c): c is CompanyWithGoals => c !== null);
 }

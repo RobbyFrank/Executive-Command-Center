@@ -8,13 +8,38 @@ import {
   Users,
   Building2,
   LogOut,
+  BarChart3,
+  Grid3X3,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/", label: "Roadmap", icon: LayoutDashboard },
-  { href: "/companies", label: "Companies", icon: Building2 },
-  { href: "/team", label: "Team", icon: Users },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+};
+
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  {
+    title: "Planning",
+    items: [{ href: "/", label: "Roadmap", icon: LayoutDashboard }],
+  },
+  {
+    title: "Insights",
+    items: [
+      { href: "/summary", label: "Summary", icon: BarChart3 },
+      { href: "/matrix", label: "Matrix", icon: Grid3X3 },
+      { href: "/review", label: "Review", icon: ClipboardCheck },
+    ],
+  },
+  {
+    title: "Organization",
+    items: [
+      { href: "/companies", label: "Companies", icon: Building2 },
+      { href: "/team", label: "Team", icon: Users },
+    ],
+  },
 ];
 
 export function Sidebar({ username }: { username: string }) {
@@ -29,28 +54,42 @@ export function Sidebar({ username }: { username: string }) {
         <p className="text-xs text-zinc-500 mt-0.5">MLabs Roadmap</p>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                isActive
-                  ? "bg-zinc-800 text-zinc-100"
-                  : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 p-3 flex flex-col gap-0">
+        {NAV_GROUPS.map((group, groupIndex) => (
+          <div
+            key={group.title}
+            className={cn(
+              groupIndex > 0 && "pt-3 mt-1 border-t border-zinc-800"
+            )}
+          >
+            <h2 className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              {group.title}
+            </h2>
+            <div className="space-y-1">
+              {group.items.map((item) => {
+                const isActive =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                      isActive
+                        ? "bg-zinc-800 text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="p-3 border-t border-zinc-800">

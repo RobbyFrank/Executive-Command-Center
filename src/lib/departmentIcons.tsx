@@ -20,7 +20,7 @@ type IconStyle = { Icon: LucideIcon; className: string };
 function resolveDepartmentIconStyle(label: string): IconStyle {
   const raw = label.trim();
   if (!raw || raw === "—") {
-    return { Icon: CircleSlash, className: "text-zinc-500" };
+    return { Icon: CircleSlash, className: "text-amber-400" };
   }
   const t = raw.toLowerCase();
 

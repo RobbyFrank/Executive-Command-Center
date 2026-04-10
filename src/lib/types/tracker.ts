@@ -6,9 +6,9 @@ import {
   MilestoneSchema,
   PersonSchema,
   TrackerDataSchema,
+  EmploymentKindEnum,
   PriorityEnum,
   StatusEnum,
-  CostOfDelayEnum,
   ExecutionModeEnum,
   ProjectTypeEnum,
   MilestoneStatusEnum,
@@ -23,10 +23,10 @@ export type TrackerData = z.infer<typeof TrackerDataSchema>;
 
 export type Priority = z.infer<typeof PriorityEnum>;
 export type Status = z.infer<typeof StatusEnum>;
-export type CostOfDelay = z.infer<typeof CostOfDelayEnum>;
 export type ExecutionMode = z.infer<typeof ExecutionModeEnum>;
 export type ProjectType = z.infer<typeof ProjectTypeEnum>;
 export type MilestoneStatus = z.infer<typeof MilestoneStatusEnum>;
+export type EmploymentKind = z.infer<typeof EmploymentKindEnum>;
 
 export interface GoalWithProjects extends Goal {
   projects: ProjectWithMilestones[];
@@ -41,12 +41,26 @@ export interface CompanyWithGoals extends Company {
   goals: GoalWithProjects[];
 }
 
-/** Aggregates for the Companies directory (goals / projects / distinct owners). */
+/** Aggregates for the Companies directory (goals / projects / distinct owners + momentum). */
 export interface CompanyDirectoryStats {
   goals: number;
   projects: number;
   /** Distinct people who own at least one goal or project under this company. */
   owners: number;
+  /** Goals with status In Progress. */
+  activeGoals: number;
+  /** Projects with status In Progress. */
+  activeProjects: number;
+  goalsWithSpotlight: number;
+  goalsWithAtRisk: number;
+  projectsWithSpotlight: number;
+  projectsWithAtRisk: number;
+  milestonesDone: number;
+  milestonesTotal: number;
+  /** Goals + projects with lastReviewed within the momentum window. */
+  recentlyReviewed: number;
+  /** Composite 0–100 from @/lib/companyMomentum.computeMomentumScore */
+  momentumScore: number;
 }
 
 export interface PersonWorkload {

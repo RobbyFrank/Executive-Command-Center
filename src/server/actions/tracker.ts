@@ -12,6 +12,12 @@ import type {
   Milestone,
   Person,
 } from "@/lib/types/tracker";
+import {
+  computeMomentumScore,
+  isActiveStatus,
+  isReviewedWithinDays,
+  MOMENTUM_RECENT_REVIEW_DAYS,
+} from "@/lib/companyMomentum";
 
 const repo = getRepository();
 
@@ -19,6 +25,9 @@ function revalidate() {
   revalidatePath("/");
   revalidatePath("/companies");
   revalidatePath("/team");
+  revalidatePath("/summary");
+  revalidatePath("/matrix");
+  revalidatePath("/review");
 }
 
 // --- ID generation ---
@@ -248,18 +257,37 @@ export async function getCompanies() {
   return repo.getCompanies();
 }
 
+function emptyCompanyDirectoryStats(): CompanyDirectoryStats {
+  return {
+    goals: 0,
+    projects: 0,
+    owners: 0,
+    activeGoals: 0,
+    activeProjects: 0,
+    goalsWithSpotlight: 0,
+    goalsWithAtRisk: 0,
+    projectsWithSpotlight: 0,
+    projectsWithAtRisk: 0,
+    milestonesDone: 0,
+    milestonesTotal: 0,
+    recentlyReviewed: 0,
+    momentumScore: 0,
+  };
+}
+
 /** Per-company tracker stats for the Companies directory. */
 export async function getCompanyStatsByCompanyId(): Promise<
   Record<string, CompanyDirectoryStats>
 > {
-  const [companies, goals, projects] = await Promise.all([
+  const [companies, goals, projects, milestones] = await Promise.all([
     repo.getCompanies(),
     repo.getGoals(),
     repo.getProjects(),
+    repo.getMilestones(),
   ]);
   const stats: Record<string, CompanyDirectoryStats> = {};
   for (const c of companies) {
-    stats[c.id] = { goals: 0, projects: 0, owners: 0 };
+    stats[c.id] = emptyCompanyDirectoryStats();
   }
   const ownerIdsByCompany = new Map<string, Set<string>>();
 
@@ -273,11 +301,18 @@ export async function getCompanyStatsByCompanyId(): Promise<
   }
 
   const goalById = new Map(goals.map((g) => [g.id, g]));
+  const projectById = new Map(projects.map((p) => [p.id, p]));
 
   for (const g of goals) {
     const row = stats[g.companyId];
     if (!row) continue;
     row.goals += 1;
+    if (isActiveStatus(g.status)) row.activeGoals += 1;
+    if (g.spotlight) row.goalsWithSpotlight += 1;
+    if (g.atRisk) row.goalsWithAtRisk += 1;
+    if (isReviewedWithinDays(g.lastReviewed, MOMENTUM_RECENT_REVIEW_DAYS)) {
+      row.recentlyReviewed += 1;
+    }
     if (g.ownerId) ensureCompanySet(g.companyId).add(g.ownerId);
   }
 
@@ -287,12 +322,35 @@ export async function getCompanyStatsByCompanyId(): Promise<
     const row = stats[goal.companyId];
     if (!row) continue;
     row.projects += 1;
+    if (isActiveStatus(p.status)) row.activeProjects += 1;
+    if (p.spotlight) row.projectsWithSpotlight += 1;
+    if (p.atRisk) row.projectsWithAtRisk += 1;
+    if (isReviewedWithinDays(p.lastReviewed, MOMENTUM_RECENT_REVIEW_DAYS)) {
+      row.recentlyReviewed += 1;
+    }
     if (p.ownerId) ensureCompanySet(goal.companyId).add(p.ownerId);
+  }
+
+  for (const m of milestones) {
+    const proj = projectById.get(m.projectId);
+    if (!proj) continue;
+    const goal = goalById.get(proj.goalId);
+    if (!goal) continue;
+    const row = stats[goal.companyId];
+    if (!row) continue;
+    row.milestonesTotal += 1;
+    if (m.status === "Done") row.milestonesDone += 1;
   }
 
   for (const [companyId, set] of ownerIdsByCompany) {
     const row = stats[companyId];
     if (row) row.owners = set.size;
+  }
+
+  for (const c of companies) {
+    const row = stats[c.id];
+    if (!row) continue;
+    row.momentumScore = computeMomentumScore(row);
   }
 
   return stats;

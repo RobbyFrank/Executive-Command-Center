@@ -1,11 +1,12 @@
-import type { Person } from "@/lib/types/tracker";
+import type { Person, PersonWorkload } from "@/lib/types/tracker";
 
 /** Highest autonomy first (5 → 1), matching “strongest signal at top”. */
 export const AUTONOMY_LEVEL_ORDER_DESC = [5, 4, 3, 2, 1] as const;
 
 export type AutonomyLevel = (typeof AUTONOMY_LEVEL_ORDER_DESC)[number];
 
-function clampAutonomy(n: number): AutonomyLevel {
+/** Clamp stored score to 1–5 (used for roster grouping and owner filter). */
+export function clampAutonomy(n: number): AutonomyLevel {
   const r = Math.round(Number(n));
   if (r >= 5) return 5;
   if (r <= 1) return 1;
@@ -57,6 +58,32 @@ export const AUTONOMY_GROUP_LABEL: Record<
     hint: "",
   },
 };
+
+/** Team roster autonomy `<select>` option text (5 = highest). */
+export const AUTONOMY_LEVEL_SELECT_LABEL: Record<AutonomyLevel, string> = {
+  5: "5. Full ownership",
+  4: "4. High ownership",
+  3: "3. Balanced",
+  2: "2. Guided",
+  1: "1. Directed",
+};
+
+export const AUTONOMY_LEVEL_SELECT_OPTIONS: { value: string; label: string }[] =
+  AUTONOMY_LEVEL_ORDER_DESC.map((level) => ({
+    value: String(level),
+    label: AUTONOMY_LEVEL_SELECT_LABEL[level],
+  }));
+
+/**
+ * Name only (no leading "5." — level is shown on the autonomy filter icon).
+ * Drops the clause after the em dash.
+ */
+export function autonomyShortTitle(level: AutonomyLevel): string {
+  const full = AUTONOMY_GROUP_LABEL[level].title;
+  const cut = full.indexOf(" — ");
+  const head = cut === -1 ? full : full.slice(0, cut);
+  return head.replace(/^\d+\.\s*/, "").trim();
+}
 
 export function groupPeopleByAutonomy(
   people: Person[]
@@ -116,9 +143,66 @@ export const FOUNDER_GROUP_LABEL = {
   hint: "",
 } as const;
 
-export type TeamRosterDisplayGroup =
+/** Groups used for owner picker and default Team ordering (autonomy sections). */
+export type TeamRosterAutonomyGroup =
   | { kind: "founders"; people: Person[] }
   | { kind: "autonomy"; level: AutonomyLevel; people: Person[] };
+
+export type TeamRosterDisplayGroup =
+  | TeamRosterAutonomyGroup
+  | { kind: "department"; departmentKey: string; people: Person[] }
+  | { kind: "workload"; tier: WorkloadSortTier; people: Person[] };
+
+/** Team table: how rows are grouped under section headers. */
+export type TeamRosterSortMode = "autonomy" | "department" | "workload";
+
+/** Exclusive workload bands (project count), same tiers as Team workload filters. */
+export const TEAM_ROSTER_WORKLOAD_SORT_ORDER = [
+  "idle",
+  "light",
+  "moderate",
+  "heavy",
+] as const;
+
+export type WorkloadSortTier =
+  (typeof TEAM_ROSTER_WORKLOAD_SORT_ORDER)[number];
+
+/** Section order when grouping Team by workload: high → low load. */
+export const TEAM_ROSTER_WORKLOAD_DISPLAY_ORDER: readonly WorkloadSortTier[] =
+  ["heavy", "moderate", "light", "idle"];
+
+export const TEAM_ROSTER_WORKLOAD_SORT_LABEL: Record<
+  WorkloadSortTier,
+  string
+> = {
+  idle: "Idle (0 projects)",
+  light: "Light (1–2)",
+  moderate: "Moderate (3–5)",
+  heavy: "Heavy (6+)",
+};
+
+/** Section headers when grouping Team by workload (title + clarifying subtitle). */
+export const TEAM_ROSTER_WORKLOAD_HEADER: Record<
+  WorkloadSortTier,
+  { title: string; subtitle: string }
+> = {
+  heavy: {
+    title: "Heavy workload",
+    subtitle: "6 or more owned projects",
+  },
+  moderate: {
+    title: "Moderate workload",
+    subtitle: "3–5 owned projects",
+  },
+  light: {
+    title: "Light workload",
+    subtitle: "1–2 owned projects",
+  },
+  idle: {
+    title: "Idle",
+    subtitle: "No owned projects",
+  },
+};
 
 function sortFounders(a: Person, b: Person): number {
   const ia = FOUNDER_ORDER.indexOf(a.id as (typeof FOUNDER_ORDER)[number]);
@@ -132,7 +216,46 @@ function sortFounders(a: Person, b: Person): number {
 /** Founders (fixed ids) first, then everyone else grouped by autonomy. */
 export function buildTeamRosterDisplayGroups(
   people: Person[]
+): TeamRosterAutonomyGroup[] {
+  const founders: Person[] = [];
+  const rest: Person[] = [];
+  for (const p of people) {
+    if (FOUNDER_PERSON_IDS.has(p.id)) founders.push(p);
+    else rest.push(p);
+  }
+  founders.sort(sortFounders);
+
+  const out: TeamRosterAutonomyGroup[] = [];
+  if (founders.length > 0) {
+    out.push({ kind: "founders", people: founders });
+  }
+  for (const g of groupPeopleByAutonomy(rest)) {
+    out.push({ kind: "autonomy", level: g.level, people: g.people });
+  }
+  return out;
+}
+
+function workloadTierFromTotals(totalProjects: number): WorkloadSortTier {
+  const t = totalProjects;
+  if (t === 0) return "idle";
+  if (t <= 2) return "light";
+  if (t <= 5) return "moderate";
+  return "heavy";
+}
+
+/**
+ * Group Team roster rows: founders first (when present), then by sort mode.
+ * `workloadByPersonId` is required when `mode === "workload"`.
+ */
+export function buildTeamRosterGroups(
+  people: Person[],
+  mode: TeamRosterSortMode,
+  workloadByPersonId: Map<string, PersonWorkload>
 ): TeamRosterDisplayGroup[] {
+  if (mode === "autonomy") {
+    return buildTeamRosterDisplayGroups(people);
+  }
+
   const founders: Person[] = [];
   const rest: Person[] = [];
   for (const p of people) {
@@ -145,8 +268,47 @@ export function buildTeamRosterDisplayGroups(
   if (founders.length > 0) {
     out.push({ kind: "founders", people: founders });
   }
-  for (const g of groupPeopleByAutonomy(rest)) {
-    out.push({ kind: "autonomy", level: g.level, people: g.people });
+
+  if (mode === "department") {
+    const byDept = new Map<string, Person[]>();
+    for (const p of rest) {
+      const key = (p.department ?? "").trim();
+      if (!byDept.has(key)) byDept.set(key, []);
+      byDept.get(key)!.push(p);
+    }
+    for (const arr of byDept.values()) {
+      arr.sort(sortPeopleByName);
+    }
+    const keys = [...byDept.keys()].sort((a, b) => {
+      if (a === "" && b !== "") return -1;
+      if (b === "" && a !== "") return 1;
+      return a.localeCompare(b, undefined, { sensitivity: "base" });
+    });
+    for (const key of keys) {
+      const groupPeople = byDept.get(key)!;
+      if (groupPeople.length === 0) continue;
+      out.push({ kind: "department", departmentKey: key, people: groupPeople });
+    }
+    return out;
+  }
+
+  const buckets = new Map<WorkloadSortTier, Person[]>();
+  for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
+    buckets.set(tier, []);
+  }
+  for (const p of rest) {
+    const w = workloadByPersonId.get(p.id);
+    const total = w?.totalProjects ?? 0;
+    const tier = workloadTierFromTotals(total);
+    buckets.get(tier)!.push(p);
+  }
+  for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
+    buckets.get(tier)!.sort(sortPeopleByName);
+  }
+  for (const tier of TEAM_ROSTER_WORKLOAD_DISPLAY_ORDER) {
+    const groupPeople = buckets.get(tier)!;
+    if (groupPeople.length === 0) continue;
+    out.push({ kind: "workload", tier, people: groupPeople });
   }
   return out;
 }

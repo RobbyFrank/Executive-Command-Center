@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DepartmentOptionIcon } from "@/lib/departmentIcons";
@@ -25,21 +33,54 @@ export function DepartmentSelect({
 }: DepartmentSelectProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [menuPlacement, setMenuPlacement] = useState<{
+    top: number;
+    right: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const listId = useId();
 
   const selected = options.find((o) => o.value === value) ?? options[0];
-  const displayLabel = selected?.label ?? "No department";
+  const displayLabel = selected?.label ?? "No Department";
+
+  const updateMenuPlacement = useCallback(() => {
+    const el = rootRef.current;
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
+    const minW = 216; // min-w-[13.5rem]
+    const width = Math.max(rect.width, minW);
+    const top = rect.bottom + 4;
+    const maxHeight = Math.min(
+      288, // max-h ~18rem
+      Math.max(96, window.innerHeight - top - 12)
+    );
+    setMenuPlacement({
+      top,
+      right: window.innerWidth - rect.right,
+      width,
+      maxHeight,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPlacement(null);
+      return;
+    }
+    updateMenuPlacement();
+  }, [open, updateMenuPlacement]);
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const onScrollOrResize = () => updateMenuPlacement();
+    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  }, [open, updateMenuPlacement]);
 
   useEffect(() => {
     if (!open) return;
@@ -59,8 +100,80 @@ export function DepartmentSelect({
   );
 
   const iconLabel = value.trim() === "" ? "" : displayLabel;
+  const isNoDepartment = !value.trim();
 
   const triggerActive = open;
+
+  const menuPortal =
+    open &&
+    menuPlacement &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <>
+        <div
+          className="fixed inset-0 z-[200]"
+          aria-hidden
+          onClick={() => setOpen(false)}
+        />
+        <div
+          id={listId}
+          role="listbox"
+          aria-label={ariaLabel}
+          className={cn(
+            "fixed z-[210] overflow-y-auto overflow-x-hidden rounded-md border border-zinc-800 bg-zinc-900 py-1 shadow-md"
+          )}
+          style={{
+            top: menuPlacement.top,
+            right: menuPlacement.right,
+            width: menuPlacement.width,
+            maxHeight: menuPlacement.maxHeight,
+          }}
+        >
+          {options.map((opt) => {
+            const isSelected = opt.value === value;
+            const rowIconLabel = opt.value === "" ? "" : opt.label;
+            return (
+              <button
+                key={opt.value === "" ? "__empty" : opt.value}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => void pick(opt.value)}
+                className={cn(
+                  "flex w-full items-center gap-3 px-2 py-2 text-left text-sm transition-colors",
+                  "hover:bg-zinc-800/60",
+                  isSelected && "bg-zinc-800/40",
+                  !opt.value.trim() &&
+                    "border-l-2 border-l-amber-500/70 bg-amber-950/20 font-semibold text-amber-100 hover:bg-amber-950/35"
+                )}
+              >
+                <DepartmentOptionIcon
+                  label={rowIconLabel}
+                  className="ring-zinc-700/50"
+                />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate",
+                    !opt.value.trim() && "text-amber-100"
+                  )}
+                >
+                  {opt.label}
+                </span>
+                {isSelected ? (
+                  <Check
+                    className="h-3.5 w-3.5 shrink-0 text-zinc-400"
+                    aria-hidden
+                  />
+                ) : (
+                  <span className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </>,
+      document.body
+    );
 
   return (
     <div ref={rootRef} className="relative w-full min-w-[11rem] max-w-[220px]">
@@ -72,95 +185,59 @@ export function DepartmentSelect({
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "group flex w-full items-center gap-2 rounded-md border border-transparent bg-transparent px-2 py-1.5 text-left text-sm shadow-none transition-[color,background-color,border-color,box-shadow] duration-150",
-          "text-zinc-500",
-          "hover:border-zinc-800 hover:bg-zinc-900/50 hover:text-zinc-200",
+          "group flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm shadow-none transition-[color,background-color,border-color,box-shadow] duration-150",
+          isNoDepartment
+            ? "border border-amber-500/35 bg-amber-950/35 text-amber-100 font-semibold shadow-sm ring-1 ring-amber-500/20 hover:border-amber-500/45 hover:bg-amber-950/50 hover:text-amber-50"
+            : "text-zinc-500 hover:border hover:border-zinc-800 hover:bg-zinc-900/50 hover:text-zinc-200",
           "focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/30 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
           triggerActive &&
-            "border-zinc-800 bg-zinc-900/50 text-zinc-200 shadow-sm",
-          !value.trim() && "italic"
+            (isNoDepartment
+              ? "border-amber-500/50 bg-amber-950/55 text-amber-50 ring-amber-500/35"
+              : "border border-zinc-800 bg-zinc-900/50 text-zinc-200 shadow-sm")
         )}
       >
         <DepartmentOptionIcon
           label={iconLabel}
           className={cn(
             "bg-zinc-800/15 shadow-none opacity-60 ring-0 transition-[opacity,background-color,box-shadow] duration-150",
-            "group-hover:bg-zinc-800/90 group-hover:opacity-100 group-hover:ring-1 group-hover:ring-zinc-700/50 group-hover:shadow-inner",
-            "group-focus-visible:opacity-90",
+            isNoDepartment
+              ? "border border-amber-500/30 bg-amber-950/50 opacity-100 ring-1 ring-amber-500/35"
+              : "group-hover:bg-zinc-800/90 group-hover:opacity-100 group-hover:ring-1 group-hover:ring-zinc-700/50 group-hover:shadow-inner",
+            !isNoDepartment && "group-focus-visible:opacity-90",
             triggerActive &&
-              "bg-zinc-800/90 opacity-100 ring-1 ring-zinc-700/50 shadow-inner"
+              (isNoDepartment
+                ? "border-amber-500/45 bg-amber-950/60 ring-amber-500/45"
+                : "bg-zinc-800/90 opacity-100 ring-1 ring-zinc-700/50 shadow-inner")
           )}
         />
-        <span className="min-w-0 flex-1 truncate font-medium">{displayLabel}</span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            isNoDepartment ? "font-semibold" : "font-medium"
+          )}
+        >
+          {displayLabel}
+        </span>
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-all duration-150",
+            "h-3.5 w-3.5 shrink-0 transition-all duration-150",
+            isNoDepartment ? "text-amber-400/90" : "text-zinc-500",
             "opacity-0 scale-95",
-            "group-hover:opacity-100 group-hover:scale-100 group-hover:text-zinc-400",
+            "group-hover:opacity-100 group-hover:scale-100",
+            isNoDepartment
+              ? "group-hover:text-amber-300"
+              : "group-hover:text-zinc-400",
             "group-focus-visible:opacity-100 group-focus-visible:scale-100",
-            triggerActive && "rotate-180 opacity-100 scale-100 text-zinc-400"
+            triggerActive &&
+              (isNoDepartment
+                ? "rotate-180 text-amber-200 opacity-100 scale-100"
+                : "rotate-180 text-zinc-400 opacity-100 scale-100")
           )}
           aria-hidden
         />
       </button>
 
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            aria-hidden
-            onClick={() => setOpen(false)}
-          />
-          <div
-            id={listId}
-            role="listbox"
-            aria-label={ariaLabel}
-            className={cn(
-              "absolute right-0 top-full z-50 mt-1 max-h-[min(18rem,calc(100vh-8rem))] w-full min-w-[13.5rem] overflow-y-auto overflow-x-hidden rounded-md border border-zinc-800 bg-zinc-900 py-1 shadow-md"
-            )}
-          >
-            {options.map((opt) => {
-              const isSelected = opt.value === value;
-              const rowIconLabel = opt.value === "" ? "" : opt.label;
-              return (
-                <button
-                  key={opt.value === "" ? "__empty" : opt.value}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => void pick(opt.value)}
-                  className={cn(
-                    "flex w-full items-center gap-3 px-2 py-2 text-left text-sm transition-colors",
-                    "hover:bg-zinc-800/60",
-                    isSelected && "bg-zinc-800/40"
-                  )}
-                >
-                  <DepartmentOptionIcon
-                    label={rowIconLabel}
-                    className="ring-zinc-700/50"
-                  />
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate",
-                      !opt.value.trim() && "italic text-zinc-500"
-                    )}
-                  >
-                    {opt.label}
-                  </span>
-                  {isSelected ? (
-                    <Check
-                      className="h-3.5 w-3.5 shrink-0 text-zinc-400"
-                      aria-hidden
-                    />
-                  ) : (
-                    <span className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
+      {menuPortal}
     </div>
   );
 }

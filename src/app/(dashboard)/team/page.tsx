@@ -13,7 +13,7 @@ export default async function TeamPage() {
   ]);
 
   return (
-    <div>
+    <div className="pt-6">
       <div className="mb-6">
         <h1 className="text-xl font-bold text-zinc-100">Team</h1>
       </div>

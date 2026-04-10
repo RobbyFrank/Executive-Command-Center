@@ -11,12 +11,14 @@ export default async function CompaniesPage() {
   ]);
 
   return (
-    <div>
+    <div className="pt-6">
       <div className="mb-6">
         <h1 className="text-xl font-bold text-zinc-100">Companies</h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Manage company names, logos, development and launch dates, and adding
-          or removing companies.
+          Manage company names, website, description, logos, development and
+          launch dates, and adding or removing companies. Momentum reflects
+          active goals and projects, spotlight and at-risk signals, milestones,
+          and recent reviews.
         </p>
       </div>
 

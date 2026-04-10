@@ -122,10 +122,10 @@ A list of all team members, used for easy assignment and risk assessment.
 | Name | Text | |
 | Role / Title | Text | |
 | Department | Text | Optional; used for Roadmap filters |
-| In-house / Outsourced | Boolean | Contractors and agencies vs salaried internal team |
+| Team (employment) | Enum | `inhouse_salaried` (In-house), `inhouse_hourly` (In-house hourly), or `outsourced` (external) |
 | Company Affiliation(s) | List | Some people work across multiple companies |
 | Autonomy Score | Number (1-5) | 5 = "give them the goal, they figure it out." 1 = "needs daily check-ins and explicit instructions." |
-| Slack Handle | Text | |
+| Slack user ID | Text | Slack member ID (`U` + 10 alphanumerics, e.g. `U09684T0D0X`), or empty |
 
 **Autonomy Score Guidelines:**
 - **5:** Fully autonomous. Set the goal, they deliver.
@@ -175,7 +175,8 @@ Everything grouped by Company → Goal → Project, with collapsible sections.
 - **By Type:** "Show me all Hiring projects"
 - **Stale:** Items where Last Reviewed is 2+ weeks ago
 - **Unassigned:** Projects with no owner (stuck, needs hiring or delegation)
-- **At Risk:** Projects where owner's autonomy score ≤ 2 AND priority is P0 or P1
+- **Close watch (computed):** Projects where the owner's autonomy score is ≤ 2 and priority is P0 or P1 — surfaced as a **Close watch** status filter and pill on the Roadmap (distinct from the manual **At risk** exec flag below).
+- **At risk (manual):** Exec-flagged goal or project (`atRisk`) when leadership marks work as needing attention for any reason.
 - **Low Confidence:** Projects where Confidence Score is ≤ 2 (quiet risks, gut-feel problems)
 - **Zombie:** Status is "In Progress" + no milestone completed in 3+ weeks + Last Reviewed not updated. These are projects people have stopped working on but haven't had the heart to kill or pause yet.
 - **Drifting:** "Next Critical Step" field unchanged for 2+ weeks. Early warning signal before a project becomes a Zombie.
@@ -185,7 +186,7 @@ Everything grouped by Company → Goal → Project, with collapsible sections.
 
 ### Resource Bottleneck View
 
-The **Team** page aggregates workload per person across all companies.
+The **Team** page aggregates workload per person across all companies. The toolbar supports **search** (name, role, department, Slack ID) and multi-select filters: **department** (including no department), **employment type**, **workload** bands (idle through heavy, plus “has P0”), **companies** where the person owns projects, and **missing profile fields** (e.g. no photo). Options show **counts** for the current facet; **Reset filters** clears everything.
 
 Each row includes a **workload bar**: length is relative to the busiest teammate so you can compare load at a glance; color segments show P0, P1, and other priorities, with the total count at the end of the bar. Company logos still show which companies their projects span, alongside autonomy for context.
 

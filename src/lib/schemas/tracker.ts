@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SLACK_USER_ID_RE } from "@/lib/slackUserId";
 
 // --- Enums ---
 
@@ -57,6 +58,12 @@ export const CompanySchema = z.object({
   developmentStartDate: z.string().default(""),
   /** Calendar date (YYYY-MM-DD) when the product/company launched */
   launchDate: z.string().default(""),
+  /** Public company website (https://…); empty if unset */
+  website: z.string().default(""),
+  /**
+   * Free-form description (same editing pattern as goal **Description** / `measurableTarget` on Roadmap).
+   */
+  description: z.string().default(""),
 });
 
 export const GoalSchema = z.object({
@@ -68,7 +75,12 @@ export const GoalSchema = z.object({
   impactScore: z.number().int().min(1).max(5).default(3),
   /** Confidence in achieving this goal (1–5 band). */
   confidenceScore: z.number().int().min(1).max(5).default(3),
-  costOfDelay: CostOfDelayEnum.default("Medium"),
+  costOfDelay: z
+    .preprocess(
+      (v) =>
+        v === "High" ? 4 : v === "Medium" ? 3 : v === "Low" ? 2 : v,
+      z.number().int().min(1).max(5).default(3),
+    ),
   ownerId: z.string().default(""),
   priority: PriorityEnum.default("P2"),
   executionMode: ExecutionModeEnum.default("Async"),
@@ -110,20 +122,53 @@ export const MilestoneSchema = z.object({
   targetDate: z.string().default(""),
 });
 
-export const PersonSchema = z.object({
+/** How someone is engaged: staff vs hourly in-house vs external. */
+export const EmploymentKindEnum = z.enum([
+  "inhouse_salaried",
+  "inhouse_hourly",
+  "outsourced",
+]);
+
+const PersonInputSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   role: z.string().default(""),
   /** Team grouping for roster and tracker owner filter, e.g. Sales, Marketing */
   department: z.string().default(""),
   autonomyScore: z.number().int().min(1).max(5).default(3),
-  slackHandle: z.string().default(""),
+  slackHandle: z
+    .string()
+    .default("")
+    .transform((s) => s.trim())
+    .refine((s) => s === "" || SLACK_USER_ID_RE.test(s), {
+      message:
+        "Slack user ID must be U + 10 characters (e.g. U09684T0D0X) or empty.",
+    })
+    .transform((s) => (s === "" ? "" : s.toUpperCase())),
   /** Site path to profile image under public/, e.g. /uploads/people/robby.png */
   profilePicturePath: z.string().default(""),
   /** Calendar date (YYYY-MM-DD) when the person joined */
   joinDate: z.string().default(""),
-  /** Contractor/agency vs salaried in-house team */
-  outsourced: z.boolean().default(false),
+  employment: EmploymentKindEnum.optional(),
+  /** Legacy: prefer `employment` when present */
+  outsourced: z.boolean().optional(),
+});
+
+export const PersonSchema = PersonInputSchema.transform((p) => {
+  const employment =
+    p.employment ??
+    (p.outsourced === true ? "outsourced" : "inhouse_salaried");
+  return {
+    id: p.id,
+    name: p.name,
+    role: p.role,
+    department: p.department,
+    autonomyScore: p.autonomyScore,
+    slackHandle: p.slackHandle,
+    profilePicturePath: p.profilePicturePath,
+    joinDate: p.joinDate,
+    employment,
+  };
 });
 
 // --- Root data store ---

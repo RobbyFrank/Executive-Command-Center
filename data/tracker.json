@@ -7,7 +7,9 @@
       "revenue": 220,
       "logoPath": "/uploads/companies/voicedrop.png",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "https://www.voicedrop.ai",
+      "description": "VoiceDrop is a ringless voicemail platform that delivers voice messages directly to recipients' voicemail boxes without ringing their phones. The technology bypasses traditional call networks using server-to-server communication with carrier voicemail infrastructure, creating an uninterrupted delivery method that appears like a naturally missed call.\n\nThe platform's core feature is AI voice cloning technology, which requires just 30 seconds of recorded audio to create authentic voice replicas. This allows users to generate personalized, scalable campaigns that maintain the human touch of their actual voice. VoiceDrop also offers pre-made AI voices and supports static voicemail uploads for users who prefer traditional recorded messages.\n\nVoiceDrop serves diverse industries including business lenders, collection agencies, political campaigns, mortgage brokers, roofing contractors, nonprofits, academic institutions, automotive companies, and solar businesses. The platform provides campaign management tools, analytics, CRM integrations, API access, and phone number validation. It integrates with popular platforms through Zapier and offers an inbound AI agent feature for handling callbacks.\n\nThe company operates on a usage-based pricing model starting at $495/month for 6,500 units, with each unit representing approximately 150 characters of message content. Static ringless voicemails cost 0.5 units per delivery. VoiceDrop is SOC 2 Type II compliant and offers discounted rates for nonprofits and charities. The service works with US mobile and VoIP numbers but does not support landlines."
     },
     {
       "id": "1lookup",
@@ -16,7 +18,9 @@
       "revenue": 5,
       "logoPath": "/uploads/companies/1lookup.png",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "https://www.1lookup.io/",
+      "description": "1Lookup is a data verification platform that provides real-time validation services for phone numbers, email addresses, and IP addresses through a single API. The company targets small-to-medium businesses with enterprise-grade accuracy while maintaining simple pricing and fast setup.\n\nThe platform's core products include phone validation with enterprise-level accuracy and sub-300ms response times, email validation with 245ms average response times, IP intelligence covering 5,000+ VPN services with 156ms response times, and phone spam detection using 50+ million report sources. Additional products include a bulk audio transcription API and integration with VoiceDrop for ringless voicemail campaigns. The company plans to launch domain intelligence and skip tracing services in Q4 2025.\n\n1Lookup differentiates itself through direct access to FCC and carrier data with daily updates, compared to competitors who rely on months-old recycled databases. The platform uses a universal credit system where one credit works across all validation types, eliminating complex pricing tiers. Customer testimonials indicate measurable results: CloudVault reported 87% more fraudulent signup detection saving $200K quarterly, SecureShield Insurance cut email bounce rates by 94%, and VelocityTel Communications blocked 15K fake accounts in their first month.\n\nThe platform processes 10+ million daily lookups across 200+ countries with 99.9% uptime SLA for enterprise customers. 1Lookup maintains a 4.9/5 rating from 500+ reviews and operates from Pinedale, Wyoming under parent company Momentum Labs."
     },
     {
       "id": "1capture",
@@ -25,7 +29,9 @@
       "revenue": 1,
       "logoPath": "/uploads/companies/1capture.png",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "https://www.1capture.io/",
+      "description": ""
     },
     {
       "id": "prymatica",
@@ -34,7 +40,9 @@
       "revenue": 15,
       "logoPath": "/uploads/companies/prymatica.png",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "",
+      "description": ""
     },
     {
       "id": "mvp-products",
@@ -43,7 +51,9 @@
       "revenue": 0,
       "logoPath": "",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "",
+      "description": ""
     },
     {
       "id": "general",
@@ -52,7 +62,31 @@
       "revenue": 0,
       "logoPath": "",
       "developmentStartDate": "",
-      "launchDate": ""
+      "launchDate": "",
+      "website": "",
+      "description": ""
+    },
+    {
+      "id": "bitpredict",
+      "name": "BitPredict",
+      "shortName": "NEW",
+      "revenue": 0,
+      "logoPath": "",
+      "developmentStartDate": "",
+      "launchDate": "",
+      "website": "",
+      "description": ""
+    },
+    {
+      "id": "new-company",
+      "name": "New Company",
+      "shortName": "NEW",
+      "revenue": 0,
+      "logoPath": "",
+      "developmentStartDate": "",
+      "launchDate": "",
+      "website": "",
+      "description": ""
     }
   ],
   "goals": [
@@ -64,12 +98,12 @@
       "currentValue": "$380K MRR",
       "impactScore": 2,
       "confidenceScore": 3,
-      "costOfDelay": "High",
+      "costOfDelay": 4,
       "ownerId": "robby",
       "priority": "P0",
       "executionMode": "Async",
       "slackChannel": "vd-sales",
-      "lastReviewed": "2026-04-09T22:52:49.015Z",
+      "lastReviewed": "2026-04-10T07:10:02.824Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -82,7 +116,7 @@
       "currentValue": "",
       "impactScore": 5,
       "confidenceScore": 3,
-      "costOfDelay": "Medium",
+      "costOfDelay": 3,
       "ownerId": "andres",
       "priority": "P0",
       "executionMode": "Sync",
@@ -100,7 +134,7 @@
       "currentValue": "",
       "impactScore": 4,
       "confidenceScore": 3,
-      "costOfDelay": "Low",
+      "costOfDelay": 2,
       "ownerId": "afaq",
       "priority": "P1",
       "executionMode": "Async",
@@ -118,12 +152,12 @@
       "currentValue": "",
       "impactScore": 3,
       "confidenceScore": 3,
-      "costOfDelay": "Medium",
+      "costOfDelay": 3,
       "ownerId": "robby",
       "priority": "P1",
       "executionMode": "Async",
       "slackChannel": "",
-      "lastReviewed": "",
+      "lastReviewed": "2026-04-10T07:10:11.892Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -136,7 +170,7 @@
       "currentValue": "",
       "impactScore": 3,
       "confidenceScore": 3,
-      "costOfDelay": "Medium",
+      "costOfDelay": 3,
       "ownerId": "",
       "priority": "P0",
       "executionMode": "Async",
@@ -152,7 +186,7 @@
       "id": "VD-1-P1",
       "goalId": "VD-1",
       "name": "AI SDR Leon V1 Launch",
-      "ownerId": "andres",
+      "ownerId": "new-team-member-5d428967",
       "assigneeIds": [],
       "type": "Engineering",
       "priority": "P0",
@@ -160,7 +194,7 @@
       "complexityScore": 4,
       "definitionOfDone": "Leon booking 20+ qualified meetings/month",
       "startDate": "2026-03-01",
-      "targetDate": "2026-05-15",
+      "targetDate": "",
       "slackUrl": "https://voicedrop-ai.slack.com/archives/C06BLQ2ML2V/p1775775929385229",
       "lastReviewed": "2026-04-09T21:38:37.418Z",
       "atRisk": false,
@@ -170,15 +204,15 @@
       "id": "VD-1-P2",
       "goalId": "VD-1",
       "name": "Scale Paid Ads to $100K/mo",
-      "ownerId": "ghulam",
+      "ownerId": "new-team-member-5d428967",
       "assigneeIds": [],
       "type": "Marketing",
       "priority": "P1",
       "status": "In Progress",
-      "complexityScore": 2,
+      "complexityScore": 4,
       "definitionOfDone": "$100K/month ad spend with positive ROAS",
       "startDate": "2026-02-01",
-      "targetDate": "2026-06-01",
+      "targetDate": "",
       "slackUrl": "",
       "lastReviewed": "2026-04-09T21:38:38.029Z",
       "atRisk": false,
@@ -188,7 +222,7 @@
       "id": "VD-3-P1",
       "goalId": "VD-3",
       "name": "Migrate Dashboard to NextJS",
-      "ownerId": "andres",
+      "ownerId": "robby",
       "assigneeIds": [],
       "type": "Engineering",
       "priority": "P0",
@@ -250,7 +284,7 @@
       "complexityScore": 4,
       "definitionOfDone": "Ops Manager hired and onboarded",
       "startDate": "",
-      "targetDate": "2026-06-01",
+      "targetDate": "",
       "slackUrl": "",
       "lastReviewed": "",
       "atRisk": false,
@@ -355,9 +389,23 @@
       "targetDate": "2026-05-15"
     },
     {
-      "id": "VD-3-P2-M1",
-      "projectId": "VD-3-P2",
-      "name": "Test",
+      "id": "1L-7-P1-M1",
+      "projectId": "1L-7-P1",
+      "name": "New milestone",
+      "status": "Not Done",
+      "targetDate": ""
+    },
+    {
+      "id": "1L-7-P1-M4",
+      "projectId": "1L-7-P1",
+      "name": "New milestone",
+      "status": "Not Done",
+      "targetDate": ""
+    },
+    {
+      "id": "VD-1-P2-M1",
+      "projectId": "VD-1-P2",
+      "name": "New milestone",
       "status": "Not Done",
       "targetDate": ""
     }
@@ -365,102 +413,80 @@
   "people": [
     {
       "id": "robby",
-      "name": "Robby",
+      "name": "Robby Frank",
       "role": "CEO",
       "department": "Founders",
       "autonomyScore": 5,
       "slackHandle": "",
       "profilePicturePath": "/uploads/people/robby.png",
       "joinDate": "",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
       "id": "nadav",
-      "name": "Nadav",
+      "name": "Nadav Boaz",
       "role": "Partner",
       "department": "Founders",
       "autonomyScore": 5,
       "slackHandle": "",
-      "profilePicturePath": "",
+      "profilePicturePath": "/uploads/people/nadav.webp",
       "joinDate": "",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
       "id": "andres",
       "name": "Andrés",
       "role": "Lead Engineer",
       "department": "Development",
-      "autonomyScore": 5,
+      "autonomyScore": 4,
       "slackHandle": "",
       "profilePicturePath": "/uploads/people/andres.jpg",
       "joinDate": "2023-11-15",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
       "id": "afaq",
-      "name": "Afaq",
+      "name": "Afaq Khan",
       "role": "Product Lead",
-      "department": "",
-      "autonomyScore": 2,
+      "department": "Development",
+      "autonomyScore": 3,
       "slackHandle": "",
-      "profilePicturePath": "",
+      "profilePicturePath": "/uploads/people/afaq.png",
       "joinDate": "",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
       "id": "ghulam",
       "name": "Ghulam",
       "role": "Marketing Lead",
       "department": "Marketing",
-      "autonomyScore": 4,
+      "autonomyScore": 2,
       "slackHandle": "",
       "profilePicturePath": "/uploads/people/ghulam.jpg",
       "joinDate": "2026-04-01",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
       "id": "new-team-member",
-      "name": "Test 1",
+      "name": "Awais",
       "role": "",
-      "department": "",
-      "autonomyScore": 3,
-      "slackHandle": "",
-      "profilePicturePath": "",
-      "joinDate": "",
-      "outsourced": false
-    },
-    {
-      "id": "new-team-member-5d428967",
-      "name": "Test 2",
-      "role": "",
-      "department": "",
+      "department": "Operations",
       "autonomyScore": 1,
       "slackHandle": "",
       "profilePicturePath": "",
       "joinDate": "",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     },
     {
-      "id": "new-team-member-bdb62113",
-      "name": "New team member",
+      "id": "new-team-member-5d428967",
+      "name": "Dirk",
       "role": "",
-      "department": "",
-      "autonomyScore": 3,
+      "department": "Development",
+      "autonomyScore": 5,
       "slackHandle": "",
-      "profilePicturePath": "",
+      "profilePicturePath": "/uploads/people/new-team-member-5d428967.png",
       "joinDate": "",
-      "outsourced": false
-    },
-    {
-      "id": "new-team-member-825e2e2a",
-      "name": "New team member",
-      "role": "",
-      "department": "",
-      "autonomyScore": 3,
-      "slackHandle": "",
-      "profilePicturePath": "",
-      "joinDate": "",
-      "outsourced": false
+      "employment": "inhouse_salaried"
     }
   ]
 }

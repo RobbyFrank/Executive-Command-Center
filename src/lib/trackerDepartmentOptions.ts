@@ -45,7 +45,7 @@ export function departmentSelectOptions(
     a.localeCompare(b, undefined, { sensitivity: "base" })
   );
   const options = [
-    { value: "", label: "No department" },
+    { value: "", label: "No Department" },
     ...sorted.map((d) => ({ value: d, label: d })),
   ];
   return options.filter(

@@ -14,7 +14,7 @@ export function MilestoneRow({ milestone }: MilestoneRowProps) {
   const isDone = milestone.status === "Done";
 
   return (
-    <div className="group flex items-center gap-3 pl-20 pr-4 py-1 hover:bg-zinc-900/50 transition-colors">
+    <div className="group flex items-center gap-3 pl-14 pr-4 py-1 hover:bg-zinc-900/50 transition-colors">
       <button
         type="button"
         onClick={() =>

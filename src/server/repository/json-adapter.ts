@@ -16,6 +16,7 @@ import type {
 import type { TrackerRepository } from "./types";
 import { compareMilestonesByTargetDate } from "@/lib/milestoneSort";
 import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
+import { comparePriority } from "@/lib/prioritySort";
 import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
 
 const DATA_PATH = join(process.cwd(), "data", "tracker.json");
@@ -300,10 +301,18 @@ export class JsonTrackerRepository implements TrackerRepository {
     const data = await this.getData();
     const companiesOrdered = sortCompaniesByRevenueDesc(data.companies);
     return companiesOrdered.map((company) => {
-      const companyGoals = data.goals.filter((g) => g.companyId === company.id);
+      const companyGoals = data.goals
+        .filter((g) => g.companyId === company.id)
+        .sort((a, b) => comparePriority(a.priority, b.priority));
       const goals: GoalWithProjects[] = companyGoals.map((goal) => {
         const goalProjects = data.projects.filter((p) => p.goalId === goal.id);
-        const projects: ProjectWithMilestones[] = goalProjects.map((project) => {
+        const orderedProjects =
+          goal.executionMode === "Sync"
+            ? goalProjects
+            : [...goalProjects].sort((a, b) =>
+                comparePriority(a.priority, b.priority)
+              );
+        const projects: ProjectWithMilestones[] = orderedProjects.map((project) => {
           const projectMilestones = data.milestones
             .filter((m) => m.projectId === project.id)
             .sort(compareMilestonesByTargetDate);

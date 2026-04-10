@@ -20,12 +20,29 @@ export type CellHoverTooltipHandle = {
   openInEditMode: () => void;
 };
 
+export type CellHoverTooltipEditExtrasContext = {
+  draft: string;
+  setDraft: (value: string) => void;
+  /**
+   * While a nested dialog is open, textarea blur must not commit (e.g. URL picker modal).
+   * Call the returned cleanup when the dialog closes.
+   */
+  suspendBlurCommit: () => () => void;
+};
+
 type CellHoverTooltipProps = {
   /** Full text (committed value). */
   label: string;
   onSave: (value: string) => void;
   children: ReactNode;
   placeholder?: string;
+  /** Extra controls below the textarea in edit mode (e.g. generate from websites). */
+  editExtras?: (ctx: CellHoverTooltipEditExtrasContext) => ReactNode;
+  /**
+   * When true, hovering opens the readonly panel whenever `label` is non-empty,
+   * even if the visible text is not overflowing (e.g. character-capped preview).
+   */
+  alwaysHoverReadonly?: boolean;
 };
 
 /**
@@ -36,7 +53,7 @@ export const CellHoverTooltip = forwardRef<
   CellHoverTooltipHandle,
   CellHoverTooltipProps
 >(function CellHoverTooltip(
-  { label, onSave, children, placeholder },
+  { label, onSave, children, placeholder, editExtras, alwaysHoverReadonly = false },
   ref
 ) {
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -44,6 +61,7 @@ export const CellHoverTooltip = forwardRef<
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editingRef = useRef(false);
   const skipCommitOnBlurRef = useRef(false);
+  const blurCommitSuspendCountRef = useRef(0);
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -131,6 +149,13 @@ export const CellHoverTooltip = forwardRef<
     });
   }, [label, closePanel]);
 
+  const suspendBlurCommit = useCallback(() => {
+    blurCommitSuspendCountRef.current += 1;
+    return () => {
+      blurCommitSuspendCountRef.current -= 1;
+    };
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -172,8 +197,7 @@ export const CellHoverTooltip = forwardRef<
     if (!label.trim()) return;
     const el = triggerRef.current;
     if (!el) return;
-    // Readonly hover only when text is truncated (wide content in a narrow cell).
-    if (el.scrollWidth <= el.clientWidth) return;
+    if (!alwaysHoverReadonly && el.scrollWidth <= el.clientWidth) return;
     openPanelReadonly();
   };
 
@@ -205,6 +229,7 @@ export const CellHoverTooltip = forwardRef<
 
   const handleTextareaBlur = () => {
     if (skipCommitOnBlurRef.current) return;
+    if (blurCommitSuspendCountRef.current > 0) return;
     commit();
   };
 
@@ -259,6 +284,15 @@ export const CellHoverTooltip = forwardRef<
                   )}
                   aria-label={placeholder ?? "Edit value"}
                 />
+                {editExtras ? (
+                  <div className="shrink-0">
+                    {editExtras({
+                      draft,
+                      setDraft,
+                      suspendBlurCommit,
+                    })}
+                  </div>
+                ) : null}
                 <p className="pointer-events-none text-[11px] text-zinc-500">
                   Enter / Shift+Enter: new line · Blur or Ctrl+Enter: save · Esc: cancel
                 </p>

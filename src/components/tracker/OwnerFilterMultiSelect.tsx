@@ -7,20 +7,71 @@ import {
   ownerFilterDepartmentToken,
   isOwnerFilterDepartmentToken,
   isOwnerFilterEmploymentToken,
+  isOwnerFilterAutonomyToken,
+  ownerFilterAutonomyLabel,
+  ownerFilterAutonomyLevel,
+  ownerFilterAutonomyToken,
   ownerFilterEmploymentLabel,
   ownerFilterEmploymentToken,
 } from "@/lib/owner-filter";
+import {
+  autonomyShortTitle,
+  AUTONOMY_LEVEL_ORDER_DESC,
+} from "@/lib/autonomyRoster";
 import { DepartmentOptionIcon } from "@/lib/departmentIcons";
-import { Briefcase, Building2, ChevronDown, Search, Users } from "lucide-react";
+import {
+  Briefcase,
+  Building2,
+  ChevronDown,
+  Clock,
+  Search,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const TOKEN_INHOUSE = ownerFilterEmploymentToken("inhouse");
-const TOKEN_OUTSOURCED = ownerFilterEmploymentToken("outsourced");
+import { firstNameFromFullName } from "@/lib/personDisplayName";
 
 const EMPLOYMENT_OPTIONS = [
-  { token: TOKEN_INHOUSE, label: "In-house" as const },
-  { token: TOKEN_OUTSOURCED, label: "Outsourced" as const },
+  {
+    token: ownerFilterEmploymentToken("inhouse_salaried"),
+    label: "In-house" as const,
+  },
+  {
+    token: ownerFilterEmploymentToken("inhouse_hourly"),
+    label: "In-house (hourly)" as const,
+  },
+  {
+    token: ownerFilterEmploymentToken("outsourced"),
+    label: "Outsourced" as const,
+  },
 ];
+
+const AUTONOMY_OPTIONS = AUTONOMY_LEVEL_ORDER_DESC.map((level) => ({
+  token: ownerFilterAutonomyToken(level),
+  label: autonomyShortTitle(level),
+}));
+
+function AutonomyFilterIcon({ level }: { level: number }) {
+  return (
+    <span
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 ring-1 ring-zinc-700 text-[11px] font-semibold tabular-nums text-zinc-300"
+      aria-hidden
+    >
+      {level}
+    </span>
+  );
+}
+
+function EmploymentFilterIcon({ label }: { label: string }) {
+  if (label === "Outsourced") {
+    return (
+      <Briefcase className="h-3.5 w-3.5 text-orange-400/90" aria-hidden />
+    );
+  }
+  if (label === "In-house (hourly)") {
+    return <Clock className="h-3.5 w-3.5 text-zinc-400" aria-hidden />;
+  }
+  return <Building2 className="h-3.5 w-3.5 text-zinc-400" aria-hidden />;
+}
 
 function initialsFromName(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -123,6 +174,13 @@ export function OwnerFilterMultiSelect({
     );
   }, [q]);
 
+  const filteredAutonomy = useMemo(() => {
+    if (!q) return [...AUTONOMY_OPTIONS];
+    return AUTONOMY_OPTIONS.filter((o) =>
+      o.label.toLowerCase().includes(q)
+    );
+  }, [q]);
+
   const filteredDepartments = useMemo(() => {
     if (!q) return departmentsSorted;
     return departmentsSorted.filter((d) => d.toLowerCase().includes(q));
@@ -149,35 +207,52 @@ export function OwnerFilterMultiSelect({
 
   const clear = useCallback(() => onChange([]), [onChange]);
 
-  const { selectedPeople, selectedDepartmentLabels, selectedEmploymentLabels } =
-    useMemo(() => {
-      const deptLabels: string[] = [];
-      const empLabels: string[] = [];
-      const plist: Person[] = [];
-      const byId = new Map(people.map((p) => [p.id, p]));
-      for (const id of selectedIds) {
-        if (isOwnerFilterDepartmentToken(id)) {
-          const l = ownerFilterDepartmentLabel(id);
-          if (l) deptLabels.push(l);
-        } else if (isOwnerFilterEmploymentToken(id)) {
-          const l = ownerFilterEmploymentLabel(id);
-          if (l) empLabels.push(l);
-        } else {
-          const p = byId.get(id);
-          if (p) plist.push(p);
-        }
+  const {
+    selectedPeople,
+    selectedDepartmentLabels,
+    selectedEmploymentLabels,
+    selectedAutonomyLabels,
+  } = useMemo(() => {
+    const deptLabels: string[] = [];
+    const empLabels: string[] = [];
+    const autonomyLabels: string[] = [];
+    const plist: Person[] = [];
+    const byId = new Map(people.map((p) => [p.id, p]));
+    for (const id of selectedIds) {
+      if (isOwnerFilterDepartmentToken(id)) {
+        const l = ownerFilterDepartmentLabel(id);
+        if (l) deptLabels.push(l);
+      } else if (isOwnerFilterEmploymentToken(id)) {
+        const l = ownerFilterEmploymentLabel(id);
+        if (l) empLabels.push(l);
+      } else if (isOwnerFilterAutonomyToken(id)) {
+        const l = ownerFilterAutonomyLabel(id);
+        if (l) autonomyLabels.push(l);
+      } else {
+        const p = byId.get(id);
+        if (p) plist.push(p);
       }
-      return {
-        selectedPeople: plist,
-        selectedDepartmentLabels: deptLabels,
-        selectedEmploymentLabels: empLabels,
-      };
-    }, [people, selectedIds]);
+    }
+    return {
+      selectedPeople: plist,
+      selectedDepartmentLabels: deptLabels,
+      selectedEmploymentLabels: empLabels,
+      selectedAutonomyLabels: autonomyLabels,
+    };
+  }, [people, selectedIds]);
 
   const selectionCount =
     selectedPeople.length +
     selectedDepartmentLabels.length +
-    selectedEmploymentLabels.length;
+    selectedEmploymentLabels.length +
+    selectedAutonomyLabels.length;
+
+  const singleSelectedAutonomyLevel = useMemo(() => {
+    if (selectedIds.length !== 1) return null;
+    const id = selectedIds[0];
+    if (!isOwnerFilterAutonomyToken(id)) return null;
+    return ownerFilterAutonomyLevel(id);
+  }, [selectedIds]);
 
   const buttonSummary =
     selectionCount === 0 ? (
@@ -188,7 +263,9 @@ export function OwnerFilterMultiSelect({
     ) : selectionCount === 1 && selectedPeople.length === 1 ? (
       <>
         <PersonAvatar person={selectedPeople[0]} size="sm" />
-        <span className="truncate min-w-0">{selectedPeople[0].name}</span>
+        <span className="truncate min-w-0">
+          {firstNameFromFullName(selectedPeople[0].name)}
+        </span>
       </>
     ) : selectionCount === 1 && selectedDepartmentLabels.length === 1 ? (
       <>
@@ -201,12 +278,15 @@ export function OwnerFilterMultiSelect({
       </>
     ) : selectionCount === 1 && selectedEmploymentLabels.length === 1 ? (
       <>
-        {selectedEmploymentLabels[0] === "In-house" ? (
-          <Building2 className="h-3.5 w-3.5 text-zinc-400 shrink-0" aria-hidden />
-        ) : (
-          <Briefcase className="h-3.5 w-3.5 text-orange-400/90 shrink-0" aria-hidden />
-        )}
+        <span className="shrink-0">
+          <EmploymentFilterIcon label={selectedEmploymentLabels[0]} />
+        </span>
         <span className="truncate min-w-0">{selectedEmploymentLabels[0]}</span>
+      </>
+    ) : selectionCount === 1 && singleSelectedAutonomyLevel !== null ? (
+      <>
+        <AutonomyFilterIcon level={singleSelectedAutonomyLevel} />
+        <span className="truncate min-w-0">{selectedAutonomyLabels[0]}</span>
       </>
     ) : (
       <>
@@ -217,13 +297,14 @@ export function OwnerFilterMultiSelect({
 
   const listEmpty =
     filteredEmployment.length === 0 &&
+    filteredAutonomy.length === 0 &&
     filteredDepartments.length === 0 &&
     filteredPeople.length === 0;
 
   return (
     <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
-        Filter by employment, department, or owner
+        Filter by employment, autonomy level, department, or owner
       </span>
       <button
         type="button"
@@ -252,12 +333,12 @@ export function OwnerFilterMultiSelect({
           <div
             id={`${listId}-panel`}
             role="group"
-            aria-label="Employment, departments, and owners"
+            aria-label="Employment, autonomy, departments, and owners"
             className="absolute right-0 top-full z-50 mt-1 min-w-full w-max max-w-[calc(100vw-2rem)] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
           >
             <div className="border-b border-zinc-800 px-2 pb-2 pt-1.5">
               <label htmlFor={searchFieldId} className="sr-only">
-                Filter employment, departments, or names
+                Filter employment, autonomy, departments, or names
               </label>
               <div className="relative">
                 <Search
@@ -270,7 +351,7 @@ export function OwnerFilterMultiSelect({
                   type="search"
                   value={nameSearch}
                   onChange={(e) => setNameSearch(e.target.value)}
-                  placeholder="Search employment, departments, or names…"
+                  placeholder="Search employment, autonomy, departments, or names…"
                   autoComplete="off"
                   className="w-full rounded-md border border-zinc-700 bg-zinc-950/80 py-1.5 pl-8 pr-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
                 />
@@ -311,27 +392,52 @@ export function OwnerFilterMultiSelect({
                               : "text-zinc-200 hover:bg-zinc-800/60"
                           )}
                         >
-                          <span
-                            className={cn(
-                              "flex h-7 w-7 shrink-0 items-center justify-center rounded-full ring-1",
-                              label === "In-house"
-                                ? "bg-zinc-800 ring-zinc-700"
-                                : "bg-zinc-800 ring-zinc-700"
-                            )}
-                          >
-                            {label === "In-house" ? (
-                              <Building2
-                                className="h-3.5 w-3.5 text-zinc-400"
-                                aria-hidden
-                              />
-                            ) : (
-                              <Briefcase
-                                className="h-3.5 w-3.5 text-orange-400/90"
-                                aria-hidden
-                              />
-                            )}
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 ring-1 ring-zinc-700">
+                            <EmploymentFilterIcon label={label} />
                           </span>
                           <span>{label}</span>
+                        </button>
+                      );
+                    })
+                  )}
+
+                  <div
+                    className="my-1 border-t border-zinc-800"
+                    role="separator"
+                  />
+                  <div
+                    className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
+                    id={`${listId}-autonomy-heading`}
+                  >
+                    Autonomy
+                  </div>
+                  {filteredAutonomy.length === 0 ? (
+                    <p className="px-2 pb-2 text-xs text-zinc-600">
+                      No autonomy levels match.
+                    </p>
+                  ) : (
+                    filteredAutonomy.map(({ token, label }) => {
+                      const selected = selectedSet.has(token);
+                      const level = ownerFilterAutonomyLevel(token);
+                      return (
+                        <button
+                          key={token}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => toggle(token)}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
+                            selected
+                              ? "bg-zinc-800 text-zinc-50 ring-1 ring-inset ring-zinc-500/80"
+                              : "text-zinc-200 hover:bg-zinc-800/60"
+                          )}
+                        >
+                          {level !== null ? (
+                            <AutonomyFilterIcon level={level} />
+                          ) : null}
+                          <span className="min-w-0 whitespace-normal leading-snug">
+                            {label}
+                          </span>
                         </button>
                       );
                     })
@@ -417,7 +523,7 @@ export function OwnerFilterMultiSelect({
                         >
                           <PersonAvatar person={person} selected={selected} />
                           <span className="flex min-w-0 flex-col gap-0">
-                            <span>{person.name}</span>
+                            <span>{firstNameFromFullName(person.name)}</span>
                             {person.department?.trim() ? (
                               <span className="text-[11px] text-zinc-500 truncate">
                                 {person.department.trim()}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { GoalSection } from "./GoalSection";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
@@ -12,21 +12,48 @@ import {
   formatRelativeCalendarDate,
 } from "@/lib/relativeCalendarDate";
 import { GoalsColumnHeaders } from "./TrackerColumnHeaders";
+import { useRoadmapView } from "./roadmap-view-context";
+import {
+  ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
+  TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
+} from "@/lib/tracker-sticky-layout";
 
 interface CompanySectionProps {
   company: CompanyWithGoals;
   people: Person[];
   /** When true (e.g. tracker search is active), expand so matches are visible */
   expandForSearch?: boolean;
+  ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
 }
 
 export function CompanySection({
   company,
   people,
   expandForSearch = false,
+  ownerWorkloadMap,
 }: CompanySectionProps) {
   const [expanded, setExpanded] = useState(true);
   const { bulkTick, bulkTarget } = useTrackerExpandBulk();
+  const { stickyTopPx } = useRoadmapView();
+  const toolbarPx =
+    stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
+  const companyHeaderRef = useRef<HTMLDivElement>(null);
+  const [companyHeaderPx, setCompanyHeaderPx] = useState(56);
+
+  useLayoutEffect(() => {
+    const el = companyHeaderRef.current;
+    if (!el) return;
+    const apply = () =>
+      setCompanyHeaderPx(Math.round(el.getBoundingClientRect().height));
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const goalsColumnStackTopPx = toolbarPx + companyHeaderPx;
+  const roadmapGoalRowStickyTopPx =
+    goalsColumnStackTopPx + TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX;
 
   useEffect(() => {
     if (bulkTick === 0) return;
@@ -54,12 +81,17 @@ export function CompanySection({
 
   return (
     <div className="mb-6">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        className="group flex w-full items-center gap-3 px-4 py-3 text-left bg-zinc-900/60 rounded-lg border border-zinc-800 hover:bg-zinc-900/85 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+      <div
+        ref={companyHeaderRef}
+        className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"
+        style={{ top: toolbarPx }}
       >
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="group flex w-full items-center gap-3 px-4 py-3 text-left bg-zinc-900/60 rounded-lg border border-zinc-800 hover:bg-zinc-900/85 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+        >
         <ChevronRight
           className={cn(
             "h-5 w-5 shrink-0 text-zinc-400 transition-transform group-hover:text-zinc-200",
@@ -125,7 +157,8 @@ export function CompanySection({
             </div>
           )}
         </div>
-      </button>
+        </button>
+      </div>
 
       {expanded && (
         <div className="mt-1">
@@ -145,7 +178,7 @@ export function CompanySection({
                     currentValue: "",
                     impactScore: 3,
                     confidenceScore: 3,
-                    costOfDelay: "Medium",
+                    costOfDelay: 3,
                     ownerId: "",
                     priority: "P2",
                     executionMode: "Async",
@@ -164,7 +197,10 @@ export function CompanySection({
             </div>
           ) : (
             <>
-              <GoalsColumnHeaders />
+              <GoalsColumnHeaders
+                stackTopPx={goalsColumnStackTopPx}
+                stickyZClass="z-[28]"
+              />
               <div className="space-y-1">
                 {company.goals.map((goal) => (
                   <GoalSection
@@ -172,6 +208,8 @@ export function CompanySection({
                     goal={goal}
                     people={people}
                     expandForSearch={expandForSearch}
+                    ownerWorkloadMap={ownerWorkloadMap}
+                    roadmapGoalRowStickyTopPx={roadmapGoalRowStickyTopPx}
                   />
                 ))}
               </div>
