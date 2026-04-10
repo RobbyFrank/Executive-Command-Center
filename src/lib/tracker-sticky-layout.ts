@@ -10,3 +10,9 @@ export const ROADMAP_TOOLBAR_STICKY_FALLBACK_PX = 140;
 
 /** Goal header row (`py-2` + one line) — fallback before ResizeObserver. */
 export const TRACKER_GOAL_HEADER_ROW_FALLBACK_PX = 44;
+
+/**
+ * Subtracted from the computed sticky `top` for goal rows so they tuck under the
+ * goals column label row (constant header height can sit a few px low vs paint).
+ */
+export const ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX = 8;

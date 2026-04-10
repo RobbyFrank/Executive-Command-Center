@@ -16,7 +16,7 @@ export default async function RoadmapPage({
   ]);
 
   return (
-    <div className="-mx-6 -mb-6 min-h-0">
+    <div className="-mx-6 -mb-6 min-h-0 min-w-0">
       <TrackerView
         hierarchy={hierarchy}
         people={people}

@@ -248,6 +248,7 @@ export function ProjectRow({
   return (
     <div
       className={cn(
+        "max-w-full min-w-0",
         project.atRisk &&
           "rounded-md border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30",
         !project.atRisk &&
@@ -265,7 +266,7 @@ export function ProjectRow({
         }
         onClick={onProjectRowClick}
         className={cn(
-          "group flex items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer",
+          "group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer",
           project.atRisk
             ? "hover:bg-amber-950/55"
             : project.spotlight
@@ -431,10 +432,10 @@ export function ProjectRow({
         {/* Slack URL (column header shows Slack mark) */}
         <div
           className={cn(
-            "shrink-0 transition-[min-width,max-width] duration-150 ease-out",
+            "transition-[min-width,max-width] duration-150 ease-out",
             slackUrlEditing
-              ? "min-w-[min(28rem,calc(100vw-5rem))] max-w-[calc(100vw-5rem)] w-[min(28rem,calc(100vw-5rem))] z-20 relative"
-              : "w-44"
+              ? "relative z-20 min-w-0 max-w-md flex-1 basis-0"
+              : "w-44 shrink-0"
           )}
           onClick={(e) => e.stopPropagation()}
         >
@@ -467,6 +468,15 @@ export function ProjectRow({
         </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
+
+        <div className="w-[5.5rem] shrink-0 flex justify-end">
+          <ReviewAction
+            kind="project"
+            lastReviewed={project.lastReviewed}
+            onConfirm={() => markProjectReviewed(project.id)}
+            ownerAutonomy={ownerPerson?.autonomyScore}
+          />
+        </div>
 
         {/* Status flags + warnings — right cluster */}
         <div className="flex shrink-0 items-center justify-end gap-1.5">
@@ -505,15 +515,6 @@ export function ProjectRow({
               Close watch
             </span>
           )}
-        </div>
-
-        <div className="w-[5.5rem] shrink-0 flex justify-end">
-          <ReviewAction
-            kind="project"
-            lastReviewed={project.lastReviewed}
-            onConfirm={() => markProjectReviewed(project.id)}
-            ownerAutonomy={ownerPerson?.autonomyScore}
-          />
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">

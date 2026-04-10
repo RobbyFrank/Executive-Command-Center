@@ -27,7 +27,7 @@ export function RoadmapStickyToolbar({ children }: { children: ReactNode }) {
     <div
       ref={ref}
       className={cn(
-        "sticky top-0 z-30 mb-4 border-b border-zinc-800/70",
+        "sticky top-0 z-30 mb-4 min-w-0 max-w-full border-b border-zinc-800/70",
         "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-3",
         "shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)]"
       )}

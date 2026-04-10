@@ -80,7 +80,7 @@ export function CompanySection({
   const statsLabel = `${goalCount} goal${goalCount !== 1 ? "s" : ""} · ${projectCount} project${projectCount !== 1 ? "s" : ""}`;
 
   return (
-    <div className="mb-6">
+    <div className="mb-6 min-w-0 max-w-full">
       <div
         ref={companyHeaderRef}
         className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"

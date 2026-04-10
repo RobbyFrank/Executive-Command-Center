@@ -32,13 +32,13 @@ export function GoalsColumnHeaders({
   return (
     <div
       className={cn(
-        "sticky border-b border-zinc-800/90",
+        "sticky max-w-full min-w-0 border-b border-zinc-800/90",
         stickyZClass ?? "z-20",
         "bg-zinc-950/95 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.35)]"
       )}
       style={{ top }}
     >
-      <div className="flex items-center gap-2 pl-6 pr-4 py-2 text-xs font-medium text-zinc-500">
+      <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-2 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <div className="w-[280px] shrink-0" title="Goal description">
           Goal
@@ -95,7 +95,12 @@ export function GoalsColumnHeaders({
           <SlackLogo className="h-3.5 w-3.5 opacity-80" />
         </div>
         <div className="min-w-2 flex-1 shrink" aria-hidden />
-        <div className="w-[5.5rem] shrink-0 text-right pr-0">Review</div>
+        <div
+          className="flex w-[5.5rem] shrink-0 items-center justify-end"
+          title="Executive signal — confirm reviewed"
+        >
+          Review
+        </div>
       </div>
     </div>
   );
@@ -113,13 +118,13 @@ export function ProjectsColumnHeaders({
   return (
     <div
       className={cn(
-        "sticky border-b border-zinc-800/70",
+        "sticky max-w-full min-w-0 border-b border-zinc-800/70",
         stickyZClass ?? "z-20",
         "bg-zinc-950/90 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.3)]"
       )}
       style={{ top }}
     >
-      <div className="flex items-center gap-2 pl-6 pr-4 py-2 text-xs font-medium text-zinc-500">
+      <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-2 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <div className="w-[280px] shrink-0" title="Project name">
           Project
@@ -164,7 +169,7 @@ export function ProjectsColumnHeaders({
           <SlackLogo className="h-3.5 w-3.5 opacity-80" />
         </div>
         <div className="min-w-2 flex-1 shrink" aria-hidden />
-        <div className="w-[5.5rem] shrink-0 text-right pr-0">Review</div>
+        <div className="w-[5.5rem] shrink-0" aria-hidden />
       </div>
     </div>
   );

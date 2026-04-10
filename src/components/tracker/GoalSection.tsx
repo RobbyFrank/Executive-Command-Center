@@ -49,7 +49,10 @@ import { formatSlackChannelHash } from "@/lib/slackDisplay";
 
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { CollapsePanel } from "./CollapsePanel";
-import { TRACKER_GOAL_HEADER_ROW_FALLBACK_PX } from "@/lib/tracker-sticky-layout";
+import {
+  ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
+  TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
+} from "@/lib/tracker-sticky-layout";
 
 interface GoalSectionProps {
   goal: GoalWithProjects;
@@ -232,12 +235,14 @@ export function GoalSection({
     expanded,
   ]);
 
-  const projectsColumnStackTopPx = roadmapGoalRowStickyTopPx + goalHeaderPx;
+  const goalStickyTopPx =
+    roadmapGoalRowStickyTopPx - ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX;
+  const projectsColumnStackTopPx = goalStickyTopPx + goalHeaderPx;
 
   return (
     <div
       className={cn(
-        "group/goal mb-2",
+        "group/goal mb-2 max-w-full min-w-0",
         goal.atRisk &&
           "rounded-md border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30",
         !goal.atRisk &&
@@ -249,9 +254,9 @@ export function GoalSection({
       <div
         ref={goalHeaderRef}
         onClick={onGoalHeaderClick}
-        style={{ top: roadmapGoalRowStickyTopPx }}
+        style={{ top: goalStickyTopPx }}
         className={cn(
-          "sticky z-[27] group flex items-center gap-2 pl-6 pr-4 py-2 transition-colors rounded-md cursor-pointer",
+          "sticky z-[27] group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-2 transition-colors rounded-md cursor-pointer",
           "shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           goal.atRisk
             ? "bg-amber-950/85 hover:bg-amber-950/55"
@@ -410,6 +415,16 @@ export function GoalSection({
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
 
+        {/* Review (72h staleness vs 24h on projects) — before signal badges so column aligns with GoalsColumnHeaders */}
+        <div className="w-[5.5rem] shrink-0 flex justify-end">
+          <ReviewAction
+            kind="goal"
+            lastReviewed={goal.lastReviewed}
+            onConfirm={() => markGoalReviewed(goal.id)}
+            ownerAutonomy={ownerPerson?.autonomyScore}
+          />
+        </div>
+
         {/* At risk / Spotlight + project counts (collapsed) + Unassigned — right cluster */}
         <div className="flex shrink-0 items-center justify-end gap-1.5 flex-wrap">
           {goal.atRisk && (
@@ -479,16 +494,6 @@ export function GoalSection({
               Unassigned
             </span>
           )}
-        </div>
-
-        {/* Review (72h staleness vs 24h on projects) */}
-        <div className="w-[5.5rem] shrink-0 flex justify-end">
-          <ReviewAction
-            kind="goal"
-            lastReviewed={goal.lastReviewed}
-            onConfirm={() => markGoalReviewed(goal.id)}
-            ownerAutonomy={ownerPerson?.autonomyScore}
-          />
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">

@@ -535,7 +535,7 @@ export function TrackerView({
             Reset filters
           </button>
         ) : null}
-        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0 ml-auto max-w-[min(100%,100vw-1.5rem)]">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 shrink-0 ml-auto">
           <button
             type="button"
             onClick={onFocusModeToggle}
@@ -621,7 +621,7 @@ export function TrackerView({
         </div>
       </RoadmapStickyToolbar>
 
-      <div className="px-6 pb-6">
+      <div className="min-w-0 max-w-full px-6 pb-6">
         {filterActive && filteredHierarchy.length === 0 ? (
           <p className="text-sm text-zinc-500 py-8 text-center border border-dashed border-zinc-800 rounded-lg">
             {searchActive ? (

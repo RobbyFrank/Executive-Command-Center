@@ -14,7 +14,9 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen">
       <Sidebar username={session.username} />
-      <main className="flex-1 overflow-auto px-6 pb-6 pt-0">{children}</main>
+      <main className="min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
+        {children}
+      </main>
       <AiAssistantButton />
     </div>
   );
