@@ -21,7 +21,7 @@ import {
   deleteCompany,
 } from "@/server/actions/tracker";
 import { CompanyDescriptionGenerateExtras } from "./CompanyDescriptionGenerateExtras";
-import { Plus } from "lucide-react";
+import { Building2, Plus, Rocket } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatWebsiteFaviconDisplay } from "@/lib/formatWebsiteDisplay";
 
@@ -62,14 +62,16 @@ function formatRevenueThousandsDisplay(value: string): string {
   return `$${n}K`;
 }
 
-/** Visible preview length in the Companies table (full text in hover / edit). */
-const COMPANY_DESCRIPTION_PREVIEW_CHARS = 36;
-
-function formatCompanyDescriptionPreview(value: string): string {
-  const t = value.trim();
-  if (t.length <= COMPANY_DESCRIPTION_PREVIEW_CHARS) return t;
-  return `${t.slice(0, COMPANY_DESCRIPTION_PREVIEW_CHARS).trimEnd()}…`;
-}
+const NEW_COMPANY_DEFAULT = {
+  name: "New Company",
+  shortName: "NEW",
+  revenue: 0,
+  logoPath: "",
+  developmentStartDate: "",
+  launchDate: "",
+  website: "",
+  description: "",
+} as const;
 
 export function CompaniesManager({
   initialCompanies,
@@ -77,6 +79,15 @@ export function CompaniesManager({
 }: CompaniesManagerProps) {
   const companies = initialCompanies;
   const [viewMode, setViewMode] = useState<CompaniesViewMode>("mrr_tier");
+  /** After adding a company, name cell opens in edit mode so the user can type immediately. */
+  const [newCompanyNameFocusId, setNewCompanyNameFocusId] = useState<
+    string | null
+  >(null);
+
+  async function handleAddCompany() {
+    const company = await createCompany({ ...NEW_COMPANY_DEFAULT });
+    setNewCompanyNameFocusId(company.id);
+  }
 
   const tierGroups = useMemo(
     () => groupCompaniesByRevenueTier(companies),
@@ -109,9 +120,8 @@ export function CompaniesManager({
     ];
   }, [viewMode, companies, tierGroups, companyStatsByCompanyId]);
 
-  /** Name is capped (was 1fr and stole width); description uses 1fr for leftover space; dates/metrics slightly wider. */
   const companyRowGridClass =
-    "grid grid-cols-[3rem_minmax(8.5rem,12rem)_minmax(9rem,12rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_3.5rem_minmax(7rem,11rem)_minmax(2.75rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
+    "grid grid-cols-[3rem_minmax(8rem,10.5rem)_minmax(8rem,10.5rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_3.5rem_minmax(8rem,1fr)_minmax(2.75rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
 
   function validateWebsite(draft: string): string | undefined {
     const t = draft.trim();
@@ -128,6 +138,28 @@ export function CompaniesManager({
       return "Invalid URL";
     }
     return undefined;
+  }
+
+  if (companies.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+        <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+          <Building2 className="h-7 w-7 text-zinc-500" />
+        </div>
+        <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No companies yet</h2>
+        <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
+          Companies are the building blocks of your portfolio. Add your first company to start tracking revenue, goals, and momentum.
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleAddCompany()}
+          className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+        >
+          <Rocket className="h-4 w-4" />
+          Add your first company
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -185,7 +217,6 @@ export function CompaniesManager({
             <div className="divide-y divide-zinc-800">
               {tierCompanies.map((company) => {
                 const descriptionRaw = company.description ?? "";
-                const descriptionTrimmed = descriptionRaw.trim();
                 const st = companyStatsByCompanyId[company.id] ?? EMPTY_STATS;
                 const hasGoals = st.goals > 0;
                 const tier = momentumTierFromScore(st.momentumScore);
@@ -212,6 +243,9 @@ export function CompaniesManager({
                         value={company.name}
                         onSave={(name) => updateCompany(company.id, { name })}
                         displayClassName="font-medium text-zinc-100"
+                        startInEditMode={
+                          company.id === newCompanyNameFocusId
+                        }
                       />
                     </div>
                     <div className="min-w-0 justify-self-start">
@@ -236,12 +270,7 @@ export function CompaniesManager({
                         }
                         placeholder="Add description"
                         displayClassName="text-zinc-100 font-medium"
-                        formatDisplay={formatCompanyDescriptionPreview}
                         displayTruncateSingleLine
-                        truncateTooltipAlwaysHover={
-                          descriptionTrimmed.length >
-                          COMPANY_DESCRIPTION_PREVIEW_CHARS
-                        }
                         truncateTooltipEditExtras={(extras) => (
                           <CompanyDescriptionGenerateExtras
                             ctx={extras}
@@ -258,7 +287,6 @@ export function CompaniesManager({
                           updateCompany(company.id, { developmentStartDate })
                         }
                         displayClassName="text-zinc-300 text-sm"
-                        emptyLabel="Set date"
                       />
                     </div>
                     <div className="min-w-0 w-full justify-self-stretch">
@@ -269,7 +297,6 @@ export function CompaniesManager({
                           updateCompany(company.id, { launchDate })
                         }
                         displayClassName="text-zinc-300 text-sm"
-                        emptyLabel="Set date"
                       />
                     </div>
                     <div className="min-w-0 w-full justify-self-start">
@@ -372,25 +399,16 @@ export function CompaniesManager({
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() =>
-          createCompany({
-            name: "New Company",
-            shortName: "NEW",
-            revenue: 0,
-            logoPath: "",
-            developmentStartDate: "",
-            launchDate: "",
-            website: "",
-            description: "",
-          })
-        }
-        className="flex items-center gap-2 px-4 py-3 text-sm text-zinc-600 hover:text-zinc-400 transition-colors w-full border border-dashed border-zinc-800 rounded-lg hover:border-zinc-700"
-      >
-        <Plus className="h-4 w-4" />
-        Add company
-      </button>
+      <div className="px-4 py-3">
+        <button
+          type="button"
+          onClick={() => void handleAddCompany()}
+          className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+        >
+          <Plus className="h-4 w-4" />
+          Add company
+        </button>
+      </div>
     </div>
   );
 }

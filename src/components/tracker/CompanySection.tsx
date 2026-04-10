@@ -33,6 +33,10 @@ export function CompanySection({
   ownerWorkloadMap,
 }: CompanySectionProps) {
   const [expanded, setExpanded] = useState(true);
+  /** After adding a goal, title (description) opens in edit mode so the user can type immediately. */
+  const [newGoalTitleFocusId, setNewGoalTitleFocusId] = useState<
+    string | null
+  >(null);
   const { bulkTick, bulkTarget } = useTrackerExpandBulk();
   const { stickyTopPx } = useRoadmapView();
   const toolbarPx =
@@ -170,8 +174,8 @@ export function CompanySection({
               </p>
               <button
                 type="button"
-                onClick={() =>
-                  createGoal({
+                onClick={async () => {
+                  const goal = await createGoal({
                     companyId: company.id,
                     description: "New goal",
                     measurableTarget: "",
@@ -187,8 +191,9 @@ export function CompanySection({
                     status: "Not Started",
                     atRisk: false,
                     spotlight: false,
-                  })
-                }
+                  });
+                  setNewGoalTitleFocusId(goal.id);
+                }}
                 className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               >
                 <Plus className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
@@ -210,6 +215,8 @@ export function CompanySection({
                     expandForSearch={expandForSearch}
                     ownerWorkloadMap={ownerWorkloadMap}
                     roadmapGoalRowStickyTopPx={roadmapGoalRowStickyTopPx}
+                    focusGoalTitleEditId={newGoalTitleFocusId}
+                    onGoalCreated={setNewGoalTitleFocusId}
                   />
                 ))}
               </div>

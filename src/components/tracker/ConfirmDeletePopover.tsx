@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -42,6 +43,7 @@ export function ConfirmDeletePopover({
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const headingId = useId();
   const [panelBox, setPanelBox] = useState<{
     top: number;
     left: number;
@@ -106,12 +108,9 @@ export function ConfirmDeletePopover({
             }}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="confirm-delete-heading"
+            aria-labelledby={headingId}
           >
-            <p
-              id="confirm-delete-heading"
-              className="mb-2 text-xs text-zinc-300"
-            >
+            <p id={headingId} className="mb-2 text-xs text-zinc-300">
               Delete {entityName}? This can&apos;t be undone.
             </p>
             {error && (
@@ -124,7 +123,7 @@ export function ConfirmDeletePopover({
                 type="button"
                 onClick={() => close()}
                 disabled={pending}
-                className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+                className="cursor-pointer px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -154,7 +153,7 @@ export function ConfirmDeletePopover({
                     setPending(false);
                   }
                 }}
-                className="rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-60"
+                className="cursor-pointer rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pending ? "…" : "Delete"}
               </button>
@@ -177,7 +176,7 @@ export function ConfirmDeletePopover({
         className={`p-1 transition-colors ${
           disabled
             ? "cursor-not-allowed text-zinc-600 opacity-40"
-            : "text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
+            : "cursor-pointer text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
         }`}
         title={
           disabled ? (disabledReason ?? "Cannot delete") : "Delete"

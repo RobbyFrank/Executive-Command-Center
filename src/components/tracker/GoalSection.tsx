@@ -61,6 +61,10 @@ interface GoalSectionProps {
   ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
   /** Cumulative sticky offset for the goal header row (toolbar + company + goals labels). */
   roadmapGoalRowStickyTopPx: number;
+  /** When this matches `goal.id`, goal title (description) opens in edit mode on mount. */
+  focusGoalTitleEditId?: string | null;
+  /** Notify parent so it can set `focusGoalTitleEditId` after creating a goal from this section. */
+  onGoalCreated?: (goalId: string) => void;
 }
 
 export function GoalSection({
@@ -69,8 +73,14 @@ export function GoalSection({
   expandForSearch = false,
   ownerWorkloadMap,
   roadmapGoalRowStickyTopPx,
+  focusGoalTitleEditId = null,
+  onGoalCreated,
 }: GoalSectionProps) {
   const [expanded, setExpanded] = useState(true);
+  /** After adding a project, name cell opens in edit mode so the user can type immediately. */
+  const [newProjectNameFocusId, setNewProjectNameFocusId] = useState<
+    string | null
+  >(null);
   const [sequentialShowAll, setSequentialShowAll] = useState(false);
   const {
     bulkTick,
@@ -281,6 +291,7 @@ export function GoalSection({
             value={goal.description}
             onSave={(description) => updateGoal(goal.id, { description })}
             displayClassName="font-medium text-zinc-200"
+            startInEditMode={goal.id === focusGoalTitleEditId}
           />
         </div>
 
@@ -545,6 +556,7 @@ export function GoalSection({
                   expandForSearch={expandForSearch}
                   goalCostOfDelay={goal.costOfDelay}
                   ownerWorkloadMap={ownerWorkloadMap}
+                  focusProjectNameEditId={newProjectNameFocusId}
                 />
               </div>
             );
@@ -614,8 +626,8 @@ export function GoalSection({
           >
             <button
               type="button"
-              onClick={() =>
-                createProject({
+              onClick={async () => {
+                const project = await createProject({
                   goalId: goal.id,
                   name: "New project",
                   ownerId: "",
@@ -631,8 +643,9 @@ export function GoalSection({
                   lastReviewed: "",
                   atRisk: false,
                   spotlight: false,
-                })
-              }
+                });
+                setNewProjectNameFocusId(project.id);
+              }}
               className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
             >
               <Plus className="h-3 w-3" />
@@ -640,8 +653,8 @@ export function GoalSection({
             </button>
             <button
               type="button"
-              onClick={() =>
-                createGoal({
+              onClick={async () => {
+                const g = await createGoal({
                   companyId: goal.companyId,
                   description: "New goal",
                   measurableTarget: "",
@@ -657,8 +670,9 @@ export function GoalSection({
                   status: "Not Started",
                   atRisk: false,
                   spotlight: false,
-                })
-              }
+                });
+                onGoalCreated?.(g.id);
+              }}
               className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
             >
               <Plus className="h-3 w-3" />

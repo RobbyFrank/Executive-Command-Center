@@ -83,6 +83,11 @@ interface InlineEditCellProps {
    * When set, `draft` is checked before save. Return an error message to block commit and keep editing.
    */
   validate?: (draft: string) => string | undefined;
+  /**
+   * When true on first mount, the cell opens in edit mode (focused input). Ignored after mount so the
+   * parent can keep passing true without forcing edit mode again after the user finishes.
+   */
+  startInEditMode?: boolean;
 }
 
 export function InlineEditCell({
@@ -96,7 +101,7 @@ export function InlineEditCell({
   placeholder,
   className,
   displayClassName,
-  emptyLabel = "—",
+  emptyLabel,
   formatDisplay,
   displayTitle,
   collapsedButtonClassName,
@@ -109,13 +114,17 @@ export function InlineEditCell({
   truncateTooltipEditExtras,
   truncateTooltipAlwaysHover = false,
   validate,
+  startInEditMode = false,
 }: InlineEditCellProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(() => Boolean(startInEditMode));
   const [draft, setDraft] = useState(value);
   const [validationError, setValidationError] = useState<string | undefined>();
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const truncateTooltipRef = useRef<CellHoverTooltipHandle>(null);
   const validationHintId = `${useId()}-validation`;
+  const dateFieldId = useId();
+  const resolvedEmptyLabel = emptyLabel ?? (type === "date" ? "Set date" : "—");
 
   useEffect(() => {
     onEditingChange?.(editing);
@@ -174,6 +183,25 @@ export function InlineEditCell({
     [commit, cancel, type]
   );
 
+  const openNativeDatePicker = useCallback(() => {
+    const el = dateInputRef.current;
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+      if (typeof el.showPicker === "function") {
+        void el.showPicker();
+      } else {
+        el.click();
+      }
+    } catch {
+      try {
+        el.click();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
   /** Always-visible select with custom visible label (e.g. owner photo) — invisible native select on top for one-click open. */
   const overlaySelect =
     type === "select" &&
@@ -200,7 +228,7 @@ export function InlineEditCell({
             value.trim() && displayClassName
           )}
         >
-          {value.trim() ? formatDisplay!(value) : emptyLabel}
+          {value.trim() ? formatDisplay!(value) : resolvedEmptyLabel}
         </div>
         <select
           value={value}
@@ -266,12 +294,79 @@ export function InlineEditCell({
     );
   }
 
+  /**
+   * Visible button + visually hidden `input[type=date]`. Opening the picker via `showPicker()`
+   * from the click handler keeps a real user gesture (fully transparent overlays often do not
+   * receive hits reliably on Chromium).
+   */
+  if (type === "date") {
+    const dateHint = value.trim()
+      ? `${formatCalendarDateHint(value)} — choose date`
+      : "Set date — choose date";
+    const buttonClass =
+      variant === "plain"
+        ? cn(
+            "inline-flex w-full max-w-full min-w-0 min-h-[28px] items-center text-left text-sm leading-normal",
+            "rounded-sm border-0 bg-transparent p-0 m-0 shadow-none ring-0",
+            "cursor-pointer transition-colors",
+            "hover:bg-zinc-800/50 hover:px-1.5 hover:py-0.5 hover:-mx-1.5",
+            "focus-visible:outline-none focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:ring-1 focus-visible:ring-zinc-500/35",
+            !value.trim() && "text-zinc-500 italic",
+            value.trim() && displayClassName
+          )
+        : cn(
+            "flex min-h-[28px] w-full max-w-full items-center rounded px-1.5 py-0.5 text-left text-sm",
+            "border-0 bg-transparent transition-colors cursor-pointer",
+            "hover:bg-zinc-800",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
+            !value.trim() && "text-zinc-600 italic",
+            value.trim() && displayClassName
+          );
+
+    return (
+      <div className={cn("relative w-full min-w-0", className)}>
+        <input
+          id={dateFieldId}
+          ref={dateInputRef}
+          type="date"
+          value={value}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (next !== value) onSave(next);
+          }}
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+        />
+        <button
+          type="button"
+          className={buttonClass}
+          title={typeof displayTitle === "string" ? displayTitle : dateHint}
+          aria-label={dateHint}
+          onClick={(e) => {
+            e.stopPropagation();
+            openNativeDatePicker();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              openNativeDatePicker();
+            }
+          }}
+        >
+          {value.trim()
+            ? formatDisplay
+              ? formatDisplay(value)
+              : formatRelativeCalendarDate(value)
+            : resolvedEmptyLabel}
+        </button>
+      </div>
+    );
+  }
+
   if (!editing) {
-    const dateTitle =
-      type === "date" && value
-        ? `${formatCalendarDateHint(value)} — click to edit`
-        : "Click to edit";
-    const collapsedTitle = displayTitle ?? dateTitle;
+    const collapsedTitle = displayTitle ?? "Click to edit";
 
     const collapsedLayout =
       variant === "plain"
@@ -329,18 +424,16 @@ export function InlineEditCell({
     const collapsedInner =
       type === "select" && options
         ? !value
-          ? emptyLabel
+          ? resolvedEmptyLabel
           : formatDisplay
             ? formatDisplay(value)
             : ((options.find((o) => o.value === value)?.label ?? value) ||
-              emptyLabel)
+              resolvedEmptyLabel)
         : formatDisplay
           ? value
             ? formatDisplay(value)
-            : emptyLabel
-          : type === "date" && value
-            ? formatRelativeCalendarDate(value)
-            : value || emptyLabel;
+            : resolvedEmptyLabel
+          : value || resolvedEmptyLabel;
 
     const useTruncateTooltip =
       displayTruncateSingleLine &&
@@ -472,7 +565,7 @@ export function InlineEditCell({
     <div className="w-full min-w-0">
       <input
         ref={inputRef as React.RefObject<HTMLInputElement>}
-        type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+        type={type === "number" ? "number" : "text"}
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);

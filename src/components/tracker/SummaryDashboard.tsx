@@ -21,6 +21,7 @@ import {
 } from "@/lib/relativeCalendarDate";
 import {
   AlertTriangle,
+  BarChart3,
   Building2,
   CalendarClock,
   ChevronRight,
@@ -474,6 +475,37 @@ export function SummaryDashboard({
       .sort((a, b) => b.totalProjects - a.totalProjects)
       .slice(0, 5);
   }, [workloads]);
+
+  if (hierarchy.length === 0) {
+    return (
+      <div className="px-6 pb-10">
+        <header className="pt-1 mb-10">
+          <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">
+            Summary
+          </h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            Portfolio health at a glance.
+          </p>
+        </header>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+            <BarChart3 className="h-7 w-7 text-zinc-500" />
+          </div>
+          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Nothing to summarize yet</h2>
+          <p className="text-sm text-zinc-500 text-center max-w-md">
+            Metrics, attention items, and deadlines will appear here once you have companies with goals and projects. Start by adding companies on the{" "}
+            <Link href="/companies" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
+              Companies
+            </Link>{" "}
+            page, then create goals and projects on the{" "}
+            <Link href="/" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
+              Roadmap
+            </Link>.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 pb-10 space-y-10">

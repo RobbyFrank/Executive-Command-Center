@@ -30,38 +30,12 @@ function revalidate() {
   revalidatePath("/review");
 }
 
-// --- ID generation ---
-
-async function nextGoalId(companyId: string): Promise<string> {
-  const companies = await repo.getCompanies();
-  const company = companies.find((c) => c.id === companyId);
-  if (!company) return uuid().slice(0, 8);
-
-  const prefix = company.shortName
-    .replace(/[^A-Za-z0-9]/g, "")
-    .slice(0, 8)
-    .toUpperCase();
-
-  const goals = await repo.getGoalsByCompany(companyId);
-  const nums = goals
-    .map((g) => {
-      const match = g.id.match(/-(\d+)$/);
-      return match ? parseInt(match[1], 10) : 0;
-    })
-    .filter((n) => !isNaN(n));
-  const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-  return `${prefix}-${next}`;
-}
-
 // --- Companies ---
 
 export async function createCompany(
   data: Omit<Company, "id">
 ): Promise<Company> {
-  const id = data.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  const id = uuid();
   const company = { id, ...data };
   await repo.createCompany(company);
   revalidate();
@@ -105,7 +79,7 @@ export async function deleteCompany(
 export async function createGoal(
   data: Omit<Goal, "id">
 ): Promise<Goal> {
-  const id = await nextGoalId(data.companyId);
+  const id = uuid();
   const goal = { id, ...data };
   await repo.createGoal(goal);
   revalidate();
@@ -131,9 +105,7 @@ export async function deleteGoal(id: string): Promise<void> {
 export async function createProject(
   data: Omit<Project, "id">
 ): Promise<Project> {
-  const goalProjects = await repo.getProjectsByGoal(data.goalId);
-  const num = goalProjects.length + 1;
-  const id = `${data.goalId}-P${num}`;
+  const id = uuid();
   const project = { id, ...data };
   await repo.createProject(project);
   revalidate();
@@ -159,9 +131,7 @@ export async function deleteProject(id: string): Promise<void> {
 export async function createMilestone(
   data: Omit<Milestone, "id">
 ): Promise<Milestone> {
-  const projectMilestones = await repo.getMilestonesByProject(data.projectId);
-  const num = projectMilestones.length + 1;
-  const id = `${data.projectId}-M${num}`;
+  const id = uuid();
   const milestone = { id, ...data };
   await repo.createMilestone(milestone);
   revalidate();
@@ -187,14 +157,7 @@ export async function deleteMilestone(id: string): Promise<void> {
 export async function createPerson(
   data: Omit<Person, "id">
 ): Promise<Person> {
-  let id = data.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  const existing = await repo.getPeople();
-  if (existing.some((p) => p.id === id)) {
-    id = `${id}-${uuid().slice(0, 8)}`;
-  }
+  const id = uuid();
   const person = { id, ...data };
   await repo.createPerson(person);
   revalidate();

@@ -40,6 +40,7 @@ import {
   Layers,
   UserX,
   Activity,
+  Users,
 } from "lucide-react";
 import { SlackLogo } from "./SlackLogo";
 import { WorkloadBar } from "./WorkloadBar";
@@ -69,6 +70,7 @@ import {
   type TeamRosterFilterState,
 } from "@/lib/team-roster-filter";
 import { normalizeTrackerSearchQuery as normalizeSearch } from "@/lib/tracker-search-filter";
+import { formatUsdWhole } from "@/lib/formatUsd";
 
 function EmploymentMiniIcon({ label }: { label: string }) {
   if (label === "Outsourced") {
@@ -78,6 +80,41 @@ function EmploymentMiniIcon({ label }: { label: string }) {
     return <Clock className="h-3.5 w-3.5 text-zinc-400" aria-hidden />;
   }
   return <Building2 className="h-3.5 w-3.5 text-zinc-400" aria-hidden />;
+}
+
+function RosterGroupMemberCount({ count }: { count: number }) {
+  return (
+    <span className="text-xs font-medium text-zinc-500 tabular-nums">
+      ({count} {count === 1 ? "person" : "people"})
+    </span>
+  );
+}
+
+function sumEstimatedMonthlySalary(people: Person[]): number {
+  return people.reduce((s, p) => s + (p.estimatedMonthlySalary ?? 0), 0);
+}
+
+/** Matches Team column: $0 / unset is treated as no salary entered. */
+function hasEstimatedSalaryEntered(p: Person): boolean {
+  return (p.estimatedMonthlySalary ?? 0) > 0;
+}
+
+function RosterGroupSalaryStats({ people }: { people: Person[] }) {
+  const total = sumEstimatedMonthlySalary(people);
+  const withSalary = people.filter(hasEstimatedSalaryEntered);
+  const avg =
+    withSalary.length > 0 ? total / withSalary.length : null;
+  return (
+    <p className="text-xs text-zinc-500 leading-snug">
+      <span className="font-medium text-zinc-400">Salary · </span>
+      <span className="tabular-nums">{formatUsdWhole(total)}</span>
+      <span> total · </span>
+      <span className="tabular-nums">
+        {avg !== null ? formatUsdWhole(avg) : "—"}
+      </span>
+      <span> avg</span>
+    </p>
+  );
 }
 
 interface TeamRosterManagerProps {
@@ -91,6 +128,10 @@ export function TeamRosterManager({
   companies,
   workloads,
 }: TeamRosterManagerProps) {
+  /** After adding a person, name cell opens in edit mode so the user can type immediately. */
+  const [newPersonNameFocusId, setNewPersonNameFocusId] = useState<
+    string | null
+  >(null);
   const [filterState, setFilterState] = useState<TeamRosterFilterState>(() =>
     emptyTeamRosterFilterState()
   );
@@ -281,6 +322,40 @@ export function TeamRosterManager({
     setFilterState(emptyTeamRosterFilterState());
   }, []);
 
+  if (initialPeople.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+        <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+          <Users className="h-7 w-7 text-zinc-500" />
+        </div>
+        <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No team members yet</h2>
+        <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
+          Your team roster is empty. Add your first team member to start tracking roles, departments, autonomy levels, and workloads.
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            createPerson({
+              name: "New team member",
+              role: "",
+              department: "",
+              autonomyScore: 3,
+              slackHandle: "",
+              profilePicturePath: "",
+              joinDate: "",
+              estimatedMonthlySalary: 0,
+              employment: "inhouse_salaried",
+            })
+          }
+          className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+        >
+          <Plus className="h-4 w-4" />
+          Add your first team member
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3 min-h-[2.25rem]">
@@ -396,7 +471,7 @@ export function TeamRosterManager({
             onChange={(e) =>
               setRosterSortMode(e.target.value as TeamRosterSortMode)
             }
-            aria-label="Group team by autonomy, organization, or workload"
+            aria-label="Group team by autonomy, department, or workload"
             className={cn(
               "cursor-pointer rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-1.5 text-xs font-medium text-zinc-200",
               "transition-colors hover:border-zinc-600 hover:text-zinc-100",
@@ -404,7 +479,7 @@ export function TeamRosterManager({
             )}
           >
             <option value="autonomy">By Autonomy</option>
-            <option value="department">By organization</option>
+            <option value="department">By Department</option>
             <option value="workload">By workload</option>
           </select>
         </div>
@@ -442,7 +517,7 @@ export function TeamRosterManager({
           </p>
         ) : null}
         {!(filterActive && filteredPeople.length === 0) ? (
-        <table className="w-full text-sm min-w-[1040px]">
+        <table className="w-full text-sm min-w-[1160px]">
           <thead>
             <tr className="border-b border-zinc-800 text-xs text-zinc-500">
               <th
@@ -460,6 +535,12 @@ export function TeamRosterManager({
               </th>
               <th className="text-left px-3 py-3 font-medium whitespace-nowrap">
                 Join date
+              </th>
+              <th
+                className="text-right px-3 py-3 font-medium whitespace-nowrap min-w-[7.5rem]"
+                scope="col"
+              >
+                Est. monthly ($)
               </th>
               <th className="text-left px-3 py-3 font-medium min-w-[13rem]">
                 Autonomy
@@ -513,7 +594,8 @@ export function TeamRosterManager({
             return (
               <tbody key={tbodyKey}>
                 <tr className={visual.header}>
-                  <td colSpan={10} className="px-3 py-2.5">
+                  <td colSpan={11} className="px-3 py-2.5">
+                    <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {group.kind === "department" ? (
                         <span className="inline-flex items-center gap-2 min-w-0">
@@ -522,16 +604,24 @@ export function TeamRosterManager({
                             className="!h-7 !w-7 opacity-95"
                             iconClassName="h-3.5 w-3.5"
                           />
-                          <span className="text-sm font-semibold text-zinc-100 tracking-tight">
-                            {label.title}
+                          <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="text-sm font-semibold text-zinc-100 tracking-tight">
+                              {label.title}
+                            </span>
+                            <RosterGroupMemberCount count={groupPeople.length} />
                           </span>
                         </span>
                       ) : group.kind === "workload" ? (
                         <span className="inline-flex items-start gap-2.5 min-w-0">
                           <WorkloadTierHeaderIcon tier={group.tier} />
                           <span className="flex min-w-0 flex-col gap-0.5">
-                            <span className="text-sm font-semibold text-zinc-100 tracking-tight">
-                              {label.title}
+                            <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span className="text-sm font-semibold text-zinc-100 tracking-tight">
+                                {label.title}
+                              </span>
+                              <RosterGroupMemberCount
+                                count={groupPeople.length}
+                              />
                             </span>
                             <span className="text-xs text-zinc-500 leading-snug">
                               {label.hint}
@@ -539,8 +629,11 @@ export function TeamRosterManager({
                           </span>
                         </span>
                       ) : (
-                        <span className="text-sm font-semibold text-zinc-100 tracking-tight">
-                          {label.title}
+                        <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="text-sm font-semibold text-zinc-100 tracking-tight">
+                            {label.title}
+                          </span>
+                          <RosterGroupMemberCount count={groupPeople.length} />
                         </span>
                       )}
                       {label.hint &&
@@ -548,6 +641,8 @@ export function TeamRosterManager({
                       group.kind !== "workload" ? (
                         <span className="text-xs text-zinc-400">{label.hint}</span>
                       ) : null}
+                    </div>
+                    <RosterGroupSalaryStats people={groupPeople} />
                     </div>
                   </td>
                 </tr>
@@ -558,11 +653,11 @@ export function TeamRosterManager({
                     key={person.id}
                     className={cn(
                       visual.dataRow,
-                      "border-b border-zinc-800/60 group align-top"
+                      "border-b border-zinc-800/60 group align-middle"
                     )}
                   >
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex items-start gap-3 min-w-0 max-w-[280px]">
+                    <td className="px-3 py-2 align-middle">
+                      <div className="flex items-center gap-3 min-w-0 max-w-[280px]">
                         <div className="shrink-0">
                           <LocalImageField
                             variant="person"
@@ -575,18 +670,21 @@ export function TeamRosterManager({
                             value={person.name}
                             onSave={(name) => updatePerson(person.id, { name })}
                             displayClassName="text-zinc-200"
+                            startInEditMode={
+                              person.id === newPersonNameFocusId
+                            }
                           />
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2 max-w-[140px]">
+                    <td className="px-3 py-2 align-middle max-w-[140px]">
                       <InlineEditCell
                         value={person.role}
                         onSave={(role) => updatePerson(person.id, { role })}
                         displayClassName="text-zinc-400"
                       />
                     </td>
-                    <td className="px-3 py-2 max-w-[160px]">
+                    <td className="px-3 py-2 align-middle max-w-[160px]">
                       {isFounderPersonId(person.id) ? (
                         <div className="flex min-w-0 max-w-[220px] items-center gap-2 px-2 py-1.5">
                           <DepartmentOptionIcon
@@ -612,7 +710,7 @@ export function TeamRosterManager({
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
+                    <td className="px-3 py-2 align-middle whitespace-nowrap">
                       {isFounderPersonId(person.id) ? (
                         <span className="text-sm text-zinc-600">—</span>
                       ) : (
@@ -624,7 +722,7 @@ export function TeamRosterManager({
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 max-w-[120px] whitespace-nowrap">
+                    <td className="px-3 py-2 align-middle max-w-[120px] whitespace-nowrap">
                       {isFounderPersonId(person.id) ? (
                         <span
                           className="text-sm text-zinc-400 font-medium"
@@ -643,7 +741,37 @@ export function TeamRosterManager({
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 min-w-[13rem]">
+                    <td className="px-3 py-2 align-middle text-right max-w-[9rem]">
+                      <InlineEditCell
+                        type="number"
+                        min={0}
+                        step={100}
+                        value={String(person.estimatedMonthlySalary ?? 0)}
+                        onSave={(raw) => {
+                          const n = parseFloat(raw);
+                          const next =
+                            Number.isFinite(n) && n >= 0
+                              ? Math.round(n)
+                              : 0;
+                          updatePerson(person.id, {
+                            estimatedMonthlySalary: next,
+                          });
+                        }}
+                        formatDisplay={(v) => {
+                          const n = parseFloat(v);
+                          if (!Number.isFinite(n) || n <= 0) {
+                            return "—";
+                          }
+                          return formatUsdWhole(n);
+                        }}
+                        placeholder="—"
+                        displayTitle="Estimated monthly salary (USD)"
+                        displayClassName="text-zinc-300 tabular-nums"
+                        collapsedButtonClassName="!text-right"
+                        className="text-right"
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-middle min-w-[13rem]">
                       {isFounderPersonId(person.id) ? (
                         <span className="text-sm text-zinc-600">—</span>
                       ) : (
@@ -675,7 +803,7 @@ export function TeamRosterManager({
                         maxAcrossTeam={maxWorkloadAcrossTeam}
                       />
                     </td>
-                    <td className="px-3 py-2 max-w-[280px]">
+                    <td className="px-3 py-2 align-middle max-w-[280px]">
                       {isFounderPersonId(person.id) ? (
                         <span className="text-zinc-400">All</span>
                       ) : (
@@ -685,7 +813,7 @@ export function TeamRosterManager({
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 max-w-[120px]">
+                    <td className="px-3 py-2 align-middle max-w-[120px]">
                       <InlineEditCell
                         value={person.slackHandle}
                         onSave={(slackHandle) =>
@@ -705,7 +833,7 @@ export function TeamRosterManager({
                         displayClassName="text-zinc-500"
                       />
                     </td>
-                    <td className="px-1 py-2">
+                    <td className="px-1 py-2 align-middle">
                       {isFounderPersonId(person.id) ? null : (
                         <ConfirmDeletePopover
                           entityName={person.name}
@@ -723,25 +851,29 @@ export function TeamRosterManager({
         ) : null}
       </div>
 
-      <button
-        type="button"
-        onClick={() =>
-          createPerson({
-            name: "New team member",
-            role: "",
-            department: "",
-            autonomyScore: 3,
-            slackHandle: "",
-            profilePicturePath: "",
-            joinDate: "",
-            employment: "inhouse_salaried",
-          })
-        }
-        className="flex items-center gap-2 px-4 py-3 text-sm text-zinc-600 hover:text-zinc-400 transition-colors w-full border border-dashed border-zinc-800 rounded-lg hover:border-zinc-700"
-      >
-        <Plus className="h-4 w-4" />
-        Add team member
-      </button>
+      <div className="px-4 py-3">
+        <button
+          type="button"
+          onClick={async () => {
+            const person = await createPerson({
+              name: "New team member",
+              role: "",
+              department: "",
+              autonomyScore: 3,
+              slackHandle: "",
+              profilePicturePath: "",
+              joinDate: "",
+              estimatedMonthlySalary: 0,
+              employment: "inhouse_salaried",
+            });
+            setNewPersonNameFocusId(person.id);
+          }}
+          className="inline-flex items-center gap-2 text-sm text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+        >
+          <Plus className="h-4 w-4" />
+          Add team member
+        </button>
+      </div>
     </div>
   );
 }

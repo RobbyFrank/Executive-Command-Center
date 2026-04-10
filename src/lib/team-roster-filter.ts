@@ -55,6 +55,7 @@ export function teamRosterSearchText(p: Person): string {
     p.role ?? "",
     p.department ?? "",
     p.slackHandle ?? "",
+    String(p.estimatedMonthlySalary ?? ""),
   ]
     .join(" ")
     .toLowerCase();

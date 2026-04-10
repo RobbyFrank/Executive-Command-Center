@@ -8,7 +8,7 @@ export default async function MatrixPage() {
   ]);
 
   return (
-    <div className="-mx-6 -mb-6 min-h-0">
+    <div className="-mx-6 -mb-6 min-h-0 h-full">
       <MatrixView hierarchy={hierarchy} people={people} />
     </div>
   );

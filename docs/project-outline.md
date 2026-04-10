@@ -37,7 +37,7 @@ A strategic objective with multiple workstreams. The test: "Does this have multi
 
 | Field | Type | Notes |
 |---|---|---|
-| ID | String | e.g., VD-1, 1L-3 |
+| ID | String | UUID (v4). Older seed data may still use legacy prefixed ids (e.g. VD-1). |
 | Description | Text | e.g., "Grow VoiceDrop to $1M MRR" |
 | Measurable Target | Text | e.g., "$1M MRR," "250 trials/month" |
 | Current Value | Text (optional) | For KPI-type goals, e.g., "$380K MRR" |

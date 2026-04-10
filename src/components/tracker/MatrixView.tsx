@@ -21,7 +21,7 @@ import {
   MATRIX_QUADRANT_LABELS,
 } from "@/lib/matrix-bands";
 import { cn } from "@/lib/utils";
-import { Building2 } from "lucide-react";
+import { Building2, Grid3X3 } from "lucide-react";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 
 export interface MatrixProjectCell {
@@ -98,6 +98,11 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
     return h;
   }, [hierarchy, companyFilterIds, ownerFilterIds, people]);
 
+  const peopleById = useMemo(
+    () => new Map(people.map((p) => [p.id, p])),
+    [people]
+  );
+
   const cells = useMemo(
     () => collectProjects(hierarchyFiltered),
     [hierarchyFiltered]
@@ -123,10 +128,36 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
     return `/?${q.toString()}`;
   }, []);
 
+  if (hierarchy.length === 0) {
+    return (
+      <div className="px-6 pb-8">
+        <header className="mb-6">
+          <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
+          <p className="text-sm text-zinc-500 mt-1">
+            Projects positioned by goal impact and project complexity.
+          </p>
+        </header>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+            <Grid3X3 className="h-7 w-7 text-zinc-500" />
+          </div>
+          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No projects to plot</h2>
+          <p className="text-sm text-zinc-500 text-center max-w-md">
+            The matrix will map your projects by impact and complexity once you have companies with goals and projects. Head to the{" "}
+            <Link href="/" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
+              Roadmap
+            </Link>{" "}
+            to get started.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="px-6 pb-8">
-      <header className="mb-6">
-        <h1 className="text-xl font-bold text-zinc-100">Impact × Complexity</h1>
+    <div className="px-6 pb-8 flex flex-col h-full">
+      <header className="mb-6 shrink-0">
+        <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
         <p className="text-sm text-zinc-500 mt-1">
           Projects positioned by goal impact (rows) and project complexity (columns).
           Top-left is highest leverage; bottom-right is cut-or-defer territory.
@@ -149,12 +180,12 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
         </div>
       </header>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto flex-1 min-h-0">
         <div
-          className="inline-grid gap-x-1 gap-y-1 min-w-[720px]"
+          className="grid gap-x-1 gap-y-1 min-w-[720px] h-full"
           style={{
             gridTemplateColumns: "auto auto repeat(3, minmax(0, 1fr))",
-            gridTemplateRows: "auto auto repeat(3, minmax(120px, auto))",
+            gridTemplateRows: "auto auto repeat(3, minmax(160px, 1fr))",
           }}
         >
           {/* Top-left corner over Y-axis + row-label columns */}
@@ -218,7 +249,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
                     key={`c-${ri}-${ci}`}
                     style={{ gridColumn: 3 + ci, gridRow: 3 + ri }}
                     className={cn(
-                      "relative rounded-lg border p-2 min-h-[120px] flex flex-col",
+                      "relative rounded-lg border p-2 flex flex-col",
                       quadrantClass
                     )}
                   >
@@ -239,9 +270,9 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
                         </p>
                       ) : (
                         bucket.map((item) => {
-                          const owner = people.find(
-                            (p) => p.id === item.project.ownerId
-                          );
+                          const owner = item.project.ownerId
+                            ? peopleById.get(item.project.ownerId)
+                            : undefined;
                           return (
                             <Link
                               key={item.project.id}

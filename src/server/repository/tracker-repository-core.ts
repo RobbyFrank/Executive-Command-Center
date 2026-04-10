@@ -1,4 +1,5 @@
 import { TrackerDataSchema } from "@/lib/schemas/tracker";
+import { milestoneProgressPercent } from "@/lib/milestone-progress";
 import type {
   Company,
   Goal,
@@ -13,10 +14,13 @@ import type {
 } from "@/lib/types/tracker";
 import type { TrackerRepository } from "./types";
 import type { TrackerStorage } from "./tracker-storage";
+import { TrackerConcurrentModificationError } from "./errors";
 import { compareMilestonesByTargetDate } from "@/lib/milestoneSort";
 import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
 import { comparePriority } from "@/lib/prioritySort";
 import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
+
+const MAX_COMMIT_ATTEMPTS = 12;
 
 /** atRisk and spotlight cannot both be true; resolve using the latest explicit update. */
 function reconcileGoalProjectExecFlags<
@@ -35,12 +39,23 @@ export class TrackerRepositoryCore implements TrackerRepository {
     return this.storage.read();
   }
 
-  async save(data: TrackerData): Promise<void> {
-    await this.storage.write(TrackerDataSchema.parse(data));
-  }
-
   private async getData(): Promise<TrackerData> {
     return this.storage.read();
+  }
+
+  private async commitWithRetry(
+    mutate: (data: TrackerData) => void
+  ): Promise<void> {
+    for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
+      const data = await this.storage.read();
+      const expected = data.revision;
+      mutate(data);
+      data.revision = expected + 1;
+      const validated = TrackerDataSchema.parse(data);
+      const ok = await this.storage.writeIfRevisionMatches(validated, expected);
+      if (ok) return;
+    }
+    throw new TrackerConcurrentModificationError();
   }
 
   // --- Companies ---
@@ -56,31 +71,34 @@ export class TrackerRepositoryCore implements TrackerRepository {
   }
 
   async createCompany(company: Company): Promise<Company> {
-    const data = await this.getData();
-    data.companies.push(company);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      if (data.companies.some((c) => c.id === company.id)) return;
+      data.companies.push(company);
+    });
     return company;
   }
 
   async updateCompany(id: string, updates: Partial<Company>): Promise<Company> {
-    const data = await this.getData();
-    const idx = data.companies.findIndex((c) => c.id === id);
-    if (idx === -1) throw new Error(`Company ${id} not found`);
-    data.companies[idx] = { ...data.companies[idx], ...updates, id };
-    await this.save(data);
-    return data.companies[idx];
+    let result!: Company;
+    await this.commitWithRetry((data) => {
+      const idx = data.companies.findIndex((c) => c.id === id);
+      if (idx === -1) throw new Error(`Company ${id} not found`);
+      data.companies[idx] = { ...data.companies[idx], ...updates, id };
+      result = data.companies[idx];
+    });
+    return result;
   }
 
   async deleteCompany(id: string): Promise<void> {
-    const data = await this.getData();
-    const goalsForCompany = data.goals.filter((g) => g.companyId === id);
-    if (goalsForCompany.length > 0) {
-      throw new Error(
-        `Cannot delete this company: ${goalsForCompany.length} goal(s) still exist. Delete or move those goals first.`
-      );
-    }
-    data.companies = data.companies.filter((c) => c.id !== id);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      const goalsForCompany = data.goals.filter((g) => g.companyId === id);
+      if (goalsForCompany.length > 0) {
+        throw new Error(
+          `Cannot delete this company: ${goalsForCompany.length} goal(s) still exist. Delete or move those goals first.`
+        );
+      }
+      data.companies = data.companies.filter((c) => c.id !== id);
+    });
   }
 
   // --- Goals ---
@@ -101,29 +119,36 @@ export class TrackerRepositoryCore implements TrackerRepository {
   }
 
   async createGoal(goal: Goal): Promise<Goal> {
-    const data = await this.getData();
-    data.goals.push(goal);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      if (data.goals.some((g) => g.id === goal.id)) return;
+      data.goals.push(goal);
+    });
     return goal;
   }
 
   async updateGoal(id: string, updates: Partial<Goal>): Promise<Goal> {
-    const data = await this.getData();
-    const idx = data.goals.findIndex((g) => g.id === id);
-    if (idx === -1) throw new Error(`Goal ${id} not found`);
-    const merged = { ...data.goals[idx], ...updates, id };
-    data.goals[idx] = reconcileGoalProjectExecFlags(merged, updates);
-    await this.save(data);
-    return data.goals[idx];
+    let result!: Goal;
+    await this.commitWithRetry((data) => {
+      const idx = data.goals.findIndex((g) => g.id === id);
+      if (idx === -1) throw new Error(`Goal ${id} not found`);
+      const merged = { ...data.goals[idx], ...updates, id };
+      data.goals[idx] = reconcileGoalProjectExecFlags(merged, updates);
+      result = data.goals[idx];
+    });
+    return result;
   }
 
   async deleteGoal(id: string): Promise<void> {
-    const data = await this.getData();
-    const projectIds = data.projects.filter((p) => p.goalId === id).map((p) => p.id);
-    data.milestones = data.milestones.filter((m) => !projectIds.includes(m.projectId));
-    data.projects = data.projects.filter((p) => p.goalId !== id);
-    data.goals = data.goals.filter((g) => g.id !== id);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      const projectIds = new Set(
+        data.projects.filter((p) => p.goalId === id).map((p) => p.id)
+      );
+      data.milestones = data.milestones.filter(
+        (m) => !projectIds.has(m.projectId)
+      );
+      data.projects = data.projects.filter((p) => p.goalId !== id);
+      data.goals = data.goals.filter((g) => g.id !== id);
+    });
   }
 
   // --- Projects ---
@@ -144,27 +169,30 @@ export class TrackerRepositoryCore implements TrackerRepository {
   }
 
   async createProject(project: Project): Promise<Project> {
-    const data = await this.getData();
-    data.projects.push(project);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      if (data.projects.some((p) => p.id === project.id)) return;
+      data.projects.push(project);
+    });
     return project;
   }
 
   async updateProject(id: string, updates: Partial<Project>): Promise<Project> {
-    const data = await this.getData();
-    const idx = data.projects.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error(`Project ${id} not found`);
-    const merged = { ...data.projects[idx], ...updates, id };
-    data.projects[idx] = reconcileGoalProjectExecFlags(merged, updates);
-    await this.save(data);
-    return data.projects[idx];
+    let result!: Project;
+    await this.commitWithRetry((data) => {
+      const idx = data.projects.findIndex((p) => p.id === id);
+      if (idx === -1) throw new Error(`Project ${id} not found`);
+      const merged = { ...data.projects[idx], ...updates, id };
+      data.projects[idx] = reconcileGoalProjectExecFlags(merged, updates);
+      result = data.projects[idx];
+    });
+    return result;
   }
 
   async deleteProject(id: string): Promise<void> {
-    const data = await this.getData();
-    data.milestones = data.milestones.filter((m) => m.projectId !== id);
-    data.projects = data.projects.filter((p) => p.id !== id);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      data.milestones = data.milestones.filter((m) => m.projectId !== id);
+      data.projects = data.projects.filter((p) => p.id !== id);
+    });
   }
 
   // --- Milestones ---
@@ -185,25 +213,31 @@ export class TrackerRepositoryCore implements TrackerRepository {
   }
 
   async createMilestone(milestone: Milestone): Promise<Milestone> {
-    const data = await this.getData();
-    data.milestones.push(milestone);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      if (data.milestones.some((m) => m.id === milestone.id)) return;
+      data.milestones.push(milestone);
+    });
     return milestone;
   }
 
-  async updateMilestone(id: string, updates: Partial<Milestone>): Promise<Milestone> {
-    const data = await this.getData();
-    const idx = data.milestones.findIndex((m) => m.id === id);
-    if (idx === -1) throw new Error(`Milestone ${id} not found`);
-    data.milestones[idx] = { ...data.milestones[idx], ...updates, id };
-    await this.save(data);
-    return data.milestones[idx];
+  async updateMilestone(
+    id: string,
+    updates: Partial<Milestone>
+  ): Promise<Milestone> {
+    let result!: Milestone;
+    await this.commitWithRetry((data) => {
+      const idx = data.milestones.findIndex((m) => m.id === id);
+      if (idx === -1) throw new Error(`Milestone ${id} not found`);
+      data.milestones[idx] = { ...data.milestones[idx], ...updates, id };
+      result = data.milestones[idx];
+    });
+    return result;
   }
 
   async deleteMilestone(id: string): Promise<void> {
-    const data = await this.getData();
-    data.milestones = data.milestones.filter((m) => m.id !== id);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      data.milestones = data.milestones.filter((m) => m.id !== id);
+    });
   }
 
   // --- People ---
@@ -220,47 +254,50 @@ export class TrackerRepositoryCore implements TrackerRepository {
   }
 
   async createPerson(person: Person): Promise<Person> {
-    const data = await this.getData();
     const normalized = withFounderDepartmentRules(person);
-    data.people.push(normalized);
-    await this.save(data);
+    await this.commitWithRetry((data) => {
+      if (data.people.some((p) => p.id === normalized.id)) return;
+      data.people.push(normalized);
+    });
     return normalized;
   }
 
   async updatePerson(id: string, updates: Partial<Person>): Promise<Person> {
-    const data = await this.getData();
-    const idx = data.people.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error(`Person ${id} not found`);
-    const merged = { ...data.people[idx], ...updates, id };
-    data.people[idx] = withFounderDepartmentRules(merged);
-    await this.save(data);
-    return data.people[idx];
+    let result!: Person;
+    await this.commitWithRetry((data) => {
+      const idx = data.people.findIndex((p) => p.id === id);
+      if (idx === -1) throw new Error(`Person ${id} not found`);
+      const merged = { ...data.people[idx], ...updates, id };
+      data.people[idx] = withFounderDepartmentRules(merged);
+      result = data.people[idx];
+    });
+    return result;
   }
 
   async deletePerson(id: string): Promise<void> {
-    const data = await this.getData();
-    const goalsOwned = data.goals.filter((g) => g.ownerId === id);
-    const projectsOwned = data.projects.filter((p) => p.ownerId === id);
-    const projectsAsAssigneeOnly = data.projects.filter(
-      (p) => p.assigneeIds.includes(id) && p.ownerId !== id
-    );
-    const parts: string[] = [];
-    if (goalsOwned.length > 0) {
-      parts.push(`${goalsOwned.length} goal(s) as owner`);
-    }
-    if (projectsOwned.length > 0) {
-      parts.push(`${projectsOwned.length} project(s) as owner`);
-    }
-    if (projectsAsAssigneeOnly.length > 0) {
-      parts.push(`${projectsAsAssigneeOnly.length} project(s) as assignee`);
-    }
-    if (parts.length > 0) {
-      throw new Error(
-        `Cannot delete this person: still assigned to ${parts.join(", ")}. Reassign or remove those first.`
+    await this.commitWithRetry((data) => {
+      const goalsOwned = data.goals.filter((g) => g.ownerId === id);
+      const projectsOwned = data.projects.filter((p) => p.ownerId === id);
+      const projectsAsAssigneeOnly = data.projects.filter(
+        (p) => p.assigneeIds.includes(id) && p.ownerId !== id
       );
-    }
-    data.people = data.people.filter((p) => p.id !== id);
-    await this.save(data);
+      const parts: string[] = [];
+      if (goalsOwned.length > 0) {
+        parts.push(`${goalsOwned.length} goal(s) as owner`);
+      }
+      if (projectsOwned.length > 0) {
+        parts.push(`${projectsOwned.length} project(s) as owner`);
+      }
+      if (projectsAsAssigneeOnly.length > 0) {
+        parts.push(`${projectsAsAssigneeOnly.length} project(s) as assignee`);
+      }
+      if (parts.length > 0) {
+        throw new Error(
+          `Cannot delete this person: still assigned to ${parts.join(", ")}. Reassign or remove those first.`
+        );
+      }
+      data.people = data.people.filter((p) => p.id !== id);
+    });
   }
 
   // --- Computed views ---
@@ -280,18 +317,18 @@ export class TrackerRepositoryCore implements TrackerRepository {
             : [...goalProjects].sort((a, b) =>
                 comparePriority(a.priority, b.priority)
               );
-        const projects: ProjectWithMilestones[] = orderedProjects.map((project) => {
-          const projectMilestones = data.milestones
-            .filter((m) => m.projectId === project.id)
-            .sort(compareMilestonesByTargetDate);
-          const done = projectMilestones.filter((m) => m.status === "Done").length;
-          const total = projectMilestones.length;
-          return {
-            ...project,
-            milestones: projectMilestones,
-            progress: total === 0 ? 0 : Math.round((done / total) * 100),
-          };
-        });
+        const projects: ProjectWithMilestones[] = orderedProjects.map(
+          (project) => {
+            const projectMilestones = data.milestones
+              .filter((m) => m.projectId === project.id)
+              .sort(compareMilestonesByTargetDate);
+            return {
+              ...project,
+              milestones: projectMilestones,
+              progress: milestoneProgressPercent(projectMilestones),
+            };
+          }
+        );
         return { ...goal, projects };
       });
       return { ...company, goals };

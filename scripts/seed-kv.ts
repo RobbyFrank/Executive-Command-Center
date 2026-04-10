@@ -1,8 +1,8 @@
 /**
- * One-time: copy local `data/tracker.json` into Upstash Redis (same key as production).
- * Requires KV_REST_* or UPSTASH_REDIS_REST_* in `.env.local` (pull from Vercel or Storage dashboard).
+ * Upload a validated tracker JSON file to Upstash Redis (key `ecc:tracker:data`).
+ * Requires KV_REST_* or UPSTASH_REDIS_* in `.env.local`.
  *
- *   npm run seed:kv
+ *   npm run seed:kv -- path/to/tracker.json
  */
 
 import { config } from "dotenv";
@@ -26,9 +26,16 @@ async function main() {
     process.exit(1);
   }
 
-  const dataPath = join(process.cwd(), "data", "tracker.json");
+  const dataPath = process.argv[2];
+  if (!dataPath) {
+    console.error(
+      "Usage: npm run seed:kv -- <path-to-tracker.json>\nExample: npm run seed:kv -- ./backup/tracker.json"
+    );
+    process.exit(1);
+  }
+
   if (!existsSync(dataPath)) {
-    console.error("No data/tracker.json found.");
+    console.error(`File not found: ${dataPath}`);
     process.exit(1);
   }
 

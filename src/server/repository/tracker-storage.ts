@@ -1,15 +1,16 @@
-import { readFile, writeFile, rename, access } from "fs/promises";
-import { join } from "path";
 import { Redis } from "@upstash/redis";
 import { TrackerDataSchema } from "@/lib/schemas/tracker";
 import type { TrackerData } from "@/lib/types/tracker";
 
-const DATA_PATH = join(process.cwd(), "data", "tracker.json");
-
 /** Vercel KV key for the full tracker document. */
 export const KV_TRACKER_KEY = "ecc:tracker:data";
 
+/**
+ * Logical empty store before any Redis write (`revision` 0). Not written as JSON
+ * until the first successful mutation.
+ */
 export const EMPTY_DATA: TrackerData = {
+  revision: 0,
   companies: [],
   goals: [],
   projects: [],
@@ -19,39 +20,40 @@ export const EMPTY_DATA: TrackerData = {
 
 export interface TrackerStorage {
   read(): Promise<TrackerData>;
-  write(data: TrackerData): Promise<void>;
+  /**
+   * Persists `data` only if the stored document’s revision equals `expectedRevision`.
+   * Missing key is treated as revision `0`. Returns whether the write succeeded.
+   */
+  writeIfRevisionMatches(
+    data: TrackerData,
+    expectedRevision: number
+  ): Promise<boolean>;
 }
 
 /**
- * Local JSON file with in-process cache (dev / single-machine).
- * Atomic replace on write.
+ * Atomic compare-and-set using Redis `EVAL` + `cjson` (Upstash / Redis 7).
+ * KEYS[1] = tracker key; ARGV[1] = expected revision; ARGV[2] = new JSON string.
  */
-export class FileTrackerStorage implements TrackerStorage {
-  private cache: TrackerData | null = null;
-
-  async read(): Promise<TrackerData> {
-    if (this.cache) return this.cache;
-    try {
-      await access(DATA_PATH);
-      const raw = await readFile(DATA_PATH, "utf-8");
-      const parsed = JSON.parse(raw);
-      const validated = TrackerDataSchema.parse(parsed);
-      this.cache = validated;
-      return validated;
-    } catch {
-      this.cache = EMPTY_DATA;
-      return EMPTY_DATA;
-    }
-  }
-
-  async write(data: TrackerData): Promise<void> {
-    const validated = TrackerDataSchema.parse(data);
-    const tmpPath = DATA_PATH + ".tmp";
-    await writeFile(tmpPath, JSON.stringify(validated, null, 2), "utf-8");
-    await rename(tmpPath, DATA_PATH);
-    this.cache = validated;
-  }
-}
+const CAS_WRITE_LUA = `
+local raw = redis.call('GET', KEYS[1])
+local expected = tonumber(ARGV[1])
+local newval = ARGV[2]
+if raw == false then
+  if expected ~= 0 then return 0 end
+  redis.call('SET', KEYS[1], newval)
+  return 1
+end
+local ok, doc = pcall(cjson.decode, raw)
+if not ok or type(doc) ~= 'table' then
+  return redis.error_reply('BAD_JSON')
+end
+local rev = doc['revision']
+if rev == nil then rev = 1 else rev = tonumber(rev) end
+if rev == nil then rev = 1 end
+if rev ~= expected then return 0 end
+redis.call('SET', KEYS[1], newval)
+return 1
+`;
 
 let _redis: Redis | null = null;
 
@@ -72,8 +74,8 @@ function getRedis(): Redis {
 }
 
 /**
- * Upstash Redis (Vercel Storage / marketplace) — no cross-request cache;
- * each read is fresh so warm lambdas do not serve stale tracker JSON.
+ * Upstash Redis — each read is fresh (no in-process cache).
+ * Invalid JSON in Redis surfaces as an error (no silent reset to empty).
  */
 export class KvTrackerStorage implements TrackerStorage {
   async read(): Promise<TrackerData> {
@@ -83,9 +85,17 @@ export class KvTrackerStorage implements TrackerStorage {
     return TrackerDataSchema.parse(parsed);
   }
 
-  async write(data: TrackerData): Promise<void> {
+  async writeIfRevisionMatches(
+    data: TrackerData,
+    expectedRevision: number
+  ): Promise<boolean> {
     const validated = TrackerDataSchema.parse(data);
-    await getRedis().set(KV_TRACKER_KEY, JSON.stringify(validated));
+    const payload = JSON.stringify(validated);
+    const r = await getRedis().eval(CAS_WRITE_LUA, [KV_TRACKER_KEY], [
+      String(expectedRevision),
+      payload,
+    ]);
+    return r === 1;
   }
 }
 

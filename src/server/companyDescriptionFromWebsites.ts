@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { isAbortError } from "@/lib/abortError";
 import { getAnthropicModel } from "@/lib/anthropicModel";
 import { fetchJinaMarkdown } from "@/lib/jinaReader";
 import { discoverInternalPageUrls } from "@/lib/websitePageDiscovery";
@@ -24,15 +25,6 @@ export type ProgressPayload =
   | { type: "done"; description: string }
   | { type: "error"; message: string }
   | { type: "cancelled" };
-
-function isAbortError(e: unknown): boolean {
-  return (
-    (typeof DOMException !== "undefined" &&
-      e instanceof DOMException &&
-      e.name === "AbortError") ||
-    (e instanceof Error && e.name === "AbortError")
-  );
-}
 
 function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {

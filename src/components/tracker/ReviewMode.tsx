@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
@@ -25,7 +26,7 @@ import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { cn } from "@/lib/utils";
-import { Building2, ChevronLeft, ChevronRight, ClipboardCheck } from "lucide-react";
+import { Building2, ChevronLeft, ChevronRight, ClipboardCheck, ScanEye } from "lucide-react";
 
 const REVIEW_INDEX_STORAGE_KEY = "ecc-review-mode-index";
 
@@ -469,6 +470,26 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     clearReviewIndexStorage();
     setDone(true);
   }, [items, router]);
+
+  if (hierarchy.length === 0) {
+    return (
+      <div className="px-6 py-12">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+            <ScanEye className="h-7 w-7 text-zinc-500" />
+          </div>
+          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Nothing to review</h2>
+          <p className="text-sm text-zinc-500 text-center max-w-md">
+            The review queue pulls in your P0 and P1 goals and projects. Add companies and create goals on the{" "}
+            <Link href="/" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
+              Roadmap
+            </Link>{" "}
+            to start reviewing.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (total === 0) {
     return (

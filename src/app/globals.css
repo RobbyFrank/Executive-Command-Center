@@ -28,3 +28,13 @@ body {
 * {
   border-color: var(--border);
 }
+
+@layer base {
+  /* Native buttons default to the arrow cursor in many browsers; use pointer for click affordance. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}

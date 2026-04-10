@@ -149,6 +149,8 @@ const PersonInputSchema = z.object({
   profilePicturePath: z.string().default(""),
   /** Calendar date (YYYY-MM-DD) when the person joined */
   joinDate: z.string().default(""),
+  /** Estimated gross monthly compensation in USD (whole dollars). */
+  estimatedMonthlySalary: z.number().min(0).default(0),
   employment: EmploymentKindEnum.optional(),
   /** Legacy: prefer `employment` when present */
   outsourced: z.boolean().optional(),
@@ -167,13 +169,29 @@ export const PersonSchema = PersonInputSchema.transform((p) => {
     slackHandle: p.slackHandle,
     profilePicturePath: p.profilePicturePath,
     joinDate: p.joinDate,
+    estimatedMonthlySalary: Math.max(
+      0,
+      Math.round(Number.isFinite(p.estimatedMonthlySalary) ? p.estimatedMonthlySalary : 0)
+    ),
     employment,
   };
 });
 
 // --- Root data store ---
 
+/**
+ * Optimistic-lock generation. `0` = never persisted (empty KV). Stored docs use
+ * `>= 1`. Legacy JSON without `revision` is treated as `1` on load.
+ */
 export const TrackerDataSchema = z.object({
+  revision: z.preprocess(
+    (v) => {
+      if (v === undefined || v === null) return 1;
+      if (typeof v === "number" && Number.isFinite(v)) return Math.floor(v);
+      return 1;
+    },
+    z.number().int().min(0)
+  ),
   companies: z.array(CompanySchema),
   goals: z.array(GoalSchema),
   projects: z.array(ProjectSchema),

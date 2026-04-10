@@ -8,9 +8,14 @@ import { Check, Circle } from "lucide-react";
 
 interface MilestoneRowProps {
   milestone: Milestone;
+  /** When true, milestone name opens in edit mode on mount (e.g. right after create). */
+  startNameInEditMode?: boolean;
 }
 
-export function MilestoneRow({ milestone }: MilestoneRowProps) {
+export function MilestoneRow({
+  milestone,
+  startNameInEditMode = false,
+}: MilestoneRowProps) {
   const isDone = milestone.status === "Done";
 
   return (
@@ -43,7 +48,6 @@ export function MilestoneRow({ milestone }: MilestoneRowProps) {
             updateMilestone(milestone.id, { targetDate })
           }
           type="date"
-          emptyLabel="No date"
         />
       </div>
 
@@ -52,6 +56,7 @@ export function MilestoneRow({ milestone }: MilestoneRowProps) {
           value={milestone.name}
           onSave={(name) => updateMilestone(milestone.id, { name })}
           displayClassName={isDone ? "line-through text-zinc-500" : ""}
+          startInEditMode={startNameInEditMode}
         />
       </div>
 

@@ -1,13 +1,6 @@
-const JINA_READER_PREFIX = "https://r.jina.ai/";
+import { isAbortError } from "@/lib/abortError";
 
-function isAbortError(e: unknown): boolean {
-  return (
-    (typeof DOMException !== "undefined" &&
-      e instanceof DOMException &&
-      e.name === "AbortError") ||
-    (e instanceof Error && e.name === "AbortError")
-  );
-}
+const JINA_READER_PREFIX = "https://r.jina.ai/";
 
 function isJinaErrorPayload(parsed: unknown): boolean {
   if (typeof parsed !== "object" || parsed === null || !("data" in parsed)) {

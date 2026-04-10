@@ -11,7 +11,6 @@ import type {
 
 export interface TrackerRepository {
   load(): Promise<TrackerData>;
-  save(data: TrackerData): Promise<void>;
 
   getCompanies(): Promise<Company[]>;
   getCompany(id: string): Promise<Company | undefined>;

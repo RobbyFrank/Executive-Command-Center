@@ -29,7 +29,7 @@ import {
   createMilestone,
   markProjectReviewed,
 } from "@/server/actions/tracker";
-import { ChevronRight, Flag, Link2, Plus, Sparkles } from "lucide-react";
+import { ChevronRight, Flag, Link2, Plus } from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewAction } from "./ReviewAction";
 import { cn } from "@/lib/utils";
@@ -55,6 +55,8 @@ interface ProjectRowProps {
   /** Parent goal's cost-of-delay score (1–5) for autonomy risk warnings. */
   goalCostOfDelay?: number;
   ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
+  /** When this matches `project.id`, project name opens in edit mode on mount. */
+  focusProjectNameEditId?: string | null;
 }
 
 export function ProjectRow({
@@ -64,10 +66,15 @@ export function ProjectRow({
   expandForSearch = false,
   goalCostOfDelay,
   ownerWorkloadMap,
+  focusProjectNameEditId = null,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
   const [showMilestones, setShowMilestones] = useState(true);
+  /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
+  const [newMilestoneNameFocusId, setNewMilestoneNameFocusId] = useState<
+    string | null
+  >(null);
   const [slackUrlEditing, setSlackUrlEditing] = useState(false);
   const {
     bulkTick,
@@ -289,6 +296,7 @@ export function ProjectRow({
           <InlineEditCell
             value={project.name}
             onSave={(name) => updateProject(project.id, { name })}
+            startInEditMode={project.id === focusProjectNameEditId}
           />
         </div>
 
@@ -337,13 +345,14 @@ export function ProjectRow({
             <button
               type="button"
               className="truncate text-left text-sm font-medium leading-snug text-zinc-500 cursor-pointer"
-              onClick={() => {
-                createMilestone({
+              onClick={async () => {
+                const ms = await createMilestone({
                   projectId: project.id,
                   name: "New milestone",
                   status: "Not Done",
                   targetDate: "",
                 });
+                setNewMilestoneNameFocusId(ms.id);
                 setExpanded(true);
                 setShowMilestones(true);
               }}
@@ -425,7 +434,6 @@ export function ProjectRow({
               updateProject(project.id, { targetDate })
             }
             type="date"
-            emptyLabel="No date"
           />
         </div>
 
@@ -559,14 +567,17 @@ export function ProjectRow({
               </p>
               <button
                 type="button"
-                onClick={() =>
-                  createMilestone({
+                onClick={async () => {
+                  const ms = await createMilestone({
                     projectId: project.id,
                     name: "New milestone",
                     status: "Not Done",
                     targetDate: "",
-                  })
-                }
+                  });
+                  setNewMilestoneNameFocusId(ms.id);
+                  setExpanded(true);
+                  setShowMilestones(true);
+                }}
                 className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -576,7 +587,11 @@ export function ProjectRow({
           ) : (
             <>
               {project.milestones.map((ms) => (
-                <MilestoneRow key={ms.id} milestone={ms} />
+                <MilestoneRow
+                  key={ms.id}
+                  milestone={ms}
+                  startNameInEditMode={ms.id === newMilestoneNameFocusId}
+                />
               ))}
               <div
                 className={cn(
@@ -589,14 +604,15 @@ export function ProjectRow({
               >
                 <button
                   type="button"
-                  onClick={() =>
-                    createMilestone({
+                  onClick={async () => {
+                    const ms = await createMilestone({
                       projectId: project.id,
                       name: "New milestone",
                       status: "Not Done",
                       targetDate: "",
-                    })
-                  }
+                    });
+                    setNewMilestoneNameFocusId(ms.id);
+                  }}
                   className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
                 >
                   <Plus className="h-3 w-3" />

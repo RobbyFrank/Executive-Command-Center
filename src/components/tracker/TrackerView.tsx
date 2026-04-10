@@ -22,7 +22,7 @@ import {
 } from "./tracker-expand-context";
 import { RoadmapViewProvider } from "./roadmap-view-context";
 import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
-import { Crosshair, FilterX, Search } from "lucide-react";
+import { Crosshair, FilterX, Map as MapIcon, Search } from "lucide-react";
 import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
 import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
 import {
@@ -622,7 +622,21 @@ export function TrackerView({
       </RoadmapStickyToolbar>
 
       <div className="min-w-0 max-w-full px-6 pb-6">
-        {filterActive && filteredHierarchy.length === 0 ? (
+        {hierarchy.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+            <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+              <MapIcon className="h-7 w-7 text-zinc-500" />
+            </div>
+            <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Your roadmap is empty</h2>
+            <p className="text-sm text-zinc-500 text-center max-w-md">
+              Goals, projects, and milestones will appear here once you add companies on the{" "}
+              <a href="/companies" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
+                Companies
+              </a>{" "}
+              page. Each company becomes a section on the roadmap with its own goals and projects.
+            </p>
+          </div>
+        ) : filterActive && filteredHierarchy.length === 0 ? (
           <p className="text-sm text-zinc-500 py-8 text-center border border-dashed border-zinc-800 rounded-lg">
             {searchActive ? (
               <>

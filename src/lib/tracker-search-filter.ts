@@ -1,3 +1,4 @@
+import { milestoneProgressPercent } from "@/lib/milestone-progress";
 import type {
   CompanyWithGoals,
   GoalWithProjects,
@@ -120,13 +121,6 @@ function companySearchTextSelf(c: CompanyWithGoals): string {
   ].join(" ");
 }
 
-function computeProgress(milestones: Milestone[]): number {
-  const total = milestones.length;
-  if (total === 0) return 0;
-  const done = milestones.filter((m) => m.status === "Done").length;
-  return Math.round((done / total) * 100);
-}
-
 function filterProject(
   p: ProjectWithMilestones,
   q: string,
@@ -143,7 +137,7 @@ function filterProject(
   return {
     ...p,
     milestones,
-    progress: computeProgress(milestones),
+    progress: milestoneProgressPercent(milestones),
   };
 }
 
