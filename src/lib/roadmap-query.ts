@@ -1,12 +1,15 @@
-import { StatusEnum } from "@/lib/schemas/tracker";
-import type { Priority, Status } from "@/lib/types/tracker";
+import { GoalStatusEnum, ProjectStatusEnum } from "@/lib/schemas/tracker";
+import type { Priority } from "@/lib/types/tracker";
 import type {
   DueDateFilterId,
   TrackerStatusTagId,
 } from "@/lib/tracker-search-filter";
 import { DUE_DATE_FILTER_OPTIONS } from "@/lib/tracker-search-filter";
 
-const DELIVERY_STATUSES = new Set(StatusEnum.options);
+const DELIVERY_STATUSES = new Set<string>([
+  ...GoalStatusEnum.options,
+  ...ProjectStatusEnum.options,
+]);
 const PRIORITIES = new Set<Priority>(["P0", "P1", "P2", "P3"]);
 
 const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [
@@ -102,8 +105,8 @@ export function parseRoadmapSearchParams(
   const priorityFilterIds = prioritiesRaw.filter((p) => PRIORITIES.has(p as Priority));
 
   const deliveryRaw = splitCsv(firstString(sp, "delivery"));
-  const statusEnumFilterIds = deliveryRaw.filter((s): s is Status =>
-    DELIVERY_STATUSES.has(s as Status)
+  const statusEnumFilterIds = deliveryRaw.filter((s) =>
+    DELIVERY_STATUSES.has(s)
   );
 
   const dueRaw = splitCsv(firstString(sp, "due"));

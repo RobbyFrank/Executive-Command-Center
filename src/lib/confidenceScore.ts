@@ -1,9 +1,48 @@
 import type { GoalWithProjects, Person, ProjectWithMilestones } from "@/lib/types/tracker";
 import { clampAutonomy } from "@/lib/autonomyRoster";
 
-/** Map 1–5 confidence band to a simple percentage for compact UI (20% … 100%). */
+/**
+ * How strongly cost of delay increases the weight of high-autonomy project owners
+ * in the goal-level aggregate (0 = ignore COD; typical ~1.5).
+ */
+const GOAL_COD_AUTONOMY_WEIGHT_BETA = 1.5;
+
+/** Map 1–5 cost of delay to [0,1]; at minimum delay, goal confidence is a plain average. */
+function costOfDelayEmphasis(costOfDelay: number): number {
+  const c = Math.max(1, Math.min(5, Math.round(costOfDelay)));
+  return (c - 1) / 4;
+}
+
+/** Owner autonomy band (1–5) for weighting; mirrors missing-owner treatment in project confidence. */
+function projectOwnerAutonomyBand(
+  project: ProjectWithMilestones,
+  peopleById: Map<string, Person>
+): number {
+  if (!project.ownerId.trim()) return 1;
+  const raw = peopleById.get(project.ownerId)?.autonomyScore;
+  if (raw === undefined) return 1;
+  return clampAutonomy(raw);
+}
+
+/**
+ * Relative weight for this project in the goal aggregate. At minimum cost of delay, all weights are 1.
+ * As delay cost rises, owners with higher autonomy get larger weights.
+ */
+function goalProjectConfidenceWeight(
+  project: ProjectWithMilestones,
+  peopleById: Map<string, Person>,
+  costOfDelay: number
+): number {
+  const cod = costOfDelayEmphasis(costOfDelay);
+  if (cod === 0) return 1;
+  const a = projectOwnerAutonomyBand(project, peopleById);
+  const autonomyHeadroom = (a - 1) / 4;
+  return 1 + GOAL_COD_AUTONOMY_WEIGHT_BETA * cod * autonomyHeadroom;
+}
+
+/** Map 0–5 confidence band to a percentage for compact UI (0% … 100%). */
 export function confidenceScoreToPercent(score: number): number {
-  const s = Math.max(1, Math.min(5, Math.round(score)));
+  const s = Math.max(0, Math.min(5, Math.round(score)));
   return s * 20;
 }
 
@@ -42,25 +81,24 @@ export function explainProjectConfidence(
 ): ConfidenceExplanation {
   if (!project.ownerId.trim()) {
     return {
-      headline: "Confidence 1/5 (20%)",
+      headline: "Confidence 0/5 (0%)",
       paragraphs: [
-        "No owner is assigned, so confidence stays at the minimum until someone owns delivery.",
-        "After you assign an owner, we compare their autonomy (from Team) to this project’s complexity.",
+        "No owner — 0% until someone is assigned; then we score autonomy (Team) vs complexity.",
       ],
       ariaLabel:
-        "Confidence 1/5 (20%). No owner assigned. Assign an owner to use autonomy vs complexity.",
+        "Confidence 0/5 (0%). No project owner assigned.",
     };
   }
   const person = peopleById.get(project.ownerId);
   const autonomyRaw = person?.autonomyScore;
   if (autonomyRaw === undefined) {
     return {
-      headline: "Confidence 1/5 (20%)",
+      headline: "Confidence 0/5 (0%)",
       paragraphs: [
-        "This owner id is not on Team, so autonomy is treated as missing (same as no owner).",
+        "Owner isn’t on Team — autonomy unknown, so confidence stays at 0 until the roster matches.",
       ],
       ariaLabel:
-        "Confidence 1/5 (20%). Owner id not found on Team; autonomy treated as missing.",
+        "Confidence 0/5 (0%). Owner id not found on Team.",
     };
   }
   const a = clampAutonomy(autonomyRaw);
@@ -82,7 +120,7 @@ export function explainProjectConfidence(
 }
 
 /**
- * Average of per-project confidence under this goal.
+ * Aggregate of per-project confidence under this goal, weighted by cost of delay and owner autonomy.
  */
 export function explainGoalConfidence(
   goal: GoalWithProjects,
@@ -90,28 +128,32 @@ export function explainGoalConfidence(
 ): ConfidenceExplanation {
   if (goal.projects.length === 0) {
     return {
-      headline: "Confidence 3/5 (60%)",
+      headline: "Confidence 0/5 (0%)",
       paragraphs: [
-        "There are no projects under this goal yet, so we use a neutral middle score.",
-        "Add projects to compute confidence from each owner’s autonomy vs complexity.",
+        "No projects yet — nothing to score. Add projects; confidence blends each project’s autonomy vs complexity.",
       ],
       ariaLabel:
-        "Confidence 3/5 (60%). No projects yet; neutral score until projects exist.",
+        "Confidence 0/5 (0%). No projects yet; add projects to compute confidence.",
     };
   }
+  const codEmphasis = costOfDelayEmphasis(goal.costOfDelay);
   const bullets = goal.projects.map((p) => {
     const s = computeProjectConfidenceFromProject(p, peopleById);
     const pPct = confidenceScoreToPercent(s);
     return `"${p.name}" → ${s}/5 (${pPct}%)`;
   });
-  const avg = computeGoalConfidence(goal.projects, peopleById);
+  const avg = computeGoalConfidence(goal.projects, peopleById, goal.costOfDelay);
   const pct = confidenceScoreToPercent(avg);
   const out: ConfidenceExplanation = {
     headline: `Confidence ${avg}/5 (${pct}%)`,
-    paragraphs: [
-      `Rounded average of ${goal.projects.length} project confidence score(s).`,
-      "Each project uses clamp(owner autonomy − complexity + 3); this row shows the mean rounded to a whole step.",
-    ],
+    paragraphs:
+      codEmphasis === 0
+        ? [
+            "Cost of delay at minimum — simple average of project scores (autonomy vs complexity per project).",
+          ]
+        : [
+            `Cost of delay ${goal.costOfDelay}/5: high-autonomy owners count more when blending projects.`,
+          ],
     bullets,
     ariaLabel: "",
   };
@@ -121,13 +163,13 @@ export function explainGoalConfidence(
 
 /**
  * Auto confidence: autonomy vs complexity. Equal scores → 3 (neutral).
- * Unassigned owner → 1.
+ * Missing owner / missing autonomy on Team → 0.
  */
 export function computeProjectConfidence(
   ownerAutonomy: number | null | undefined,
   complexityScore: number
 ): number {
-  if (ownerAutonomy === null || ownerAutonomy === undefined) return 1;
+  if (ownerAutonomy === null || ownerAutonomy === undefined) return 0;
   const a = clampAutonomy(ownerAutonomy);
   const c = Math.max(1, Math.min(5, complexityScore));
   return Math.max(1, Math.min(5, a - c + 3));
@@ -137,20 +179,30 @@ export function computeProjectConfidenceFromProject(
   project: ProjectWithMilestones,
   peopleById: Map<string, Person>
 ): number {
-  if (!project.ownerId.trim()) return 1;
+  if (!project.ownerId.trim()) return 0;
   const autonomy = peopleById.get(project.ownerId)?.autonomyScore;
   return computeProjectConfidence(autonomy ?? null, project.complexityScore);
 }
 
-/** Average of child project confidences, rounded; no projects → 3. */
+/**
+ * Child project confidences combined with cost-of-delay-aware weights, rounded; no projects → 0.
+ * At minimum cost of delay this matches a straight average; as delay cost rises, projects owned by
+ * higher-autonomy people count more (see `goalProjectConfidenceWeight`).
+ */
 export function computeGoalConfidence(
   projects: ProjectWithMilestones[],
-  peopleById: Map<string, Person>
+  peopleById: Map<string, Person>,
+  costOfDelay: number = 3
 ): number {
-  if (projects.length === 0) return 3;
-  const sum = projects.reduce(
-    (acc, p) => acc + computeProjectConfidenceFromProject(p, peopleById),
-    0
-  );
-  return Math.round(sum / projects.length);
+  if (projects.length === 0) return 0;
+  let sumW = 0;
+  let sumWeighted = 0;
+  for (const p of projects) {
+    const pc = computeProjectConfidenceFromProject(p, peopleById);
+    const w = goalProjectConfidenceWeight(p, peopleById, costOfDelay);
+    sumW += w;
+    sumWeighted += w * pc;
+  }
+  const raw = sumWeighted / sumW;
+  return Math.max(0, Math.min(5, Math.round(raw)));
 }

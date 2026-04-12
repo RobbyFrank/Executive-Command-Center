@@ -33,6 +33,7 @@ import {
   filterTrackerHierarchyByPriority,
   filterTrackerHierarchyByStatusEnum,
   filterTrackerHierarchyByStatusTags,
+  filterTrackerHierarchyHideDoneProjects,
   normalizeTrackerSearchQuery,
   type DueDateFilterId,
   DUE_DATE_FILTER_OPTIONS,
@@ -87,6 +88,8 @@ export function TrackerView({
   const [statusEnumFilterIds, setStatusEnumFilterIds] = useState<string[]>(
     () => initialFilters.statusEnumFilterIds
   );
+  /** When false, project rows with status Done are hidden. */
+  const [showCompletedProjects, setShowCompletedProjects] = useState(true);
   const [bulkTick, setBulkTick] = useState(0);
   /** Last bulk preset applied; null = none yet this session (manual expansion) */
   const [bulkTarget, setBulkTarget] = useState<TrackerBulkExpandTarget>(null);
@@ -312,13 +315,22 @@ export function TrackerView({
     [hierarchyAfterStatusEnum, statusTagFilterIds, people]
   );
 
+  const hierarchyAfterHideDone = useMemo(
+    () =>
+      filterTrackerHierarchyHideDoneProjects(
+        hierarchyAfterStatusTags,
+        !showCompletedProjects
+      ),
+    [hierarchyAfterStatusTags, showCompletedProjects]
+  );
+
   const hierarchyAfterDueDate = useMemo(
     () =>
       filterTrackerHierarchyByDueDate(
-        hierarchyAfterStatusTags,
+        hierarchyAfterHideDone,
         dueDateFilterIds.length > 0 ? dueDateFilterIds : null
       ),
-    [hierarchyAfterStatusTags, dueDateFilterIds]
+    [hierarchyAfterHideDone, dueDateFilterIds]
   );
 
   const filteredHierarchy = useMemo(
@@ -519,11 +531,20 @@ export function TrackerView({
         </div>
         <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[18rem]">
           <DueDateFilterSelect
-            hierarchy={hierarchyAfterStatusTags}
+            hierarchy={hierarchyAfterHideDone}
             selectedIds={dueDateFilterIds}
             onChange={setDueDateFilterIds}
           />
         </div>
+        <label className="inline-flex items-center gap-2 shrink-0 cursor-pointer select-none text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={showCompletedProjects}
+            onChange={(e) => setShowCompletedProjects(e.target.checked)}
+            className="rounded border-zinc-600 bg-zinc-900 text-emerald-600 focus:ring-emerald-500/40"
+          />
+          Show completed
+        </label>
         {filterActive ? (
           <button
             type="button"

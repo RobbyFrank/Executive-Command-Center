@@ -9,7 +9,7 @@ import {
   FOUNDER_GROUP_LABEL,
   FOUNDER_GROUP_VISUAL,
   FOUNDERS_DEPARTMENT,
-  isFounderPersonId,
+  isFounderPerson,
   AUTONOMY_LEVEL_SELECT_OPTIONS,
   clampAutonomy,
   TEAM_ROSTER_WORKLOAD_HEADER,
@@ -19,14 +19,10 @@ import { DepartmentOptionIcon } from "@/lib/departmentIcons";
 import { WorkloadTierHeaderIcon } from "./WorkloadTierHeaderIcon";
 import { cn } from "@/lib/utils";
 import { InlineEditCell } from "./InlineEditCell";
-import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
+import { TeamRosterRowMenu } from "./TeamRosterRowMenu";
 import { LocalImageField } from "./LocalImageField";
 import { CompanyAffiliationLogos } from "./CompanyAffiliationLogos";
-import {
-  createPerson,
-  updatePerson,
-  deletePerson,
-} from "@/server/actions/tracker";
+import { createPerson, updatePerson } from "@/server/actions/tracker";
 import { departmentSelectOptions } from "@/lib/trackerDepartmentOptions";
 import { DepartmentSelect } from "./DepartmentSelect";
 import { EmploymentSelect } from "./EmploymentSelect";
@@ -37,6 +33,7 @@ import {
   Building2,
   Briefcase,
   Clock,
+  Crown,
   Layers,
   UserX,
   Activity,
@@ -52,6 +49,11 @@ import {
 import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
 import type { CompanyFilterOption } from "./CompanyFilterMultiSelect";
 import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
+import { RosterContactInput } from "./RosterContactInput";
+import {
+  personEmailValidationError,
+  personPhoneValidationError,
+} from "@/lib/personContactValidation";
 import { TeamFacetMultiSelect } from "./TeamFacetMultiSelect";
 import {
   applyTeamRosterFilters,
@@ -137,6 +139,13 @@ export function TeamRosterManager({
   );
   const [rosterSortMode, setRosterSortMode] =
     useState<TeamRosterSortMode>("autonomy");
+  /** When true, founders are excluded from the roster and filter counts. */
+  const [hideFounders, setHideFounders] = useState(true);
+
+  const peopleForRosterView = useMemo(() => {
+    if (!hideFounders) return initialPeople;
+    return initialPeople.filter((p) => !isFounderPerson(p));
+  }, [initialPeople, hideFounders]);
 
   const workloadByPersonId = useMemo(() => {
     const m = new Map<string, PersonWorkload>();
@@ -147,62 +156,62 @@ export function TeamRosterManager({
   const peopleForDeptFacet = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState,
         "department"
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
   const peopleForEmpFacet = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState,
         "employment"
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
   const peopleForWlFacet = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState,
         "workload"
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
   const peopleForCoFacet = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState,
         "company"
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
   const peopleForMissFacet = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState,
         "missing"
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
 
   const filteredPeople = useMemo(
     () =>
       applyTeamRosterFilters(
-        initialPeople,
+        peopleForRosterView,
         workloadByPersonId,
         filterState
       ),
-    [initialPeople, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState]
   );
 
   const filterActive = useMemo(
@@ -303,7 +312,7 @@ export function TeamRosterManager({
   const departmentOptionsByPersonId = useMemo(() => {
     const m = new Map<string, { value: string; label: string }[]>();
     for (const p of initialPeople) {
-      if (isFounderPersonId(p.id)) continue;
+      if (isFounderPerson(p)) continue;
       m.set(
         p.id,
         departmentSelectOptions(initialPeople, p.department ?? "", p.id)
@@ -343,6 +352,8 @@ export function TeamRosterManager({
               slackHandle: "",
               profilePicturePath: "",
               joinDate: "",
+              email: "",
+              phone: "",
               estimatedMonthlySalary: 0,
               employment: "inhouse_salaried",
             })
@@ -376,7 +387,7 @@ export function TeamRosterManager({
             onChange={(e) =>
               setFilterState((s) => ({ ...s, searchQuery: e.target.value }))
             }
-            placeholder="Search name, role, department…"
+            placeholder="Search name, role, department, email, phone…"
             className="w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 pr-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
             aria-label="Search team"
             autoComplete="off"
@@ -452,6 +463,20 @@ export function TeamRosterManager({
           searchPlaceholder="Search missing fields…"
         />
 
+        <label
+          htmlFor="team-roster-hide-founders"
+          className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 text-xs text-zinc-400 hover:text-zinc-300"
+        >
+          <input
+            id="team-roster-hide-founders"
+            type="checkbox"
+            checked={hideFounders}
+            onChange={(e) => setHideFounders(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 text-amber-500 focus:ring-2 focus:ring-zinc-500/50 focus:ring-offset-0"
+          />
+          <span>Hide founders</span>
+        </label>
+
         {filterActive ? (
           <button
             type="button"
@@ -490,7 +515,9 @@ export function TeamRosterManager({
           Showing{" "}
           <span className="tabular-nums text-zinc-400">{filteredPeople.length}</span>
           {" of "}
-          <span className="tabular-nums text-zinc-400">{initialPeople.length}</span>{" "}
+          <span className="tabular-nums text-zinc-400">
+            {peopleForRosterView.length}
+          </span>{" "}
           members
           {searchActive ? (
             <>
@@ -517,7 +544,7 @@ export function TeamRosterManager({
           </p>
         ) : null}
         {!(filterActive && filteredPeople.length === 0) ? (
-        <table className="w-full text-sm min-w-[1160px]">
+        <table className="w-full text-sm min-w-[1380px]">
           <thead>
             <tr className="border-b border-zinc-800 text-xs text-zinc-500">
               <th
@@ -551,10 +578,16 @@ export function TeamRosterManager({
               <th className="text-left px-3 py-3 font-medium min-w-[160px]">
                 Companies
               </th>
+              <th className="text-left px-3 py-3 font-medium min-w-[11rem]">
+                Email
+              </th>
+              <th className="text-left px-3 py-3 font-medium min-w-[9rem]">
+                Phone
+              </th>
               <th className="text-left px-3 py-3 font-medium" scope="col">
                 <SlackLogo alt="Slack" className="h-4 w-4" />
               </th>
-              <th className="w-10" />
+              <th className="w-10 py-3 pr-4" scope="col" aria-label="Actions" />
             </tr>
           </thead>
           {rosterGroups.map((group) => {
@@ -594,7 +627,7 @@ export function TeamRosterManager({
             return (
               <tbody key={tbodyKey}>
                 <tr className={visual.header}>
-                  <td colSpan={11} className="px-3 py-2.5">
+                  <td colSpan={13} className="px-3 py-2.5">
                     <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {group.kind === "department" ? (
@@ -629,7 +662,14 @@ export function TeamRosterManager({
                           </span>
                         </span>
                       ) : (
-                        <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                          {isFounders ? (
+                            <Crown
+                              className="h-4 w-4 shrink-0 text-amber-400/90"
+                              strokeWidth={2}
+                              aria-hidden
+                            />
+                          ) : null}
                           <span className="text-sm font-semibold text-zinc-100 tracking-tight">
                             {label.title}
                           </span>
@@ -642,7 +682,9 @@ export function TeamRosterManager({
                         <span className="text-xs text-zinc-400">{label.hint}</span>
                       ) : null}
                     </div>
-                    <RosterGroupSalaryStats people={groupPeople} />
+                    {group.kind !== "founders" ? (
+                      <RosterGroupSalaryStats people={groupPeople} />
+                    ) : null}
                     </div>
                   </td>
                 </tr>
@@ -685,7 +727,7 @@ export function TeamRosterManager({
                       />
                     </td>
                     <td className="px-3 py-2 align-middle max-w-[160px]">
-                      {isFounderPersonId(person.id) ? (
+                      {isFounderPerson(person) ? (
                         <div className="flex min-w-0 max-w-[220px] items-center gap-2 px-2 py-1.5">
                           <DepartmentOptionIcon
                             label={FOUNDERS_DEPARTMENT}
@@ -711,9 +753,7 @@ export function TeamRosterManager({
                       )}
                     </td>
                     <td className="px-3 py-2 align-middle whitespace-nowrap">
-                      {isFounderPersonId(person.id) ? (
-                        <span className="text-sm text-zinc-600">—</span>
-                      ) : (
+                      {isFounderPerson(person) ? null : (
                         <EmploymentSelect
                           employment={person.employment}
                           onChange={(employment) =>
@@ -723,7 +763,7 @@ export function TeamRosterManager({
                       )}
                     </td>
                     <td className="px-3 py-2 align-middle max-w-[120px] whitespace-nowrap">
-                      {isFounderPersonId(person.id) ? (
+                      {isFounderPerson(person) ? (
                         <span
                           className="text-sm text-zinc-400 font-medium"
                           title="Founder"
@@ -742,39 +782,39 @@ export function TeamRosterManager({
                       )}
                     </td>
                     <td className="px-3 py-2 align-middle text-right max-w-[9rem]">
-                      <InlineEditCell
-                        type="number"
-                        min={0}
-                        step={100}
-                        value={String(person.estimatedMonthlySalary ?? 0)}
-                        onSave={(raw) => {
-                          const n = parseFloat(raw);
-                          const next =
-                            Number.isFinite(n) && n >= 0
-                              ? Math.round(n)
-                              : 0;
-                          updatePerson(person.id, {
-                            estimatedMonthlySalary: next,
-                          });
-                        }}
-                        formatDisplay={(v) => {
-                          const n = parseFloat(v);
-                          if (!Number.isFinite(n) || n <= 0) {
-                            return "—";
-                          }
-                          return formatUsdWhole(n);
-                        }}
-                        placeholder="—"
-                        displayTitle="Estimated monthly salary (USD)"
-                        displayClassName="text-zinc-300 tabular-nums"
-                        collapsedButtonClassName="!text-right"
-                        className="text-right"
-                      />
+                      {isFounderPerson(person) ? null : (
+                        <InlineEditCell
+                          type="number"
+                          min={0}
+                          step={100}
+                          value={String(person.estimatedMonthlySalary ?? 0)}
+                          onSave={(raw) => {
+                            const n = parseFloat(raw);
+                            const next =
+                              Number.isFinite(n) && n >= 0
+                                ? Math.round(n)
+                                : 0;
+                            updatePerson(person.id, {
+                              estimatedMonthlySalary: next,
+                            });
+                          }}
+                          formatDisplay={(v) => {
+                            const n = parseFloat(v);
+                            if (!Number.isFinite(n) || n <= 0) {
+                              return "—";
+                            }
+                            return formatUsdWhole(n);
+                          }}
+                          placeholder="—"
+                          displayTitle="Estimated monthly salary (USD)"
+                          displayClassName="text-zinc-300 tabular-nums"
+                          collapsedButtonClassName="!text-right"
+                          className="text-right"
+                        />
+                      )}
                     </td>
                     <td className="px-3 py-2 align-middle min-w-[13rem]">
-                      {isFounderPersonId(person.id) ? (
-                        <span className="text-sm text-zinc-600">—</span>
-                      ) : (
+                      {isFounderPerson(person) ? null : (
                         <InlineEditCell
                           type="select"
                           selectPresentation="always"
@@ -796,15 +836,17 @@ export function TeamRosterManager({
                       )}
                     </td>
                     <td className="px-3 py-2 align-middle">
-                      <WorkloadBar
-                        totalProjects={w?.totalProjects ?? 0}
-                        p0Projects={w?.p0Projects ?? 0}
-                        p1Projects={w?.p1Projects ?? 0}
-                        maxAcrossTeam={maxWorkloadAcrossTeam}
-                      />
+                      {isFounderPerson(person) ? null : (
+                        <WorkloadBar
+                          totalProjects={w?.totalProjects ?? 0}
+                          p0Projects={w?.p0Projects ?? 0}
+                          p1Projects={w?.p1Projects ?? 0}
+                          maxAcrossTeam={maxWorkloadAcrossTeam}
+                        />
+                      )}
                     </td>
                     <td className="px-3 py-2 align-middle max-w-[280px]">
-                      {isFounderPersonId(person.id) ? (
+                      {isFounderPerson(person) ? (
                         <span className="text-zinc-400">All</span>
                       ) : (
                         <CompanyAffiliationLogos
@@ -812,6 +854,26 @@ export function TeamRosterManager({
                           companies={companies}
                         />
                       )}
+                    </td>
+                    <td className="px-3 py-2 align-middle max-w-[14rem]">
+                      <RosterContactInput
+                        kind="email"
+                        value={person.email}
+                        validate={personEmailValidationError}
+                        onSave={(email) =>
+                          updatePerson(person.id, { email })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-2 align-middle max-w-[12rem]">
+                      <RosterContactInput
+                        kind="tel"
+                        value={person.phone}
+                        validate={personPhoneValidationError}
+                        onSave={(phone) =>
+                          updatePerson(person.id, { phone })
+                        }
+                      />
                     </td>
                     <td className="px-3 py-2 align-middle max-w-[120px]">
                       <InlineEditCell
@@ -833,13 +895,8 @@ export function TeamRosterManager({
                         displayClassName="text-zinc-500"
                       />
                     </td>
-                    <td className="px-1 py-2 align-middle">
-                      {isFounderPersonId(person.id) ? null : (
-                        <ConfirmDeletePopover
-                          entityName={person.name}
-                          onConfirm={() => deletePerson(person.id)}
-                        />
-                      )}
+                    <td className="py-2 pl-2 pr-4 align-middle">
+                      <TeamRosterRowMenu person={person} />
                     </td>
                   </tr>
                   );
@@ -863,6 +920,8 @@ export function TeamRosterManager({
               slackHandle: "",
               profilePicturePath: "",
               joinDate: "",
+              email: "",
+              phone: "",
               estimatedMonthlySalary: 0,
               employment: "inhouse_salaried",
             });

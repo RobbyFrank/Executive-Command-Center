@@ -341,7 +341,7 @@ export function SummaryDashboard({
 
         for (const p of g.projects) {
           if (p.priority === "P0") p0Projects++;
-          if (p.status === "Blocked") blocked++;
+          if (p.status === "Stuck") blocked++;
           if (isProjectZombie(p)) zombies++;
           if (!p.ownerId) unassignedProjects++;
           if (p.atRisk) atRisk++;
@@ -354,7 +354,11 @@ export function SummaryDashboard({
           )
             needReviewProjects++;
           if (projectMatchesCloseWatch(p, people)) closeWatch++;
-          if (g.impactScore >= 4 && p.complexityScore <= 2) highLeverage++;
+          if (
+            (g.priority === "P0" || g.priority === "P1") &&
+            p.complexityScore <= 2
+          )
+            highLeverage++;
         }
       }
     }
@@ -388,7 +392,7 @@ export function SummaryDashboard({
         for (const p of g.projects) {
           if (seen.has(p.id)) continue;
           let kind: string | null = null;
-          if (p.priority === "P0" && p.status === "Blocked") kind = "P0 blocked";
+          if (p.priority === "P0" && p.status === "Stuck") kind = "P0 stuck";
           else if (isProjectZombie(p)) kind = "Zombie";
           else if (p.atRisk || g.atRisk) kind = "At risk";
           if (!kind) continue;
@@ -534,9 +538,9 @@ export function SummaryDashboard({
             accentClass="bg-red-500/15 text-red-400"
           />
           <StatCard
-            label="Blocked"
+            label="Stuck"
             value={stats.blocked}
-            href={buildRoadmapHref({ statusEnumFilterIds: ["Blocked"] })}
+            href={buildRoadmapHref({ statusEnumFilterIds: ["Stuck"] })}
             icon={ShieldAlert}
             accentClass="bg-orange-500/15 text-orange-400"
           />

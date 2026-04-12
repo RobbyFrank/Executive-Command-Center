@@ -180,8 +180,8 @@ Everything grouped by Company → Goal → Project, with collapsible sections.
 - **Low Confidence:** Projects where Confidence Score is ≤ 2 (quiet risks, gut-feel problems)
 - **Zombie:** Status is "In Progress" + no milestone completed in 3+ weeks + Last Reviewed not updated. These are projects people have stopped working on but haven't had the heart to kill or pause yet.
 - **Drifting:** "Next Critical Step" field unchanged for 2+ weeks. Early warning signal before a project becomes a Zombie.
-- **High Leverage:** High impact goals (4-5) with low complexity projects (1-2)
-- **Low Leverage:** Low impact goals (1-2) with high complexity projects (4-5), candidates to cut
+- **High Leverage:** P0 or P1 goals with low complexity projects (1-2)
+- **Low Leverage:** P3 goals with high complexity projects (4-5), candidates to cut
 - **Time-Sensitive:** Goals with High Cost of Delay that are not yet In Progress
 
 ### Resource Bottleneck View

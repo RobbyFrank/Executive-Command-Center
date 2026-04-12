@@ -15,8 +15,8 @@ import { firstNameFromFullName } from "@/lib/personDisplayName";
 import {
   buildTeamRosterDisplayGroups,
   clampAutonomy,
-  isFounderPersonId,
-  AUTONOMY_GROUP_LABEL,
+  isFounderPerson,
+  isGoalDriEligiblePerson,
   autonomyShortTitle,
   type AutonomyLevel,
 } from "@/lib/autonomyRoster";
@@ -36,6 +36,15 @@ interface OwnerPickerCellProps {
   priority?: string;
   /** P0/P1 workload per person id — shown in the dropdown. */
   workloadMap?: Map<string, OwnerWorkload>;
+  /** Roadmap: draw attention to the owner cell when still unassigned. */
+  emphasizeUnassigned?: boolean;
+  /** Roadmap grid: align resting label with sticky column headers. */
+  trackerGridAlign?: boolean;
+  /**
+   * Goal DRI column: only founders and autonomy 4–5; footnote explains the rule.
+   * Project owners use the default full roster.
+   */
+  restrictToGoalDriEligible?: boolean;
 }
 
 const PANEL_W = 320;
@@ -46,6 +55,9 @@ export function OwnerPickerCell({
   onSave,
   priority,
   workloadMap,
+  emphasizeUnassigned = false,
+  trackerGridAlign = false,
+  restrictToGoalDriEligible = false,
 }: OwnerPickerCellProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -105,9 +117,17 @@ export function OwnerPickerCell({
     [value, onSave, close],
   );
 
+  const rosterPeople = useMemo(
+    () =>
+      restrictToGoalDriEligible
+        ? people.filter(isGoalDriEligiblePerson)
+        : people,
+    [people, restrictToGoalDriEligible],
+  );
+
   const groups = useMemo(
-    () => buildTeamRosterDisplayGroups(people),
-    [people],
+    () => buildTeamRosterDisplayGroups(rosterPeople),
+    [rosterPeople],
   );
 
   const filteredGroups = useMemo(() => {
@@ -136,8 +156,10 @@ export function OwnerPickerCell({
     : "Click to assign owner";
   const autonomyRing =
     person &&
-    !isFounderPersonId(person.id) &&
+    !isFounderPerson(person) &&
     clampAutonomy(person.autonomyScore) <= 2;
+
+  const unassignedHighlight = emphasizeUnassigned && !person;
 
   const collapsed = (
     <button
@@ -147,7 +169,14 @@ export function OwnerPickerCell({
         e.stopPropagation();
         setOpen(!open);
       }}
-      className="group/owner relative flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pl-1.5 pr-7 text-left text-sm transition-colors hover:bg-zinc-800"
+      className={cn(
+        "group/owner relative flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-7 text-left text-sm transition-colors hover:bg-zinc-800",
+        trackerGridAlign ? "pl-0" : "pl-1.5",
+        unassignedHighlight &&
+          "rounded-md border border-amber-500/45 bg-amber-950/40 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
+        unassignedHighlight && trackerGridAlign && "pl-1.5",
+        unassignedHighlight && !trackerGridAlign && "pl-2"
+      )}
       title={title}
     >
       {person ? (
@@ -162,9 +191,9 @@ export function OwnerPickerCell({
                 autonomyRing ? "ring-amber-500/75" : "ring-zinc-700",
               )}
             />
-            {dept ? (
-              <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-400">
-                {dept}
+            {displayName ? (
+              <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-100">
+                {displayName}
               </span>
             ) : null}
           </span>
@@ -185,10 +214,21 @@ export function OwnerPickerCell({
           </span>
         )
       ) : (
-        <span className="italic text-zinc-600">Unassigned</span>
+        <span
+          className={cn(
+            unassignedHighlight
+              ? "font-medium text-amber-100"
+              : "italic text-zinc-600"
+          )}
+        >
+          Unassigned
+        </span>
       )}
       <ChevronDown
-        className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity group-hover/owner:opacity-100"
+        className={cn(
+          "pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity group-hover/owner:opacity-100",
+          unassignedHighlight ? "text-amber-400/90 opacity-100" : "opacity-0"
+        )}
         aria-hidden
       />
     </button>
@@ -220,7 +260,7 @@ export function OwnerPickerCell({
               />
             </div>
 
-            <div className="flex-1 overflow-y-auto overscroll-contain">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {/* Unassigned option */}
               <button
                 type="button"
@@ -273,6 +313,13 @@ export function OwnerPickerCell({
                 </p>
               )}
             </div>
+
+            {restrictToGoalDriEligible ? (
+              <p className="shrink-0 border-t border-zinc-800 px-3 py-2 text-[10px] leading-snug text-zinc-500">
+                Only founders and people with autonomy 4 or 5 can be assigned as
+                the directly responsible individual (DRI).
+              </p>
+            ) : null}
           </div>
         )}
       </>
@@ -303,7 +350,7 @@ function PersonOption({
   const dept = person.department?.trim();
   const displayName = person.name;
   const firstName = firstNameFromFullName(person.name);
-  const isFounder = isFounderPersonId(person.id);
+  const isFounder = isFounderPerson(person);
   const autonomy = clampAutonomy(person.autonomyScore);
   const lowAutonomy = !isFounder && autonomy < 4;
   const showWarning = isHighPriority && lowAutonomy;

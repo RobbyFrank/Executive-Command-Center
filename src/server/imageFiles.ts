@@ -15,7 +15,7 @@ const MIME_TO_EXT: Record<string, string> = {
 
 const ALLOWED = new Set(Object.keys(MIME_TO_EXT));
 
-function useBlobUploads(): boolean {
+function blobUploadsEnabled(): boolean {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
@@ -87,7 +87,7 @@ export async function saveUploadedImage(args: {
   const safe = sanitizeId(entityId);
   const sub = kind === "company" ? "companies" : "people";
 
-  if (useBlobUploads()) {
+  if (blobUploadsEnabled()) {
     const pathname = `uploads/${sub}/${safe}.${ext}`;
     const blob = await put(pathname, file, {
       access: "public",

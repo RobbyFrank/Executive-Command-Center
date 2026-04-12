@@ -2,7 +2,12 @@
 
 import { Fragment, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import type { CompanyWithGoals, Person, ProjectWithMilestones } from "@/lib/types/tracker";
+import type {
+  CompanyWithGoals,
+  Person,
+  Priority,
+  ProjectWithMilestones,
+} from "@/lib/types/tracker";
 import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
 import { OwnerFilterMultiSelect } from "./OwnerFilterMultiSelect";
 import { PriorityBadge } from "./PriorityBadge";
@@ -14,8 +19,8 @@ import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
 import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
 import {
   complexityBand,
-  impactBand,
-  IMPACT_ROW_LABELS,
+  goalPriorityBand,
+  PRIORITY_ROW_LABELS,
   COMPLEXITY_COL_LABELS,
   matrixCellToneClasses,
   MATRIX_QUADRANT_LABELS,
@@ -28,7 +33,7 @@ export interface MatrixProjectCell {
   project: ProjectWithMilestones;
   goalId: string;
   goalDescription: string;
-  impactScore: number;
+  goalPriority: Priority;
   companyId: string;
   companyName: string;
   companyLogoPath: string;
@@ -45,7 +50,7 @@ function collectProjects(
           project: p,
           goalId: g.id,
           goalDescription: g.description,
-          impactScore: g.impactScore,
+          goalPriority: g.priority,
           companyId: c.id,
           companyName: c.name,
           companyLogoPath: c.logoPath ?? "",
@@ -113,7 +118,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
       Array.from({ length: 3 }, () => [] as MatrixProjectCell[])
     );
     for (const item of cells) {
-      const ri = impactBand(item.impactScore);
+      const ri = goalPriorityBand(item.goalPriority);
       const ci = complexityBand(item.project.complexityScore);
       g[ri][ci].push(item);
     }
@@ -134,7 +139,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
         <header className="mb-6">
           <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Projects positioned by goal impact and project complexity.
+            Projects positioned by goal priority and project complexity.
           </p>
         </header>
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
@@ -143,7 +148,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
           </div>
           <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No projects to plot</h2>
           <p className="text-sm text-zinc-500 text-center max-w-md">
-            The matrix will map your projects by impact and complexity once you have companies with goals and projects. Head to the{" "}
+            The matrix will map your projects by goal priority and complexity once you have companies with goals and projects. Head to the{" "}
             <Link href="/" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
               Roadmap
             </Link>{" "}
@@ -159,7 +164,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
       <header className="mb-6 shrink-0">
         <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
         <p className="text-sm text-zinc-500 mt-1">
-          Projects positioned by goal impact (rows) and project complexity (columns).
+          Projects positioned by goal priority (rows) and project complexity (columns).
           Top-left is highest leverage; bottom-right is cut-or-defer territory.
         </p>
         <div className="mt-4 flex flex-wrap gap-3 max-w-3xl">
@@ -222,14 +227,14 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
               High
             </span>
             <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 [writing-mode:vertical-rl] rotate-180">
-              Goal impact
+              Goal priority
             </span>
             <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
               Low
             </span>
           </div>
 
-          {IMPACT_ROW_LABELS.map((rowLabel, ri) => (
+          {PRIORITY_ROW_LABELS.map((rowLabel, ri) => (
             <Fragment key={rowLabel}>
               <div
                 className="flex items-start justify-end pr-2 pt-2 text-right text-[11px] font-medium uppercase tracking-wide text-zinc-500 max-w-[7rem]"

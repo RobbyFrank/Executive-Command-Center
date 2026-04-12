@@ -88,6 +88,14 @@ interface InlineEditCellProps {
    * parent can keep passing true without forcing edit mode again after the user finishes.
    */
   startInEditMode?: boolean;
+  /**
+   * Roadmap goal/project grid: omit default resting left padding so values line up with sticky column headers.
+   */
+  trackerGridAlign?: boolean;
+  /** When `type` is `date` and the value is empty, draw attention (Roadmap due date). */
+  emphasizeEmpty?: boolean;
+  /** When `type` is `date`, minimum allowed `YYYY-MM-DD` (native `min` — inclusive). */
+  dateMin?: string;
 }
 
 export function InlineEditCell({
@@ -115,6 +123,9 @@ export function InlineEditCell({
   truncateTooltipAlwaysHover = false,
   validate,
   startInEditMode = false,
+  trackerGridAlign = false,
+  emphasizeEmpty = false,
+  dateMin,
 }: InlineEditCellProps) {
   const [editing, setEditing] = useState(() => Boolean(startInEditMode));
   const [draft, setDraft] = useState(value);
@@ -125,6 +136,9 @@ export function InlineEditCell({
   const validationHintId = `${useId()}-validation`;
   const dateFieldId = useId();
   const resolvedEmptyLabel = emptyLabel ?? (type === "date" ? "Set date" : "—");
+
+  const cellPadX = trackerGridAlign ? "pl-0 pr-1.5" : "px-1.5";
+  const selectPadX = trackerGridAlign ? "pl-0 pr-7" : "pl-1.5 pr-7";
 
   useEffect(() => {
     onEditingChange?.(editing);
@@ -223,7 +237,8 @@ export function InlineEditCell({
       <div className="relative isolate w-full min-w-0">
         <div
           className={cn(
-            "pointer-events-none flex min-h-[28px] max-w-full items-center rounded py-0.5 pl-1.5 pr-7 text-left text-sm",
+            "pointer-events-none flex min-h-8 max-w-full items-center rounded py-0.5 text-left text-sm",
+            selectPadX,
             !value.trim() && "text-zinc-600 italic",
             value.trim() && displayClassName
           )}
@@ -237,7 +252,7 @@ export function InlineEditCell({
             if (next !== value) onSave(next);
           }}
           className={cn(
-            "peer absolute inset-0 z-[1] min-h-[28px] w-full max-w-full cursor-pointer appearance-none rounded border-0 bg-transparent opacity-0",
+            "peer absolute inset-0 z-[1] min-h-8 w-full max-w-full cursor-pointer appearance-none rounded border-0 bg-transparent opacity-0",
             "hover:bg-zinc-800",
             "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
             className
@@ -269,7 +284,8 @@ export function InlineEditCell({
             if (next !== value) onSave(next);
           }}
           className={cn(
-            "peer w-full min-h-[28px] max-w-full pl-1.5 pr-7 py-0.5 rounded text-sm cursor-pointer text-left",
+            "peer w-full min-h-[28px] max-w-full py-0.5 rounded text-sm cursor-pointer text-left",
+            selectPadX,
             "appearance-none border-0 bg-transparent shadow-none",
             "transition-colors",
             "hover:bg-zinc-800",
@@ -300,9 +316,13 @@ export function InlineEditCell({
    * receive hits reliably on Chromium).
    */
   if (type === "date") {
+    const emptyAttention =
+      emphasizeEmpty && !value.trim() && variant !== "plain";
     const dateHint = value.trim()
       ? `${formatCalendarDateHint(value)} — choose date`
-      : "Set date — choose date";
+      : dateMin
+        ? `Set due date — on or after ${dateMin}`
+        : "Set date — choose date";
     const buttonClass =
       variant === "plain"
         ? cn(
@@ -315,11 +335,15 @@ export function InlineEditCell({
             value.trim() && displayClassName
           )
         : cn(
-            "flex min-h-[28px] w-full max-w-full items-center rounded px-1.5 py-0.5 text-left text-sm",
+            "flex min-h-[28px] w-full max-w-full items-center rounded py-0.5 text-left text-sm",
+            cellPadX,
             "border-0 bg-transparent transition-colors cursor-pointer",
             "hover:bg-zinc-800",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
-            !value.trim() && "text-zinc-600 italic",
+            !value.trim() && !emptyAttention && "text-zinc-600 italic",
+            emptyAttention &&
+              "rounded-md border border-amber-500/45 bg-amber-950/40 font-medium not-italic text-amber-100 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
+            emptyAttention && trackerGridAlign && "pl-1.5",
             value.trim() && displayClassName
           );
 
@@ -330,9 +354,14 @@ export function InlineEditCell({
           ref={dateInputRef}
           type="date"
           value={value}
+          min={dateMin || undefined}
           onChange={(e) => {
             const next = e.target.value;
-            if (next !== value) onSave(next);
+            if (next === value) return;
+            if (dateMin && next && next < dateMin) {
+              return;
+            }
+            onSave(next);
           }}
           className="sr-only"
           tabIndex={-1}
@@ -378,7 +407,10 @@ export function InlineEditCell({
             "hover:bg-zinc-800/50 hover:px-1.5 hover:py-0.5 hover:-mx-1.5 hover:cursor-text",
             "focus-visible:outline-none focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:cursor-text focus-visible:ring-1 focus-visible:ring-zinc-500/35"
           )
-        : "text-left w-full px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm cursor-pointer";
+        : cn(
+            "text-left w-full py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm cursor-pointer",
+            cellPadX
+          );
 
     const trimmed = value.trim();
     if (linkBehavior && trimmed && isValidHttpUrl(trimmed)) {
@@ -501,8 +533,10 @@ export function InlineEditCell({
     );
   }
 
-  const inputClasses =
-    "w-full px-1.5 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-600";
+  const inputClasses = cn(
+    "w-full py-0.5 bg-zinc-900 border border-zinc-700 rounded text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-600",
+    cellPadX
+  );
 
   if (type === "select" && options) {
     return (

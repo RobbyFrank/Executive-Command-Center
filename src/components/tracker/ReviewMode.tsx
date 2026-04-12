@@ -1,32 +1,99 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
-import { firstNameFromFullName } from "@/lib/personDisplayName";
-import { clampAutonomy, isFounderPersonId } from "@/lib/autonomyRoster";
-import type { Priority, Status } from "@/lib/types/tracker";
-import { StatusEnum } from "@/lib/schemas/tracker";
+import type {
+  CompanyWithGoals,
+  GoalWithProjects,
+  Person,
+  GoalStatus,
+  ProjectStatus,
+  Priority,
+  ProjectType,
+} from "@/lib/types/tracker";
+import {
+  GoalStatusEnum,
+  PriorityEnum,
+  ProjectTypeEnum,
+} from "@/lib/schemas/tracker";
 import {
   updateGoal,
   updateProject,
   markGoalReviewed,
   markProjectReviewed,
+  createMilestone,
 } from "@/server/actions/tracker";
+import { InlineEditCell } from "./InlineEditCell";
+import { OwnerPickerCell } from "./OwnerPickerCell";
+import { ReviewLogPanel } from "./ReviewLogPanel";
+import { ProgressBar } from "./ProgressBar";
+import {
+  SCORE_BAND_OPTIONS,
+  parseScoreBand,
+} from "@/lib/tracker-score-bands";
+import { prioritySelectTextClass } from "@/lib/prioritySort";
+import { formatSlackChannelHash } from "@/lib/slackDisplay";
+import { Layers, ArrowRightLeft, Link2, Plus } from "lucide-react";
 import {
   computeGoalConfidence,
   computeProjectConfidenceFromProject,
   explainGoalConfidence,
   explainProjectConfidence,
   fallbackConfidenceExplanation,
+  type ConfidenceExplanation,
 } from "@/lib/confidenceScore";
-import { formatLastReviewedHint, isReviewStale } from "@/lib/reviewStaleness";
+import {
+  formatLastReviewedHint,
+  getReviewStaleWindowHours,
+  isReviewStale,
+} from "@/lib/reviewStaleness";
 import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { ExecFlagMenu } from "./ExecFlagMenu";
+import { MilestoneRow } from "./MilestoneRow";
+import { WarningsBadge } from "./WarningsBadge";
+import {
+  getGoalHeaderWarnings,
+  getTrackerProjectWarnings,
+  type TrackerWarning,
+} from "@/lib/tracker-project-warnings";
+import { projectMatchesCloseWatch } from "@/lib/closeWatch";
+import {
+  AUTONOMY_GROUP_LABEL,
+  clampAutonomy,
+  isFounderPerson,
+} from "@/lib/autonomyRoster";
 import { cn } from "@/lib/utils";
-import { Building2, ChevronLeft, ChevronRight, ClipboardCheck, ScanEye } from "lucide-react";
+import { minDueDateYmdAfterPreviousProject } from "@/lib/syncProjectDueDate";
+import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
+import { ProjectStatusPill } from "./ProjectStatusPill";
+import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
+import {
+  filterTrackerHierarchyByCompanyIds,
+  filterTrackerHierarchyByOwner,
+  filterTrackerHierarchyByPriority,
+} from "@/lib/tracker-search-filter";
+import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
+import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
+import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
+import { OwnerFilterMultiSelect } from "./OwnerFilterMultiSelect";
+import { PriorityFilterMultiSelect } from "./PriorityFilterMultiSelect";
+import {
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  FilterX,
+  ScanEye,
+} from "lucide-react";
 
 const REVIEW_INDEX_STORAGE_KEY = "ecc-review-mode-index";
 
@@ -48,7 +115,7 @@ type ReviewItem =
       name: string;
       ownerId: string;
       priority: Priority;
-      status: Status;
+      status: GoalStatus;
       lastReviewed: string;
       atRisk: boolean;
       spotlight: boolean;
@@ -65,12 +132,86 @@ type ReviewItem =
       name: string;
       ownerId: string;
       priority: Priority;
-      status: Status;
+      status: ProjectStatus;
       lastReviewed: string;
       atRisk: boolean;
       spotlight: boolean;
       confidence: number;
     };
+
+function ReviewItemContextBar({
+  kind,
+  goalLabel,
+  atRisk,
+  spotlight,
+  showCloseWatch,
+  warnings,
+}: {
+  kind: "goal" | "project";
+  goalLabel?: string;
+  atRisk: boolean;
+  spotlight: boolean;
+  showCloseWatch: boolean;
+  warnings: TrackerWarning[];
+}) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 border-b border-zinc-800/80 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "rounded-md px-2.5 py-1.5 text-xs font-bold uppercase tracking-wide ring-1",
+            kind === "goal"
+              ? "bg-violet-500/15 text-violet-100 ring-violet-500/45"
+              : "bg-cyan-500/15 text-cyan-100 ring-cyan-500/45"
+          )}
+        >
+          {kind === "goal" ? "Goal" : "Project"}
+        </span>
+        {kind === "project" && goalLabel ? (
+          <span className="text-sm text-zinc-400">
+            Under{" "}
+            <span className="font-medium text-zinc-200">{goalLabel}</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+        {atRisk && (
+          <span
+            className="whitespace-nowrap rounded-md border border-amber-400/45 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300/95"
+            title="Marked at risk"
+          >
+            At risk
+          </span>
+        )}
+        {spotlight && (
+          <span
+            className="whitespace-nowrap rounded-md border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/95"
+            title="Spotlight — win or momentum"
+          >
+            Spotlight
+          </span>
+        )}
+        {kind === "project" && showCloseWatch && (
+          <span
+            className="whitespace-nowrap rounded-md border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/95"
+            title="P0/P1 with owner autonomy 1–2 — stay closer on delivery"
+          >
+            Close watch
+          </span>
+        )}
+        {warnings.length === 1 && (
+          <span
+            className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
+            title={warnings[0].title}
+          >
+            {warnings[0].label}
+          </span>
+        )}
+        {warnings.length > 1 && <WarningsBadge warnings={warnings} />}
+      </div>
+    </div>
+  );
+}
 
 function itemReviewStale(
   item: ReviewItem,
@@ -85,31 +226,6 @@ function itemReviewStale(
     item.kind === "goal" ? "goal" : "project",
     autonomy
   );
-}
-
-/** YYYY-MM-DD or empty → label + overdue hint vs today (local). */
-function projectTargetDatePresentation(iso: string): {
-  label: string;
-  overdue: boolean;
-} {
-  const t = iso.trim();
-  if (!t) return { label: "—", overdue: false };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return { label: t, overdue: false };
-  const [y, mo, d] = t.split("-").map(Number);
-  const target = new Date(y, mo - 1, d);
-  const today = new Date();
-  const startToday = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  const overdue = target.getTime() < startToday.getTime();
-  return {
-    label: target.toLocaleDateString(undefined, {
-      dateStyle: "medium",
-    }),
-    overdue,
-  };
 }
 
 function ReviewCompanyLogo({
@@ -152,125 +268,71 @@ function ReviewCompanyLogo({
   );
 }
 
-function ReviewOwnerAvatar({
-  person,
-  ownerId,
-}: {
-  person: Person | undefined;
-  ownerId: string;
-}) {
-  const id = ownerId.trim();
-  if (!id) {
-    return (
-      <span className="shrink-0 text-xs text-zinc-500" title="Unassigned">
-        —
-      </span>
-    );
-  }
-  if (!person) {
-    return (
-      <span
-        className="shrink-0 max-w-[7rem] truncate text-xs text-zinc-500"
-        title={ownerId}
-      >
-        ?
-      </span>
-    );
-  }
-  const path = person.profilePicturePath?.trim();
-  const display = firstNameFromFullName(person.name);
-  const title = person.name;
-  const autonomyRing =
-    !isFounderPersonId(person.id) && clampAutonomy(person.autonomyScore) <= 2;
+const PRIORITY_ORDER: Record<Priority, number> = {
+  P0: 0,
+  P1: 1,
+  P2: 2,
+  P3: 3,
+};
 
-  if (path) {
-    return (
-      <span
-        className="inline-flex max-w-[11rem] shrink-0 items-center gap-2"
-        title={title}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={path}
-          alt=""
-          className={cn(
-            "h-8 w-8 shrink-0 rounded-full object-cover ring-2",
-            autonomyRing ? "ring-amber-500/75" : "ring-zinc-700"
-          )}
-        />
-        <span className="truncate text-sm text-zinc-200">{display}</span>
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className="inline-flex max-w-[11rem] shrink-0 items-center gap-1.5"
-      title={title}
-    >
-      {autonomyRing ? (
-        <span
-          className="h-2 w-2 shrink-0 rounded-full bg-amber-500/90 ring-1 ring-amber-400/50"
-          aria-hidden
-        />
-      ) : null}
-      <span className="truncate text-sm text-zinc-200">{display}</span>
-    </span>
-  );
+function priorityRank(priority: Priority): number {
+  return PRIORITY_ORDER[priority];
 }
 
-function collectP0P1Items(
+/**
+ * All goals plus projects that **need review** (stale vs last reviewed), ordered P0→P3
+ * then stale-first within priority. Project cadence matches Roadmap **Need review**
+ * (`getReviewStaleWindowHours` by owner autonomy), not raw P-tier.
+ */
+function collectReviewItems(
   hierarchy: CompanyWithGoals[],
   peopleById: Map<string, Person>
 ): ReviewItem[] {
   const out: ReviewItem[] = [];
   for (const c of hierarchy) {
     for (const g of c.goals) {
-      if (g.priority === "P0" || g.priority === "P1") {
-        out.push({
-          kind: "goal",
-          id: g.id,
+      out.push({
+        kind: "goal",
+        id: g.id,
+        companyId: c.id,
+        companyName: c.name,
+        companyShortName: c.shortName,
+        name: g.description,
+        ownerId: g.ownerId,
+        priority: g.priority,
+        status: g.status,
+        lastReviewed: g.lastReviewed,
+        atRisk: g.atRisk,
+        spotlight: g.spotlight,
+        confidence: computeGoalConfidence(g.projects, peopleById, g.costOfDelay),
+      });
+      for (const p of g.projects) {
+        const projectItem: ReviewItem = {
+          kind: "project",
+          id: p.id,
+          goalId: g.id,
           companyId: c.id,
           companyName: c.name,
           companyShortName: c.shortName,
-          name: g.description,
-          ownerId: g.ownerId,
-          priority: g.priority,
-          status: g.status,
-          lastReviewed: g.lastReviewed,
-          atRisk: g.atRisk,
-          spotlight: g.spotlight,
-          confidence: computeGoalConfidence(g.projects, peopleById),
-        });
-      }
-      for (const p of g.projects) {
-        if (p.priority === "P0" || p.priority === "P1") {
-          out.push({
-            kind: "project",
-            id: p.id,
-            goalId: g.id,
-            companyId: c.id,
-            companyName: c.name,
-            companyShortName: c.shortName,
-            goalLabel: g.description,
-            name: p.name,
-            ownerId: p.ownerId,
-            priority: p.priority,
-            status: p.status,
-            lastReviewed: p.lastReviewed,
-            atRisk: p.atRisk,
-            spotlight: p.spotlight,
-            confidence: computeProjectConfidenceFromProject(p, peopleById),
-          });
-        }
+          goalLabel: g.description,
+          name: p.name,
+          ownerId: p.ownerId,
+          priority: p.priority,
+          status: p.status,
+          lastReviewed: p.lastReviewed,
+          atRisk: p.atRisk,
+          spotlight: p.spotlight,
+          confidence: computeProjectConfidenceFromProject(p, peopleById),
+        };
+        if (!itemReviewStale(projectItem, peopleById)) continue;
+        out.push(projectItem);
       }
     }
   }
 
-  const prOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
   out.sort((a, b) => {
-    const pa = prOrder[a.priority] ?? 9;
-    const pb = prOrder[b.priority] ?? 9;
+    const pa = priorityRank(a.priority);
+    const pb = priorityRank(b.priority);
     if (pa !== pb) return pa - pb;
     const staleA = itemReviewStale(a, peopleById) ? 0 : 1;
     const staleB = itemReviewStale(b, peopleById) ? 0 : 1;
@@ -280,6 +342,255 @@ function collectP0P1Items(
     return a.name.localeCompare(b.name);
   });
   return out;
+}
+
+function ReviewEntityColumn({
+  title,
+  titleClassName,
+  children,
+}: {
+  title: string;
+  titleClassName: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex min-h-0 min-w-0 flex-col rounded-xl border border-zinc-800/90 bg-zinc-950/40 p-4">
+      <h3
+        className={cn(
+          "mb-3 shrink-0 text-xs font-bold uppercase tracking-wide",
+          titleClassName
+        )}
+      >
+        {title}
+      </h3>
+      <div className="min-h-0 min-w-0 flex-1 space-y-4">{children}</div>
+    </section>
+  );
+}
+
+function ReviewNotesScrollColumn({
+  entryCount,
+  children,
+}: {
+  entryCount: number;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      aria-label="Review notes"
+      className="flex min-h-[min(36vh,20rem)] flex-col rounded-xl border border-zinc-800/90 bg-zinc-950/50 p-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-9rem)]"
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 px-4 py-3">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-400">
+          Review notes
+        </h3>
+        {entryCount > 0 ? (
+          <span className="text-[11px] tabular-nums text-zinc-500">
+            {entryCount}
+          </span>
+        ) : null}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function GoalFieldsEditor({
+  goal,
+  people,
+  ownerWorkloadMap,
+  priorityOptions,
+  goalStatusOptions,
+  confidenceScore,
+  confidenceExplanation,
+  projectNamesSummary,
+  refresh,
+}: {
+  goal: GoalWithProjects;
+  people: Person[];
+  ownerWorkloadMap: Map<string, { total: number; p0: number; p1: number }>;
+  priorityOptions: { value: string; label: string }[];
+  goalStatusOptions: { value: string; label: string }[];
+  confidenceScore: number;
+  confidenceExplanation: ConfidenceExplanation | null;
+  projectNamesSummary: string | null;
+  refresh: () => void;
+}) {
+  return (
+    <>
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">DRI</p>
+        <OwnerPickerCell
+          people={people}
+          value={goal.ownerId}
+          onSave={(ownerId) =>
+            void updateGoal(goal.id, { ownerId }).then(refresh)
+          }
+          priority={goal.priority}
+          workloadMap={ownerWorkloadMap}
+          restrictToGoalDriEligible
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+        <div className="min-w-0">
+          <p className="text-[11px] text-zinc-500 mb-1">Priority</p>
+          <InlineEditCell
+            value={goal.priority}
+            onSave={(priority) =>
+              void updateGoal(goal.id, {
+                priority: priority as Priority,
+              }).then(refresh)
+            }
+            type="select"
+            options={priorityOptions}
+            displayClassName={cn(
+              "font-medium",
+              prioritySelectTextClass(goal.priority)
+            )}
+          />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] text-zinc-500 mb-1">Status</p>
+          <InlineEditCell
+            value={goal.status}
+            onSave={(status) =>
+              void updateGoal(goal.id, {
+                status: status as GoalStatus,
+              }).then(refresh)
+            }
+            type="select"
+            options={goalStatusOptions}
+          />
+        </div>
+        <div className="col-span-2 min-w-0 lg:col-span-1 lg:justify-self-start lg:pb-0.5">
+          <p className="text-[11px] text-zinc-500 mb-1 lg:sr-only">Execution</p>
+          <button
+            type="button"
+            onClick={() =>
+              void updateGoal(goal.id, {
+                executionMode: goal.executionMode === "Sync" ? "Async" : "Sync",
+              }).then(refresh)
+            }
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+              goal.executionMode === "Sync"
+                ? "bg-purple-500/20 text-purple-300"
+                : "bg-cyan-500/20 text-cyan-300"
+            )}
+          >
+            {goal.executionMode === "Sync" ? (
+              <Layers className="h-3 w-3" />
+            ) : (
+              <ArrowRightLeft className="h-3 w-3" />
+            )}
+            {goal.executionMode}
+          </button>
+        </div>
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">Goal (title)</p>
+        <InlineEditCell
+          value={goal.description}
+          onSave={(description) =>
+            void updateGoal(goal.id, { description }).then(refresh)
+          }
+          displayClassName="font-medium text-zinc-100"
+        />
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] text-zinc-500 mb-1">Target / scope</p>
+          <InlineEditCell
+            value={goal.measurableTarget}
+            onSave={(measurableTarget) =>
+              void updateGoal(goal.id, { measurableTarget }).then(refresh)
+            }
+            placeholder="Add description"
+            displayClassName="text-zinc-100 font-medium"
+            displayTruncateSingleLine
+          />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] text-zinc-500 mb-1">Current value</p>
+          <InlineEditCell
+            value={goal.currentValue}
+            onSave={(currentValue) =>
+              void updateGoal(goal.id, { currentValue }).then(refresh)
+            }
+            placeholder="Current value"
+            displayClassName="text-zinc-100 font-medium"
+            displayTruncateSingleLine
+          />
+        </div>
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">Why it matters</p>
+        <InlineEditCell
+          value={goal.whyItMatters}
+          onSave={(whyItMatters) =>
+            void updateGoal(goal.id, { whyItMatters }).then(refresh)
+          }
+          placeholder="What we stand to gain if we achieve this"
+          displayClassName="text-zinc-100 font-medium"
+          displayTruncateSingleLine
+        />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">Cost of delay</p>
+        <InlineEditCell
+          value={String(goal.costOfDelay)}
+          onSave={(v) =>
+            void updateGoal(goal.id, {
+              costOfDelay: parseScoreBand(v),
+            }).then(refresh)
+          }
+          type="select"
+          options={SCORE_BAND_OPTIONS}
+        />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">Slack channel</p>
+        <InlineEditCell
+          variant="plain"
+          value={goal.slackChannel}
+          onSave={(slackChannel) =>
+            void updateGoal(goal.id, { slackChannel }).then(refresh)
+          }
+          formatDisplay={(v) => formatSlackChannelHash(v)}
+          placeholder="vd-sales"
+          displayClassName="text-zinc-300 font-medium min-w-0 not-italic"
+          emptyLabel="Add channel"
+          displayTitle="Slack channel — click to edit"
+        />
+      </div>
+
+      <div className="flex justify-end">
+        <AutoConfidencePercent
+          score={confidenceScore}
+          explanation={
+            confidenceExplanation ??
+            fallbackConfidenceExplanation(
+              "Confidence could not be resolved for this item."
+            )
+          }
+        />
+      </div>
+
+      {projectNamesSummary ? (
+        <p className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3 py-2 text-xs leading-relaxed text-zinc-300">
+          {projectNamesSummary}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 interface ReviewModeProps {
@@ -294,22 +605,132 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     [people]
   );
 
+  const peopleSorted = useMemo(
+    () => sortPeopleLikeTeamRoster(people),
+    [people]
+  );
+
+  const companiesForFilter = useMemo(
+    () =>
+      groupCompaniesByRevenueTier(hierarchy)
+        .flatMap((g) => g.companies)
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          shortName: c.shortName,
+          logoPath: c.logoPath,
+          revenue: c.revenue,
+        })),
+    [hierarchy]
+  );
+
+  const [companyFilterIds, setCompanyFilterIds] = useState<string[]>([]);
+  const [ownerFilterIds, setOwnerFilterIds] = useState<string[]>([]);
+  const [priorityFilterIds, setPriorityFilterIds] = useState<string[]>([]);
+
+  const hierarchyAfterCompany = useMemo(
+    () =>
+      filterTrackerHierarchyByCompanyIds(
+        hierarchy,
+        companyFilterIds.length > 0 ? companyFilterIds : null
+      ),
+    [hierarchy, companyFilterIds]
+  );
+
+  const hierarchyAfterOwner = useMemo(
+    () =>
+      filterTrackerHierarchyByOwner(
+        hierarchyAfterCompany,
+        ownerFilterIds.length > 0 ? ownerFilterIds : null,
+        people
+      ),
+    [hierarchyAfterCompany, ownerFilterIds, people]
+  );
+
+  const hierarchyFiltered = useMemo(
+    () =>
+      filterTrackerHierarchyByPriority(
+        hierarchyAfterOwner,
+        priorityFilterIds.length > 0 ? priorityFilterIds : null
+      ),
+    [hierarchyAfterOwner, priorityFilterIds]
+  );
+
   const companyById = useMemo(
     () => new Map(hierarchy.map((c) => [c.id, c])),
     [hierarchy]
   );
 
+  const ownerWorkloadMap = useMemo(() => {
+    const m = new Map<string, { total: number; p0: number; p1: number }>();
+    for (const company of hierarchy) {
+      for (const goal of company.goals) {
+        for (const project of goal.projects) {
+          if (!project.ownerId) continue;
+          let entry = m.get(project.ownerId);
+          if (!entry) {
+            entry = { total: 0, p0: 0, p1: 0 };
+            m.set(project.ownerId, entry);
+          }
+          entry.total++;
+          if (project.priority === "P0") entry.p0++;
+          else if (project.priority === "P1") entry.p1++;
+        }
+      }
+    }
+    return m;
+  }, [hierarchy]);
+
   const items = useMemo(
-    () => collectP0P1Items(hierarchy, peopleById),
-    [hierarchy, peopleById]
+    () => collectReviewItems(hierarchyFiltered, peopleById),
+    [hierarchyFiltered, peopleById]
   );
 
   const [index, setIndex] = useState(0);
+
+  const reviewFiltersKey = useMemo(
+    () =>
+      JSON.stringify([companyFilterIds, ownerFilterIds, priorityFilterIds]),
+    [companyFilterIds, ownerFilterIds, priorityFilterIds]
+  );
+  const prevReviewFiltersKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevReviewFiltersKey.current === null) {
+      prevReviewFiltersKey.current = reviewFiltersKey;
+      return;
+    }
+    if (prevReviewFiltersKey.current !== reviewFiltersKey) {
+      prevReviewFiltersKey.current = reviewFiltersKey;
+      setIndex(0);
+    }
+  }, [reviewFiltersKey]);
+
+  const reviewFiltersActive =
+    companyFilterIds.length > 0 ||
+    ownerFilterIds.length > 0 ||
+    priorityFilterIds.length > 0;
+
+  const clearReviewFilters = useCallback(() => {
+    setCompanyFilterIds([]);
+    setOwnerFilterIds([]);
+    setPriorityFilterIds([]);
+  }, []);
+
   const [sessionReviewed, setSessionReviewed] = useState(0);
   const [done, setDone] = useState(false);
+  const [reviewNoteDraft, setReviewNoteDraft] = useState("");
+  const [milestoneNameFocusId, setMilestoneNameFocusId] = useState<
+    string | null
+  >(null);
 
   const current = items[index];
   const total = items.length;
+
+  useEffect(() => {
+    setReviewNoteDraft("");
+    setMilestoneNameFocusId(null);
+  }, [current?.id, current?.kind]);
+
   const currentCompany = current
     ? companyById.get(current.companyId)
     : undefined;
@@ -352,11 +773,96 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     return null;
   }, [current, hierarchy]);
 
-  const p0p1ProjectsUnderGoal = useMemo(() => {
+  const parentGoalForCurrentProject = useMemo((): GoalWithProjects | null => {
+    if (!current || current.kind !== "project") return null;
+    for (const c of hierarchy) {
+      const g = c.goals.find((x) => x.id === current.goalId);
+      if (g) return g;
+    }
+    return null;
+  }, [current, hierarchy]);
+
+  const goalReviewWarnings = useMemo(() => {
     if (!currentGoalFromHierarchy) return [];
-    return currentGoalFromHierarchy.projects.filter(
-      (p) => p.priority === "P0" || p.priority === "P1"
+    return getGoalHeaderWarnings(currentGoalFromHierarchy, people);
+  }, [currentGoalFromHierarchy, people]);
+
+  const projectReviewWarnings = useMemo(() => {
+    if (!currentProjectFromHierarchy) return [];
+    return getTrackerProjectWarnings(
+      currentProjectFromHierarchy,
+      parentGoalForCurrentProject?.costOfDelay,
+      people
     );
+  }, [currentProjectFromHierarchy, parentGoalForCurrentProject, people]);
+
+  const projectCloseWatch = useMemo(() => {
+    if (!currentProjectFromHierarchy) return false;
+    return projectMatchesCloseWatch(currentProjectFromHierarchy, people);
+  }, [currentProjectFromHierarchy, people]);
+
+  const lowAutonomyProjectOwnerHint = useMemo(() => {
+    if (!currentProjectFromHierarchy) return null;
+    const ownerPerson = people.find(
+      (p) => p.id === currentProjectFromHierarchy.ownerId
+    );
+    if (!ownerPerson || isFounderPerson(ownerPerson)) return null;
+    const level = clampAutonomy(ownerPerson.autonomyScore);
+    if (level > 2) return null;
+    return AUTONOMY_GROUP_LABEL[level].title;
+  }, [currentProjectFromHierarchy, people]);
+
+  const parentProjectsSorted = useMemo(() => {
+    if (!parentGoalForCurrentProject) return [];
+    return [...parentGoalForCurrentProject.projects].sort((a, b) => {
+      const d = priorityRank(a.priority) - priorityRank(b.priority);
+      if (d !== 0) return d;
+      return a.name.localeCompare(b.name);
+    });
+  }, [parentGoalForCurrentProject]);
+
+  const parentGoalConfidence = useMemo(() => {
+    if (!parentGoalForCurrentProject) return 0;
+    return computeGoalConfidence(
+      parentGoalForCurrentProject.projects,
+      peopleById,
+      parentGoalForCurrentProject.costOfDelay
+    );
+  }, [parentGoalForCurrentProject, peopleById]);
+
+  const parentGoalConfidenceExplanation = useMemo(() => {
+    if (!parentGoalForCurrentProject) return null;
+    return explainGoalConfidence(parentGoalForCurrentProject, peopleById);
+  }, [parentGoalForCurrentProject, peopleById]);
+
+  const parentGoalHeaderWarnings = useMemo(() => {
+    if (!parentGoalForCurrentProject) return [];
+    return getGoalHeaderWarnings(parentGoalForCurrentProject, people);
+  }, [parentGoalForCurrentProject, people]);
+
+  const syncDueDateMinYmdForReviewProject = useMemo(() => {
+    if (!parentGoalForCurrentProject || !currentProjectFromHierarchy) {
+      return undefined;
+    }
+    if (parentGoalForCurrentProject.executionMode !== "Sync") {
+      return undefined;
+    }
+    const ix = parentGoalForCurrentProject.projects.findIndex(
+      (p) => p.id === currentProjectFromHierarchy.id
+    );
+    if (ix <= 0) return undefined;
+    return minDueDateYmdAfterPreviousProject(
+      parentGoalForCurrentProject.projects[ix - 1]?.targetDate ?? ""
+    );
+  }, [parentGoalForCurrentProject, currentProjectFromHierarchy]);
+
+  const projectsUnderGoalByPriority = useMemo(() => {
+    if (!currentGoalFromHierarchy) return [];
+    return [...currentGoalFromHierarchy.projects].sort((a, b) => {
+      const d = priorityRank(a.priority) - priorityRank(b.priority);
+      if (d !== 0) return d;
+      return a.name.localeCompare(b.name);
+    });
   }, [currentGoalFromHierarchy]);
 
   const nextPendingMilestone = useMemo(() => {
@@ -369,10 +875,27 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     [current, peopleById]
   );
 
-  const projectTargetPresentation = useMemo(() => {
-    if (!currentProjectFromHierarchy) return null;
-    return projectTargetDatePresentation(currentProjectFromHierarchy.targetDate);
-  }, [currentProjectFromHierarchy]);
+  /** Human-readable cadence for the stale banner (matches review window logic). */
+  const staleWindowHint = useMemo(() => {
+    if (!current) return null;
+    const ownerId = current.ownerId.trim();
+    const autonomy = ownerId
+      ? peopleById.get(ownerId)?.autonomyScore
+      : undefined;
+    const hours = getReviewStaleWindowHours(
+      current.kind === "goal" ? "goal" : "project",
+      autonomy
+    );
+    if (hours < 48) {
+      return `${hours} hours`;
+    }
+    const days = hours / 24;
+    const rounded = Math.round(days * 10) / 10;
+    const whole = Math.round(rounded) === rounded;
+    if (whole && rounded === 1) return "1 day";
+    if (whole) return `${rounded} days`;
+    return `about ${rounded} days`;
+  }, [current, peopleById]);
 
   const milestoneProgress = useMemo(() => {
     if (!currentProjectFromHierarchy) return null;
@@ -441,13 +964,16 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [goPrev, goNext, done, total]);
 
-  const onMarkReviewed = useCallback(async () => {
+  const onMarkReviewed = useCallback(async (noteFromComposer?: string) => {
     if (!current) return;
+    const trimmed = noteFromComposer?.trim();
+    const note = trimmed && trimmed.length > 0 ? trimmed : undefined;
     if (current.kind === "goal") {
-      await markGoalReviewed(current.id);
+      await markGoalReviewed(current.id, note);
     } else {
-      await markProjectReviewed(current.id);
+      await markProjectReviewed(current.id, note);
     }
+    setReviewNoteDraft("");
     router.refresh();
     setSessionReviewed((n) => n + 1);
     if (index < total - 1) setIndex((i) => i + 1);
@@ -457,20 +983,6 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     }
   }, [current, index, total, router]);
 
-  const bulkMarkAllReviewed = useCallback(async () => {
-    for (const it of items) {
-      if (it.kind === "goal") {
-        await markGoalReviewed(it.id);
-      } else {
-        await markProjectReviewed(it.id);
-      }
-    }
-    router.refresh();
-    setSessionReviewed(items.length);
-    clearReviewIndexStorage();
-    setDone(true);
-  }, [items, router]);
-
   if (hierarchy.length === 0) {
     return (
       <div className="px-6 py-12">
@@ -478,9 +990,9 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
           <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
             <ScanEye className="h-7 w-7 text-zinc-500" />
           </div>
-          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Nothing to review</h2>
+          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Nothing in the review queue yet</h2>
           <p className="text-sm text-zinc-500 text-center max-w-md">
-            The review queue pulls in your P0 and P1 goals and projects. Add companies and create goals on the{" "}
+            When you have goals and projects, this page steps through them in priority order. Add companies and create goals on the{" "}
             <Link href="/" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
               Roadmap
             </Link>{" "}
@@ -493,9 +1005,47 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
 
   if (total === 0) {
     return (
-      <div className="px-6 py-12">
+      <div className="mx-auto w-full max-w-7xl px-6 py-12">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <h1 className="text-xl font-bold text-zinc-100">Review</h1>
+          <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+            <div className="min-w-0 w-[min(100%,12rem)] sm:w-[12rem]">
+              <CompanyFilterMultiSelect
+                companies={companiesForFilter}
+                selectedIds={companyFilterIds}
+                onChange={setCompanyFilterIds}
+              />
+            </div>
+            <div className="min-w-0 w-[min(100%,12rem)] sm:w-[12rem]">
+              <OwnerFilterMultiSelect
+                people={peopleSorted}
+                selectedIds={ownerFilterIds}
+                onChange={setOwnerFilterIds}
+              />
+            </div>
+            <div className="min-w-0 w-[min(100%,10rem)] sm:w-[10rem]">
+              <PriorityFilterMultiSelect
+                selectedIds={priorityFilterIds}
+                onChange={setPriorityFilterIds}
+              />
+            </div>
+            {reviewFiltersActive ? (
+              <button
+                type="button"
+                onClick={clearReviewFilters}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+                title="Clear company, owner, and priority filters"
+              >
+                <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Clear filters
+              </button>
+            ) : null}
+          </div>
+        </div>
         <p className="text-zinc-500 text-sm">
-          No P0 or P1 goals or projects in the portfolio.
+          {reviewFiltersActive
+            ? "No review items match the current filters. Adjust or clear filters to see the queue."
+            : "No goals or projects in the portfolio."}
         </p>
       </div>
     );
@@ -528,26 +1078,86 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     );
   }
 
-  const statusOptions = StatusEnum.options.map((s) => ({ value: s, label: s }));
+  const goalStatusOptions = GoalStatusEnum.options.map((s) => ({
+    value: s,
+    label: s,
+  }));
+  const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
+  const projectTypeOptions = ProjectTypeEnum.options.map((t) => ({
+    value: t,
+    label: t,
+  }));
 
   return (
-    <div className="px-6 pb-10 max-w-3xl">
-      <header className="mb-8">
-        <h1 className="text-xl font-bold text-zinc-100">Review mode</h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          P0/P1 items are ordered with stale reviews first. Path: company → goal → project; milestones
-          appear on project steps. Keyboard:{" "}
-          <kbd className="rounded border border-zinc-600 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
-            ←
-          </kbd>{" "}
-          <kbd className="rounded border border-zinc-600 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300">
-            →
-          </kbd>{" "}
-          between items (not while a dropdown is focused).
-        </p>
-      </header>
+    <div className="mx-auto w-full max-w-7xl px-6 pt-8 pb-10 sm:pt-10">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-zinc-100">Review</h1>
+          <p className="text-sm text-zinc-500 tabular-nums mt-1">
+            {index + 1} of {total}
+            {sessionReviewed > 0 ? (
+              <span className="text-zinc-600">
+                {" "}· {sessionReviewed} reviewed
+              </span>
+            ) : null}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end justify-end gap-2 sm:gap-3">
+          <div className="min-w-0 w-[min(100%,12rem)] sm:w-[12rem]">
+            <CompanyFilterMultiSelect
+              companies={companiesForFilter}
+              selectedIds={companyFilterIds}
+              onChange={setCompanyFilterIds}
+            />
+          </div>
+          <div className="min-w-0 w-[min(100%,12rem)] sm:w-[12rem]">
+            <OwnerFilterMultiSelect
+              people={peopleSorted}
+              selectedIds={ownerFilterIds}
+              onChange={setOwnerFilterIds}
+            />
+          </div>
+          <div className="min-w-0 w-[min(100%,10rem)] sm:w-[10rem]">
+            <PriorityFilterMultiSelect
+              selectedIds={priorityFilterIds}
+              onChange={setPriorityFilterIds}
+            />
+          </div>
+          {reviewFiltersActive ? (
+            <button
+              type="button"
+              onClick={clearReviewFilters}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors mb-px"
+              title="Clear company, owner, and priority filters"
+            >
+              <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Clear
+            </button>
+          ) : null}
+          <div className="flex shrink-0 items-center gap-2 border-l border-zinc-800 pl-2 sm:pl-3">
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={index === 0}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 transition-colors hover:bg-zinc-800/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-900"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={index >= total - 1}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 transition-colors hover:bg-zinc-800/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-900"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
 
-      <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+      <div className="mb-5 h-1 w-full overflow-hidden rounded-full bg-zinc-800">
         <div
           className="h-full rounded-full bg-emerald-500/75 transition-[width] duration-300 ease-out"
           style={{ width: `${((index + 1) / total) * 100}%` }}
@@ -555,37 +1165,10 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
           aria-valuenow={index + 1}
           aria-valuemin={1}
           aria-valuemax={total}
-          aria-label={`Review progress: item ${index + 1} of ${total}`}
         />
       </div>
 
-      <div className="flex items-center justify-between gap-4 mb-4">
-        <p className="text-sm text-zinc-400 tabular-nums">
-          {index + 1} of {total}
-        </p>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={goPrev}
-            disabled={index === 0}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 transition-colors hover:bg-zinc-800/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-900"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={index >= total - 1}
-            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 transition-colors hover:bg-zinc-800/90 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-900"
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <details className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950/25 px-3 py-2 text-sm">
+      <details className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/25 px-3 py-2 text-sm">
         <summary className="cursor-pointer select-none text-zinc-400 hover:text-zinc-300">
           Jump to item ({total})
         </summary>
@@ -639,230 +1222,514 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
       </details>
 
       {current ? (
-        <div
-          className={cn(
-            "group rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-5",
-            current.kind === "goal" ? "border-l-4 border-l-violet-500/50" : "border-l-4 border-l-cyan-500/40",
-            isCurrentStale && "ring-1 ring-amber-500/20"
-          )}
-        >
-          {isCurrentStale ? (
-            <div className="rounded-md border border-amber-500/35 bg-amber-950/35 px-3 py-2 text-xs text-amber-100/90">
-              Review is past cadence for this owner’s lane (autonomy-based window).
-            </div>
-          ) : null}
-
-          <nav
-            aria-label="Portfolio context"
-            className="flex flex-wrap items-start gap-3 sm:items-center sm:justify-between"
+        <div className="space-y-5">
+          <div
+            className={cn(
+              "rounded-xl border p-4 lg:p-5",
+              current.atRisk &&
+                "border-amber-700/50 border-l-4 border-l-amber-400 bg-amber-950/25 shadow-[inset_8px_0_0_0_rgba(251,191,36,0.1)] ring-1 ring-amber-500/25",
+              !current.atRisk &&
+                current.spotlight &&
+                "border-emerald-800/50 border-l-4 border-l-emerald-400/80 bg-emerald-950/25 shadow-[inset_8px_0_0_0_rgba(52,211,153,0.1)] ring-1 ring-emerald-500/25",
+              !current.atRisk &&
+                !current.spotlight &&
+                "border-zinc-800 bg-zinc-900/50",
+              !current.atRisk &&
+                !current.spotlight &&
+                current.kind === "goal" &&
+                "border-l-4 border-l-violet-500/55",
+              !current.atRisk &&
+                !current.spotlight &&
+                current.kind === "project" &&
+                "border-l-4 border-l-cyan-500/50",
+              isCurrentStale && "ring-1 ring-amber-400/35"
+            )}
           >
-            <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            {isCurrentStale ? (
+              <p className="mb-4 rounded-md border border-amber-500/35 bg-amber-950/35 px-3 py-2 text-xs text-amber-200/90">
+                Check-in overdue{staleWindowHint ? ` (cadence: every ${staleWindowHint})` : ""}
+              </p>
+            ) : null}
+
+            <ReviewItemContextBar
+              kind={current.kind}
+              goalLabel={current.kind === "project" ? current.goalLabel : undefined}
+              atRisk={current.atRisk}
+              spotlight={current.spotlight}
+              showCloseWatch={current.kind === "project" ? projectCloseWatch : false}
+              warnings={
+                current.kind === "goal"
+                  ? goalReviewWarnings
+                  : projectReviewWarnings
+              }
+            />
+
+            <div className="mt-4 flex flex-wrap items-center gap-2.5">
               <ReviewCompanyLogo
                 logoPath={currentCompany?.logoPath}
                 title={current.companyName}
               />
-              <p className="min-w-0 flex-1 text-sm leading-snug text-balance">
-                <span className="font-mono tabular-nums text-zinc-500">
-                  {current.priority}
-                </span>
-                <span className="text-zinc-600"> · </span>
-                <span className="text-zinc-300">{current.companyShortName}</span>
-                {current.kind === "project" ? (
-                  <>
-                    <span className="text-zinc-600"> · </span>
-                    <span className="text-zinc-400">{current.goalLabel}</span>
-                    <span className="text-zinc-600"> · </span>
-                    <span className="font-semibold text-zinc-100">{current.name}</span>
-                    {projectTargetPresentation &&
-                    projectTargetPresentation.label !== "—" ? (
-                      <>
-                        <span className="text-zinc-600"> · </span>
-                        <span
-                          className={cn(
-                            "text-zinc-400",
-                            projectTargetPresentation.overdue &&
-                              "font-medium text-amber-400/95"
-                          )}
-                        >
-                          {projectTargetPresentation.label}
-                          {projectTargetPresentation.overdue ? " (overdue)" : ""}
-                        </span>
-                      </>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <span className="text-zinc-600"> · </span>
-                    <span className="font-semibold text-zinc-100">{current.name}</span>
-                  </>
-                )}
-              </p>
+              <span className="text-sm text-zinc-300">{current.companyShortName}</span>
             </div>
-            <ReviewOwnerAvatar
-              person={
-                current.ownerId.trim()
-                  ? peopleById.get(current.ownerId.trim())
-                  : undefined
-              }
-              ownerId={current.ownerId}
-            />
-          </nav>
 
-          {current.kind === "goal" && p0p1ProjectsUnderGoal.length > 0 ? (
-            <p className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3 py-2 text-xs leading-relaxed text-zinc-300">
-              {p0p1ProjectsUnderGoal.map((p) => p.name).join(" · ")}
-            </p>
+            {current.kind === "project" ? (
+              <p className="mt-4 text-[11px] leading-relaxed text-zinc-500">
+                <span className="font-semibold text-violet-400/95">Goal</span>
+                <span className="mx-2 text-zinc-600">→</span>
+                <span className="font-semibold text-cyan-400/95">Project</span>
+                <span className="mx-2 text-zinc-600">→</span>
+                <span className="text-zinc-500">Review notes</span>
+              </p>
+            ) : null}
+          </div>
+
+          {current.kind === "goal" && currentGoalFromHierarchy ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_min(20rem,32vw)] lg:items-stretch">
+                <ReviewEntityColumn title="Goal" titleClassName="text-violet-300/95">
+                  <GoalFieldsEditor
+                    goal={currentGoalFromHierarchy}
+                    people={people}
+                    ownerWorkloadMap={ownerWorkloadMap}
+                    priorityOptions={priorityOptions}
+                    goalStatusOptions={goalStatusOptions}
+                    confidenceScore={current.confidence}
+                    confidenceExplanation={currentConfidenceExplanation}
+                    projectNamesSummary={
+                      projectsUnderGoalByPriority.length > 0
+                        ? projectsUnderGoalByPriority.map((p) => p.name).join(" · ")
+                        : null
+                    }
+                    refresh={() => router.refresh()}
+                  />
+                </ReviewEntityColumn>
+
+                <ReviewNotesScrollColumn
+                  entryCount={currentGoalFromHierarchy.reviewLog?.length ?? 0}
+                >
+                  <ReviewLogPanel
+                    embedded
+                    variant="sidebar"
+                    entries={currentGoalFromHierarchy.reviewLog}
+                    draft={reviewNoteDraft}
+                    onDraftChange={setReviewNoteDraft}
+                    onMarkReviewed={onMarkReviewed}
+                  />
+                </ReviewNotesScrollColumn>
+              </div>
+
+              <div className="flex flex-col gap-4 border-t border-zinc-800/80 pt-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <p className="text-xs text-zinc-500">
+                  Reviewed{" "}
+                  {currentGoalFromHierarchy.lastReviewed.trim()
+                    ? formatLastReviewedHint(currentGoalFromHierarchy.lastReviewed)
+                    : "never"}
+                </p>
+                <ExecFlagMenu
+                  atRisk={currentGoalFromHierarchy.atRisk}
+                  spotlight={currentGoalFromHierarchy.spotlight}
+                  entityLabel="Goal"
+                  onCommit={(flags) => {
+                    void updateGoal(currentGoalFromHierarchy.id, flags).then(() =>
+                      router.refresh()
+                    );
+                  }}
+                />
+              </div>
+            </>
           ) : null}
 
-          {current.kind === "project" && currentProjectFromHierarchy ? (
-            <div className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3 py-2.5 text-xs">
-              {milestoneProgress && milestoneProgress.milestoneCount > 0 ? (
-                <div className="mb-2 flex items-center gap-2">
-                  <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-emerald-500/60 transition-[width]"
-                      style={{
-                        width: `${(milestoneProgress.doneCount / milestoneProgress.milestoneCount) * 100}%`,
-                      }}
-                    />
+          {current.kind === "project" &&
+          currentProjectFromHierarchy &&
+          parentGoalForCurrentProject ? (
+            <>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(11rem,0.95fr)_minmax(12rem,1.05fr)_min(19rem,26vw)] xl:gap-4 xl:items-stretch">
+                <ReviewEntityColumn title="Goal" titleClassName="text-violet-300/95">
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                    {parentGoalForCurrentProject.atRisk ? (
+                      <span
+                        className="whitespace-nowrap rounded-md border border-amber-400/45 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300/95"
+                        title="Marked at risk"
+                      >
+                        At risk
+                      </span>
+                    ) : null}
+                    {parentGoalForCurrentProject.spotlight ? (
+                      <span
+                        className="whitespace-nowrap rounded-md border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/95"
+                        title="Spotlight — win or momentum"
+                      >
+                        Spotlight
+                      </span>
+                    ) : null}
+                    {parentGoalHeaderWarnings.length === 1 ? (
+                      <span
+                        className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
+                        title={parentGoalHeaderWarnings[0].title}
+                      >
+                        {parentGoalHeaderWarnings[0].label}
+                      </span>
+                    ) : null}
+                    {parentGoalHeaderWarnings.length > 1 ? (
+                      <WarningsBadge warnings={parentGoalHeaderWarnings} />
+                    ) : null}
                   </div>
-                  <span className="shrink-0 tabular-nums text-[10px] text-zinc-500">
-                    {milestoneProgress.doneCount}/{milestoneProgress.milestoneCount} done
-                  </span>
+                  <GoalFieldsEditor
+                    goal={parentGoalForCurrentProject}
+                    people={people}
+                    ownerWorkloadMap={ownerWorkloadMap}
+                    priorityOptions={priorityOptions}
+                    goalStatusOptions={goalStatusOptions}
+                    confidenceScore={parentGoalConfidence}
+                    confidenceExplanation={parentGoalConfidenceExplanation}
+                    projectNamesSummary={
+                      parentProjectsSorted.length > 0
+                        ? parentProjectsSorted.map((p) => p.name).join(" · ")
+                        : null
+                    }
+                    refresh={() => router.refresh()}
+                  />
+                </ReviewEntityColumn>
+
+                <ReviewEntityColumn title="Project" titleClassName="text-cyan-300/95">
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-1">Owner</p>
+                <OwnerPickerCell
+                  people={people}
+                  value={currentProjectFromHierarchy.ownerId}
+                  onSave={(ownerId) =>
+                    void updateProject(currentProjectFromHierarchy.id, {
+                      ownerId,
+                    }).then(() => router.refresh())
+                  }
+                  priority={currentProjectFromHierarchy.priority}
+                  workloadMap={ownerWorkloadMap}
+                />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-1">Project name</p>
+                <InlineEditCell
+                  value={currentProjectFromHierarchy.name}
+                  onSave={(name) =>
+                    void updateProject(currentProjectFromHierarchy.id, {
+                      name,
+                    }).then(() => router.refresh())
+                  }
+                  displayClassName="font-semibold text-zinc-100"
+                />
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-1">Description</p>
+                <InlineEditCell
+                  value={currentProjectFromHierarchy.description}
+                  onSave={(description) =>
+                    void updateProject(currentProjectFromHierarchy.id, {
+                      description,
+                    }).then(() => router.refresh())
+                  }
+                  placeholder="Outcome or scope"
+                  displayClassName="text-zinc-100 font-medium"
+                  displayTruncateSingleLine
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Priority</p>
+                  <InlineEditCell
+                    value={currentProjectFromHierarchy.priority}
+                    onSave={(priority) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        priority: priority as Priority,
+                      }).then(() => router.refresh())
+                    }
+                    type="select"
+                    options={priorityOptions}
+                    displayClassName={cn(
+                      "font-medium",
+                      prioritySelectTextClass(currentProjectFromHierarchy.priority)
+                    )}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Status</p>
+                  <InlineEditCell
+                    value={currentProjectFromHierarchy.status}
+                    onSave={(status) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        status: status as ProjectStatus,
+                      }).then(() => router.refresh())
+                    }
+                    type="select"
+                    options={PROJECT_STATUS_SELECT_OPTIONS}
+                    formatDisplay={(v) => <ProjectStatusPill status={v} />}
+                    selectPresentation="always"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Type</p>
+                  <InlineEditCell
+                    value={currentProjectFromHierarchy.type}
+                    onSave={(type) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        type: type as ProjectType,
+                      }).then(() => router.refresh())
+                    }
+                    type="select"
+                    options={projectTypeOptions}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Complexity</p>
+                  <InlineEditCell
+                    value={String(currentProjectFromHierarchy.complexityScore)}
+                    onSave={(v) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        complexityScore: parseScoreBand(v),
+                      }).then(() => router.refresh())
+                    }
+                    type="select"
+                    options={SCORE_BAND_OPTIONS}
+                  />
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-1">Definition of done</p>
+                <InlineEditCell
+                  value={currentProjectFromHierarchy.definitionOfDone}
+                  onSave={(definitionOfDone) =>
+                    void updateProject(currentProjectFromHierarchy.id, {
+                      definitionOfDone,
+                    }).then(() => router.refresh())
+                  }
+                  placeholder="Definition of done"
+                  displayClassName="text-zinc-100 font-medium"
+                  displayTruncateSingleLine
+                />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Start date</p>
+                  <InlineEditCell
+                    value={currentProjectFromHierarchy.startDate}
+                    onSave={(startDate) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        startDate,
+                      }).then(() => router.refresh())
+                    }
+                    type="date"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[11px] text-zinc-500 mb-1">Due date</p>
+                  <InlineEditCell
+                    value={currentProjectFromHierarchy.targetDate}
+                    onSave={(targetDate) =>
+                      void updateProject(currentProjectFromHierarchy.id, {
+                        targetDate,
+                      })
+                        .then(() => router.refresh())
+                        .catch((e) => {
+                          alert(
+                            e instanceof Error
+                              ? e.message
+                              : "Could not save due date."
+                          );
+                        })
+                    }
+                    type="date"
+                    dateMin={syncDueDateMinYmdForReviewProject}
+                    emptyLabel="Set due date"
+                  />
+                </div>
+              </div>
+
+              <div className="min-w-0">
+                <p className="text-[11px] text-zinc-500 mb-1">Slack link</p>
+                <InlineEditCell
+                  value={currentProjectFromHierarchy.slackUrl}
+                  onSave={(slackUrl) =>
+                    void updateProject(currentProjectFromHierarchy.id, {
+                      slackUrl,
+                    }).then(() => router.refresh())
+                  }
+                  placeholder="https://…"
+                  linkBehavior
+                  displayClassName="not-italic"
+                  formatDisplay={(url) => (
+                    <Link2
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        /^https?:\/\//i.test(url.trim())
+                          ? "text-cyan-500/90"
+                          : "text-zinc-500"
+                      )}
+                      aria-hidden
+                    />
+                  )}
+                  emptyLabel={
+                    <Link2 className="h-3.5 w-3.5 text-zinc-600" aria-hidden />
+                  }
+                />
+              </div>
+
+              <div>
+                <p className="text-[11px] text-zinc-500 mb-1">Progress</p>
+                <ProgressBar percent={currentProjectFromHierarchy.progress} />
+              </div>
+
+              <div className="flex justify-end">
+                <AutoConfidencePercent
+                  score={current.confidence}
+                  explanation={
+                    currentConfidenceExplanation ??
+                    fallbackConfidenceExplanation(
+                      "Confidence could not be resolved for this item."
+                    )
+                  }
+                />
+              </div>
+
+              {lowAutonomyProjectOwnerHint ? (
+                <div className="rounded-md border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-[11px] leading-snug text-zinc-300">
+                  <span className="font-medium text-amber-200/90">Owner — </span>
+                  {lowAutonomyProjectOwnerHint}
                 </div>
               ) : null}
-              {currentProjectFromHierarchy.milestones.length === 0 ? (
-                <p className="text-zinc-500">
-                  None yet — add milestones from the main tracker under this project.
-                </p>
-              ) : (
-                <ul className="space-y-1 text-zinc-300">
-                  {currentProjectFromHierarchy.milestones.slice(0, 10).map((m) => (
-                    <li key={m.id} className="flex gap-2">
-                      <span
-                        className={cn(
-                          "shrink-0 text-[10px] font-mono uppercase",
-                          m.status === "Done" ? "text-emerald-500/80" : "text-amber-500/85"
-                        )}
-                      >
-                        {m.status === "Done" ? "Done" : "Open"}
+
+              <div className="rounded-lg border border-zinc-800/80 bg-zinc-950/40 px-3 py-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    Milestones
+                  </p>
+                  {milestoneProgress && milestoneProgress.milestoneCount > 0 ? (
+                    <div className="flex min-w-[8rem] max-w-[14rem] flex-1 items-center gap-2">
+                      <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-zinc-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-500/60 transition-[width]"
+                          style={{
+                            width: `${(milestoneProgress.doneCount / milestoneProgress.milestoneCount) * 100}%`,
+                          }}
+                        />
+                      </div>
+                      <span className="shrink-0 tabular-nums text-[10px] text-zinc-500">
+                        {milestoneProgress.doneCount}/
+                        {milestoneProgress.milestoneCount}
                       </span>
-                      <span
-                        className={cn(
-                          "min-w-0",
-                          m.status === "Done" && "text-zinc-500 line-through decoration-zinc-600"
-                        )}
-                      >
-                        {m.name}
-                      </span>
-                    </li>
-                  ))}
-                  {currentProjectFromHierarchy.milestones.length > 10 ? (
-                    <li className="text-zinc-500 pt-0.5">
-                      …and {currentProjectFromHierarchy.milestones.length - 10} more
-                    </li>
+                    </div>
                   ) : null}
-                </ul>
-              )}
-              {nextPendingMilestone ? (
-                <p className="mt-2 border-t border-zinc-800/80 pt-2 text-sm text-zinc-400">
-                  Next:{" "}
-                  <span className="font-medium text-zinc-200">
-                    {nextPendingMilestone.name}
-                  </span>
+                </div>
+                {currentProjectFromHierarchy.milestones.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/50 px-3 py-4">
+                    <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+                      No milestones yet. Add a milestone to track delivery
+                      checkpoints for this project.&nbsp;
+                      <button
+                        type="button"
+                        title="Add a new milestone to this project"
+                        onClick={async () => {
+                          const ms = await createMilestone({
+                            projectId: currentProjectFromHierarchy.id,
+                            name: "New milestone",
+                            status: "Not Done",
+                            targetDate: "",
+                          });
+                          setMilestoneNameFocusId(ms.id);
+                          router.refresh();
+                        }}
+                        className={TRACKER_INLINE_TEXT_ACTION}
+                      >
+                        Add milestone
+                      </button>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="-mx-1 space-y-0">
+                    {currentProjectFromHierarchy.milestones.map((ms) => (
+                      <MilestoneRow
+                        key={ms.id}
+                        milestone={ms}
+                        startNameInEditMode={ms.id === milestoneNameFocusId}
+                      />
+                    ))}
+                    <div className="pt-2 pl-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const ms = await createMilestone({
+                            projectId: currentProjectFromHierarchy.id,
+                            name: "New milestone",
+                            status: "Not Done",
+                            targetDate: "",
+                          });
+                          setMilestoneNameFocusId(ms.id);
+                          router.refresh();
+                        }}
+                        className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+                      >
+                        <Plus className="h-3 w-3" aria-hidden />
+                        Add milestone
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {nextPendingMilestone ? (
+                  <p className="mt-3 border-t border-zinc-800/80 pt-3 text-sm text-zinc-400">
+                    Next milestone:{" "}
+                    <span className="font-medium text-zinc-200">
+                      {nextPendingMilestone.name}
+                    </span>
+                  </p>
+                ) : currentProjectFromHierarchy.milestones.length > 0 ? (
+                  <p className="mt-3 border-t border-zinc-800/80 pt-3 text-sm text-emerald-500/80">
+                    All milestones done.
+                  </p>
+                ) : null}
+              </div>
+                </ReviewEntityColumn>
+
+                <ReviewNotesScrollColumn
+                  entryCount={currentProjectFromHierarchy.reviewLog?.length ?? 0}
+                >
+                  <ReviewLogPanel
+                    embedded
+                    variant="sidebar"
+                    entries={currentProjectFromHierarchy.reviewLog}
+                    draft={reviewNoteDraft}
+                    onDraftChange={setReviewNoteDraft}
+                    onMarkReviewed={onMarkReviewed}
+                  />
+                </ReviewNotesScrollColumn>
+              </div>
+
+              <div className="flex flex-col gap-4 border-t border-zinc-800/80 pt-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <p className="text-xs text-zinc-500">
+                  Reviewed{" "}
+                  {currentProjectFromHierarchy.lastReviewed.trim()
+                    ? formatLastReviewedHint(
+                        currentProjectFromHierarchy.lastReviewed
+                      )
+                    : "never"}
                 </p>
-              ) : currentProjectFromHierarchy.milestones.length > 0 ? (
-                <p className="mt-2 border-t border-zinc-800/80 pt-2 text-sm text-emerald-500/80">
-                  All milestones done.
-                </p>
-              ) : null}
-            </div>
+                <ExecFlagMenu
+                  atRisk={currentProjectFromHierarchy.atRisk}
+                  spotlight={currentProjectFromHierarchy.spotlight}
+                  entityLabel="Project"
+                  onCommit={(flags) => {
+                    void updateProject(currentProjectFromHierarchy.id, flags).then(
+                      () => router.refresh()
+                    );
+                  }}
+                />
+              </div>
+            </>
           ) : null}
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="sr-only" htmlFor="review-status-select">
-                Delivery status
-              </label>
-              <select
-                id="review-status-select"
-                value={current.status}
-                onChange={(e) => {
-                  const v = e.target.value as Status;
-                  if (current.kind === "goal") {
-                    void updateGoal(current.id, { status: v }).then(() =>
-                      router.refresh()
-                    );
-                  } else {
-                    void updateProject(current.id, { status: v }).then(() =>
-                      router.refresh()
-                    );
-                  }
-                }}
-                className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm text-zinc-100"
-              >
-                {statusOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <span className="sr-only">Confidence (automatic)</span>
-              <AutoConfidencePercent
-                score={current.confidence}
-                explanation={
-                  currentConfidenceExplanation ??
-                  fallbackConfidenceExplanation(
-                    "Confidence could not be resolved for this item."
-                  )
-                }
-              />
-            </div>
-          </div>
-
-          <p className="text-sm text-zinc-400">
-            {current.lastReviewed.trim()
-              ? formatLastReviewedHint(current.lastReviewed)
-              : "—"}
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <ExecFlagMenu
-              atRisk={current.atRisk}
-              spotlight={current.spotlight}
-              entityLabel={current.kind === "goal" ? "Goal" : "Project"}
-              onCommit={(flags) => {
-                if (current.kind === "goal") {
-                  void updateGoal(current.id, flags).then(() => router.refresh());
-                } else {
-                  void updateProject(current.id, flags).then(() =>
-                    router.refresh()
-                  );
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => void onMarkReviewed()}
-              className="inline-flex cursor-pointer items-center rounded-md bg-zinc-100 text-zinc-900 px-4 py-2 text-sm font-medium hover:bg-white"
-            >
-              Mark reviewed &amp; next
-            </button>
-          </div>
         </div>
       ) : null}
-
-      <div className="mt-10 pt-6 border-t border-zinc-800">
-        <button
-          type="button"
-          onClick={() => void bulkMarkAllReviewed()}
-          className="cursor-pointer text-sm text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline"
-        >
-          Mark all {total} as reviewed (bulk)
-        </button>
-      </div>
     </div>
   );
 }

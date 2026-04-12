@@ -1,7 +1,7 @@
 import type { EmploymentKind, Person, PersonWorkload } from "@/lib/types/tracker";
 import {
   FOUNDERS_DEPARTMENT,
-  isFounderPersonId,
+  isFounderPerson,
 } from "@/lib/autonomyRoster";
 import { normalizeTrackerSearchQuery } from "@/lib/tracker-search-filter";
 
@@ -54,6 +54,8 @@ export function teamRosterSearchText(p: Person): string {
     p.name,
     p.role ?? "",
     p.department ?? "",
+    p.email ?? "",
+    p.phone ?? "",
     p.slackHandle ?? "",
     String(p.estimatedMonthlySalary ?? ""),
   ]
@@ -89,7 +91,7 @@ function matchesMissing(
   ids: TeamMissingDetailId[]
 ): boolean {
   if (ids.length === 0) return true;
-  const founder = isFounderPersonId(p.id);
+  const founder = isFounderPerson(p);
   return ids.some((id) => {
     if (founder) {
       if (id === "no_photo") return !p.profilePicturePath?.trim();
@@ -117,7 +119,7 @@ function matchesDepartment(p: Person, values: string[]): boolean {
 
 function matchesEmployment(p: Person, kinds: EmploymentKind[]): boolean {
   if (kinds.length === 0) return true;
-  if (isFounderPersonId(p.id)) return true;
+  if (isFounderPerson(p)) return true;
   return kinds.includes(p.employment);
 }
 
@@ -127,7 +129,7 @@ function matchesCompany(
   workloadById: Map<string, PersonWorkload>
 ): boolean {
   if (companyIds.length === 0) return true;
-  if (isFounderPersonId(p.id)) return true;
+  if (isFounderPerson(p)) return true;
   const w = workloadById.get(p.id);
   const set = new Set(companyIds);
   return (w?.projectCompanyIds ?? []).some((cid) => set.has(cid));
@@ -199,7 +201,7 @@ export function countByEmployment(
   kind: EmploymentKind
 ): number {
   return people.filter(
-    (p) => !isFounderPersonId(p.id) && p.employment === kind
+    (p) => !isFounderPerson(p) && p.employment === kind
   ).length;
 }
 
@@ -219,7 +221,7 @@ export function countByCompany(
   companyId: string
 ): number {
   return people.filter((p) => {
-    if (isFounderPersonId(p.id)) return false;
+    if (isFounderPerson(p)) return false;
     const w = workloadById.get(p.id);
     return (w?.projectCompanyIds ?? []).includes(companyId);
   }).length;

@@ -1,8 +1,11 @@
 /** 3×3 matrix: band index 0 = best quadrant for that axis. */
 
-export function impactBand(impactScore: number): 0 | 1 | 2 {
-  if (impactScore >= 4) return 0;
-  if (impactScore === 3) return 1;
+import type { Priority } from "@/lib/types/tracker";
+
+/** Rows by goal priority — P0/P1 = top (most urgent), P3 = bottom. */
+export function goalPriorityBand(priority: Priority): 0 | 1 | 2 {
+  if (priority === "P0" || priority === "P1") return 0;
+  if (priority === "P2") return 1;
   return 2;
 }
 
@@ -12,10 +15,10 @@ export function complexityBand(complexityScore: number): 0 | 1 | 2 {
   return 2;
 }
 
-export const IMPACT_ROW_LABELS = ["High (4–5)", "Mid (3)", "Low (1–2)"] as const;
+export const PRIORITY_ROW_LABELS = ["High (P0–P1)", "Mid (P2)", "Low (P3)"] as const;
 export const COMPLEXITY_COL_LABELS = ["Low (1–2)", "Mid (3)", "High (4–5)"] as const;
 
-/** Short strategic label per cell (high impact = row 0, low complexity = col 0). */
+/** Short strategic label per cell (high goal priority = row 0, low complexity = col 0). */
 export const MATRIX_QUADRANT_LABELS = [
   ["Quick wins", "Major bets", "Moonshots"],
   ["Fill-ins", "Standard work", "Reconsider"],

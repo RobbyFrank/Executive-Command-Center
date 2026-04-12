@@ -105,15 +105,33 @@ export function groupPeopleByAutonomy(
   })).filter((g) => g.people.length > 0);
 }
 
-/** Shown at the top of Team; stable person ids from data. */
-const FOUNDER_PERSON_IDS = new Set(["robby", "nadav"]);
-const FOUNDER_ORDER = ["robby", "nadav"] as const;
+/**
+ * Historical default founders when `Person.isFounder` is omitted. Explicit
+ * `isFounder: false` on these ids opts out.
+ */
+const LEGACY_FOUNDER_IDS = new Set(["robby", "nadav"]);
+const LEGACY_FOUNDER_ORDER = ["robby", "nadav"] as const;
 
 /** Reserved department label for founders only (not assignable to others). */
 export const FOUNDERS_DEPARTMENT = "Founders";
 
-export function isFounderPersonId(personId: string): boolean {
-  return FOUNDER_PERSON_IDS.has(personId);
+/**
+ * Founders are marked in data (`isFounder`) or match legacy ids when the flag
+ * is unset. Explicit `isFounder: false` overrides legacy ids.
+ */
+export function isFounderPerson(person: Person): boolean {
+  if (person.isFounder === false) return false;
+  if (person.isFounder === true) return true;
+  return LEGACY_FOUNDER_IDS.has(person.id);
+}
+
+/**
+ * Goal DRI on Roadmap: founders, or non-founders with autonomy 4 or 5 only.
+ */
+export function isGoalDriEligiblePerson(person: Person): boolean {
+  if (isFounderPerson(person)) return true;
+  const a = clampAutonomy(person.autonomyScore);
+  return a === 5 || a === 4;
 }
 
 /**
@@ -121,7 +139,7 @@ export function isFounderPersonId(personId: string): boolean {
  * Call on read and after merging person updates before persist.
  */
 export function withFounderDepartmentRules(person: Person): Person {
-  if (isFounderPersonId(person.id)) {
+  if (isFounderPerson(person)) {
     return { ...person, department: FOUNDERS_DEPARTMENT };
   }
   if (person.department?.trim() === FOUNDERS_DEPARTMENT) {
@@ -205,22 +223,26 @@ export const TEAM_ROSTER_WORKLOAD_HEADER: Record<
 };
 
 function sortFounders(a: Person, b: Person): number {
-  const ia = FOUNDER_ORDER.indexOf(a.id as (typeof FOUNDER_ORDER)[number]);
-  const ib = FOUNDER_ORDER.indexOf(b.id as (typeof FOUNDER_ORDER)[number]);
+  const ia = LEGACY_FOUNDER_ORDER.indexOf(
+    a.id as (typeof LEGACY_FOUNDER_ORDER)[number]
+  );
+  const ib = LEGACY_FOUNDER_ORDER.indexOf(
+    b.id as (typeof LEGACY_FOUNDER_ORDER)[number]
+  );
   if (ia !== -1 && ib !== -1) return ia - ib;
   if (ia !== -1) return -1;
   if (ib !== -1) return 1;
   return sortPeopleByName(a, b);
 }
 
-/** Founders (fixed ids) first, then everyone else grouped by autonomy. */
+/** Founders first, then everyone else grouped by autonomy. */
 export function buildTeamRosterDisplayGroups(
   people: Person[]
 ): TeamRosterAutonomyGroup[] {
   const founders: Person[] = [];
   const rest: Person[] = [];
   for (const p of people) {
-    if (FOUNDER_PERSON_IDS.has(p.id)) founders.push(p);
+    if (isFounderPerson(p)) founders.push(p);
     else rest.push(p);
   }
   founders.sort(sortFounders);
@@ -244,7 +266,9 @@ function workloadTierFromTotals(totalProjects: number): WorkloadSortTier {
 }
 
 /**
- * Group Team roster rows: founders first (when present), then by sort mode.
+ * Group Team roster rows: founders first when sorting by autonomy or department;
+ * when sorting by workload, everyone (including founders) is grouped only by
+ * workload tier.
  * `workloadByPersonId` is required when `mode === "workload"`.
  */
 export function buildTeamRosterGroups(
@@ -256,10 +280,33 @@ export function buildTeamRosterGroups(
     return buildTeamRosterDisplayGroups(people);
   }
 
+  if (mode === "workload") {
+    const buckets = new Map<WorkloadSortTier, Person[]>();
+    for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
+      buckets.set(tier, []);
+    }
+    for (const p of people) {
+      const w = workloadByPersonId.get(p.id);
+      const total = w?.totalProjects ?? 0;
+      const tier = workloadTierFromTotals(total);
+      buckets.get(tier)!.push(p);
+    }
+    for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
+      buckets.get(tier)!.sort(sortPeopleByName);
+    }
+    const out: TeamRosterDisplayGroup[] = [];
+    for (const tier of TEAM_ROSTER_WORKLOAD_DISPLAY_ORDER) {
+      const groupPeople = buckets.get(tier)!;
+      if (groupPeople.length === 0) continue;
+      out.push({ kind: "workload", tier, people: groupPeople });
+    }
+    return out;
+  }
+
   const founders: Person[] = [];
   const rest: Person[] = [];
   for (const p of people) {
-    if (FOUNDER_PERSON_IDS.has(p.id)) founders.push(p);
+    if (isFounderPerson(p)) founders.push(p);
     else rest.push(p);
   }
   founders.sort(sortFounders);
@@ -269,46 +316,24 @@ export function buildTeamRosterGroups(
     out.push({ kind: "founders", people: founders });
   }
 
-  if (mode === "department") {
-    const byDept = new Map<string, Person[]>();
-    for (const p of rest) {
-      const key = (p.department ?? "").trim();
-      if (!byDept.has(key)) byDept.set(key, []);
-      byDept.get(key)!.push(p);
-    }
-    for (const arr of byDept.values()) {
-      arr.sort(sortPeopleByName);
-    }
-    const keys = [...byDept.keys()].sort((a, b) => {
-      if (a === "" && b !== "") return -1;
-      if (b === "" && a !== "") return 1;
-      return a.localeCompare(b, undefined, { sensitivity: "base" });
-    });
-    for (const key of keys) {
-      const groupPeople = byDept.get(key)!;
-      if (groupPeople.length === 0) continue;
-      out.push({ kind: "department", departmentKey: key, people: groupPeople });
-    }
-    return out;
-  }
-
-  const buckets = new Map<WorkloadSortTier, Person[]>();
-  for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
-    buckets.set(tier, []);
-  }
+  const byDept = new Map<string, Person[]>();
   for (const p of rest) {
-    const w = workloadByPersonId.get(p.id);
-    const total = w?.totalProjects ?? 0;
-    const tier = workloadTierFromTotals(total);
-    buckets.get(tier)!.push(p);
+    const key = (p.department ?? "").trim();
+    if (!byDept.has(key)) byDept.set(key, []);
+    byDept.get(key)!.push(p);
   }
-  for (const tier of TEAM_ROSTER_WORKLOAD_SORT_ORDER) {
-    buckets.get(tier)!.sort(sortPeopleByName);
+  for (const arr of byDept.values()) {
+    arr.sort(sortPeopleByName);
   }
-  for (const tier of TEAM_ROSTER_WORKLOAD_DISPLAY_ORDER) {
-    const groupPeople = buckets.get(tier)!;
+  const keys = [...byDept.keys()].sort((a, b) => {
+    if (a === "" && b !== "") return -1;
+    if (b === "" && a !== "") return 1;
+    return a.localeCompare(b, undefined, { sensitivity: "base" });
+  });
+  for (const key of keys) {
+    const groupPeople = byDept.get(key)!;
     if (groupPeople.length === 0) continue;
-    out.push({ kind: "workload", tier, people: groupPeople });
+    out.push({ kind: "department", departmentKey: key, people: groupPeople });
   }
   return out;
 }

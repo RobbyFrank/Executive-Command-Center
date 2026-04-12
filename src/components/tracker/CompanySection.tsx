@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { GoalSection } from "./GoalSection";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import { ChevronRight, Building2, Plus } from "lucide-react";
+import { ChevronRight, Building2 } from "lucide-react";
 import { createGoal } from "@/server/actions/tracker";
 import { cn } from "@/lib/utils";
 import {
@@ -17,6 +17,8 @@ import {
   ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
   TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
 } from "@/lib/tracker-sticky-layout";
+import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
+import { AiCreateButton } from "./AiCreateButton";
 
 interface CompanySectionProps {
   company: CompanyWithGoals;
@@ -84,7 +86,7 @@ export function CompanySection({
   const statsLabel = `${goalCount} goal${goalCount !== 1 ? "s" : ""} · ${projectCount} project${projectCount !== 1 ? "s" : ""}`;
 
   return (
-    <div className="mb-6 min-w-0 max-w-full">
+    <div className="group/company mb-6 min-w-0 max-w-full">
       <div
         ref={companyHeaderRef}
         className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"
@@ -168,37 +170,43 @@ export function CompanySection({
         <div className="mt-1">
           {company.goals.length === 0 ? (
             <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8">
-              <p className="text-sm text-zinc-500 mb-4 max-w-md">
-                No goals yet. Add a goal to plan work and projects for this
-                company.
+              <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+                No goals yet. Add a goal to plan work and projects for this company.&nbsp;
+                <button
+                  type="button"
+                  title="Add a new goal for this company"
+                  onClick={async () => {
+                    const goal = await createGoal({
+                      companyId: company.id,
+                      description: "New goal",
+                      measurableTarget: "",
+                      whyItMatters: "",
+                      currentValue: "",
+                      impactScore: 3,
+                      confidenceScore: 0,
+                      costOfDelay: 3,
+                      ownerId: "",
+                      priority: "P2",
+                      executionMode: "Async",
+                      slackChannel: "",
+                      status: "Not Started",
+                      atRisk: false,
+                      spotlight: false,
+                      reviewLog: [],
+                    });
+                    setNewGoalTitleFocusId(goal.id);
+                  }}
+                  className={TRACKER_INLINE_TEXT_ACTION}
+                >
+                  Add goal
+                </button>
+                <AiCreateButton
+                  type="goal"
+                  companyId={company.id}
+                  onCreated={(id) => setNewGoalTitleFocusId(id)}
+                  inline
+                />
               </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  const goal = await createGoal({
-                    companyId: company.id,
-                    description: "New goal",
-                    measurableTarget: "",
-                    currentValue: "",
-                    impactScore: 3,
-                    confidenceScore: 3,
-                    costOfDelay: 3,
-                    ownerId: "",
-                    priority: "P2",
-                    executionMode: "Async",
-                    slackChannel: "",
-                    lastReviewed: "",
-                    status: "Not Started",
-                    atRisk: false,
-                    spotlight: false,
-                  });
-                  setNewGoalTitleFocusId(goal.id);
-                }}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-800 hover:border-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-              >
-                <Plus className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
-                Add goal
-              </button>
             </div>
           ) : (
             <>

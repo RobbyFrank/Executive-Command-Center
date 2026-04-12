@@ -1,6 +1,6 @@
 import type { Person } from "@/lib/types/tracker";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
-import { clampAutonomy, isFounderPersonId } from "@/lib/autonomyRoster";
+import { clampAutonomy, isFounderPerson } from "@/lib/autonomyRoster";
 import { cn } from "@/lib/utils";
 
 interface OwnerSelectDisplayProps {
@@ -8,7 +8,7 @@ interface OwnerSelectDisplayProps {
   ownerId: string;
 }
 
-/** Collapsed owner cell: photo + department when set; otherwise name with optional department. */
+/** Collapsed owner cell: photo + first name when set; otherwise name with optional department. */
 export function OwnerSelectDisplay({ people, ownerId }: OwnerSelectDisplayProps) {
   const person = people.find((p) => p.id === ownerId);
   if (!person) {
@@ -23,7 +23,7 @@ export function OwnerSelectDisplay({ people, ownerId }: OwnerSelectDisplayProps)
   const displayName = firstNameFromFullName(person.name);
   const title = [person.name, dept].filter(Boolean).join(" · ");
   const autonomyRing =
-    !isFounderPersonId(person.id) && clampAutonomy(person.autonomyScore) <= 2;
+    !isFounderPerson(person) && clampAutonomy(person.autonomyScore) <= 2;
 
   if (path) {
     return (
@@ -42,9 +42,9 @@ export function OwnerSelectDisplay({ people, ownerId }: OwnerSelectDisplayProps)
               : "ring-zinc-700"
           )}
         />
-        {dept ? (
-          <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-400">
-            {dept}
+        {displayName ? (
+          <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-100">
+            {displayName}
           </span>
         ) : null}
       </span>

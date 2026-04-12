@@ -39,7 +39,7 @@ const OPTIONS: {
   {
     id: "unassigned",
     label: "Unassigned",
-    hint: "No owner on the goal or project",
+    hint: "No DRI on the goal or owner on the project",
     Icon: UserRound,
   },
   {
@@ -63,13 +63,13 @@ const OPTIONS: {
   {
     id: "high_leverage",
     label: "High leverage",
-    hint: "High impact goal (4–5) with low-complexity project (1–2)",
+    hint: "P0 or P1 goal with low-complexity project (1–2)",
     Icon: TrendingUp,
   },
   {
     id: "low_leverage",
     label: "Low leverage",
-    hint: "Low impact goal (1–2) with high-complexity project (4–5)",
+    hint: "P3 goal with high-complexity project (4–5)",
     Icon: TrendingDown,
   },
   {

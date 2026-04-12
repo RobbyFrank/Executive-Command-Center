@@ -18,6 +18,8 @@ import {
   isReviewedWithinDays,
   MOMENTUM_RECENT_REVIEW_DAYS,
 } from "@/lib/companyMomentum";
+import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
+import { validateSyncDueDateVsPrevious } from "@/lib/syncProjectDueDate";
 
 const repo = getRepository();
 
@@ -77,10 +79,16 @@ export async function deleteCompany(
 // --- Goals ---
 
 export async function createGoal(
-  data: Omit<Goal, "id">
+  data: Omit<Goal, "id" | "lastReviewed" | "reviewLog"> &
+    Partial<Pick<Goal, "lastReviewed" | "reviewLog">>
 ): Promise<Goal> {
   const id = uuid();
-  const goal = { id, ...data };
+  const trimmedReviewed = data.lastReviewed?.trim() ?? "";
+  const lastReviewed =
+    trimmedReviewed !== ""
+      ? trimmedReviewed
+      : new Date().toISOString();
+  const goal = { id, ...data, lastReviewed, reviewLog: data.reviewLog ?? [] };
   await repo.createGoal(goal);
   revalidate();
   return goal;
@@ -90,6 +98,21 @@ export async function updateGoal(
   id: string,
   updates: Partial<Goal>
 ): Promise<Goal> {
+  if (updates.ownerId !== undefined) {
+    const raw = updates.ownerId.trim();
+    if (raw !== "") {
+      const people = await repo.getPeople();
+      const person = people.find((p) => p.id === raw);
+      if (!person) {
+        throw new Error("That person is not on the team roster.");
+      }
+      if (!isGoalDriEligiblePerson(person)) {
+        throw new Error(
+          "Goal DRI must be a founder or someone with autonomy 4 or 5."
+        );
+      }
+    }
+  }
   const result = await repo.updateGoal(id, updates);
   revalidate();
   return result;
@@ -103,10 +126,21 @@ export async function deleteGoal(id: string): Promise<void> {
 // --- Projects ---
 
 export async function createProject(
-  data: Omit<Project, "id">
+  data: Omit<Project, "id" | "lastReviewed" | "reviewLog"> &
+    Partial<Pick<Project, "lastReviewed" | "reviewLog">>
 ): Promise<Project> {
   const id = uuid();
-  const project = { id, ...data };
+  const trimmedReviewed = data.lastReviewed?.trim() ?? "";
+  const lastReviewed =
+    trimmedReviewed !== ""
+      ? trimmedReviewed
+      : new Date().toISOString();
+  const project = {
+    id,
+    ...data,
+    lastReviewed,
+    reviewLog: data.reviewLog ?? [],
+  };
   await repo.createProject(project);
   revalidate();
   return project;
@@ -116,6 +150,25 @@ export async function updateProject(
   id: string,
   updates: Partial<Project>
 ): Promise<Project> {
+  if (updates.targetDate !== undefined) {
+    const existing = await repo.getProject(id);
+    if (existing) {
+      const goal = await repo.getGoal(existing.goalId);
+      if (goal?.executionMode === "Sync") {
+        const siblings = await repo.getProjectsByGoal(existing.goalId);
+        const ix = siblings.findIndex((p) => p.id === id);
+        if (ix > 0) {
+          const prev = siblings[ix - 1];
+          const err = validateSyncDueDateVsPrevious({
+            executionMode: goal.executionMode,
+            previousProjectTargetDate: prev.targetDate,
+            newTargetDate: updates.targetDate,
+          });
+          if (err) throw new Error(err);
+        }
+      }
+    }
+  }
   const result = await repo.updateProject(id, updates);
   revalidate();
   return result;
@@ -198,15 +251,84 @@ export async function deletePerson(
 
 // --- Mark as Reviewed ---
 
-export async function markGoalReviewed(id: string): Promise<Goal> {
+/**
+ * Records `lastReviewed` and optionally appends one dated note to `reviewLog`
+ * (same timestamp as the review).
+ */
+export async function markGoalReviewed(
+  id: string,
+  note?: string
+): Promise<Goal> {
+  const existing = await repo.getGoal(id);
+  if (!existing) {
+    throw new Error(`Goal ${id} not found`);
+  }
+  const ts = new Date().toISOString();
+  const trimmed = note?.trim();
+  const updates: Partial<Goal> = { lastReviewed: ts };
+  if (trimmed) {
+    updates.reviewLog = [
+      ...(existing.reviewLog ?? []),
+      { id: uuid(), at: ts, text: trimmed },
+    ];
+  }
+  return updateGoal(id, updates);
+}
+
+export async function markProjectReviewed(
+  id: string,
+  note?: string
+): Promise<Project> {
+  const existing = await repo.getProject(id);
+  if (!existing) {
+    throw new Error(`Project ${id} not found`);
+  }
+  const ts = new Date().toISOString();
+  const trimmed = note?.trim();
+  const updates: Partial<Project> = { lastReviewed: ts };
+  if (trimmed) {
+    updates.reviewLog = [
+      ...(existing.reviewLog ?? []),
+      { id: uuid(), at: ts, text: trimmed },
+    ];
+  }
+  return updateProject(id, updates);
+}
+
+/** Append a note without updating `lastReviewed`. */
+export async function appendGoalReviewNote(
+  id: string,
+  text: string
+): Promise<Goal> {
+  const existing = await repo.getGoal(id);
+  if (!existing) {
+    throw new Error(`Goal ${id} not found`);
+  }
+  const trimmed = text.trim();
+  if (!trimmed) return existing;
   return updateGoal(id, {
-    lastReviewed: new Date().toISOString(),
+    reviewLog: [
+      ...(existing.reviewLog ?? []),
+      { id: uuid(), at: new Date().toISOString(), text: trimmed },
+    ],
   });
 }
 
-export async function markProjectReviewed(id: string): Promise<Project> {
+export async function appendProjectReviewNote(
+  id: string,
+  text: string
+): Promise<Project> {
+  const existing = await repo.getProject(id);
+  if (!existing) {
+    throw new Error(`Project ${id} not found`);
+  }
+  const trimmed = text.trim();
+  if (!trimmed) return existing;
   return updateProject(id, {
-    lastReviewed: new Date().toISOString(),
+    reviewLog: [
+      ...(existing.reviewLog ?? []),
+      { id: uuid(), at: new Date().toISOString(), text: trimmed },
+    ],
   });
 }
 

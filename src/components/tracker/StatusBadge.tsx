@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
-import type { Status } from "@/lib/types/tracker";
+import type { GoalStatus } from "@/lib/types/tracker";
 
-const STATUS_COLORS: Record<Status, string> = {
+const STATUS_COLORS: Record<GoalStatus, string> = {
   "In Progress": "bg-blue-500/20 text-blue-400",
   "Not Started": "bg-zinc-500/20 text-zinc-400",
   Planning: "bg-purple-500/20 text-purple-400",
@@ -12,7 +12,7 @@ const STATUS_COLORS: Record<Status, string> = {
   Idea: "bg-zinc-600/20 text-zinc-500",
 };
 
-export function StatusBadge({ status }: { status: Status }) {
+export function StatusBadge({ status }: { status: GoalStatus }) {
   return (
     <span
       className={cn(

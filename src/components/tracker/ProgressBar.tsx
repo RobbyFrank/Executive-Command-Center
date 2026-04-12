@@ -10,7 +10,7 @@ export function ProgressBar({ percent, className }: ProgressBarProps) {
   return (
     <div
       className={cn(
-        "relative w-full h-5 rounded-full bg-zinc-800 overflow-hidden",
+        "relative w-full h-4 rounded-full bg-zinc-800 overflow-hidden",
         className
       )}
     >
@@ -29,7 +29,7 @@ export function ProgressBar({ percent, className }: ProgressBarProps) {
         aria-hidden
       />
       <span
-        className="relative z-10 flex h-full items-center justify-center text-[10px] font-medium tabular-nums text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none"
+        className="relative z-10 flex h-full items-center justify-center text-[9px] font-medium tabular-nums text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none"
         title={`${p}%`}
       >
         {p}%

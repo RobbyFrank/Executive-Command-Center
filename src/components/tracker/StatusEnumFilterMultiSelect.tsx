@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useId, useMemo, useState } from "react";
-import { StatusEnum } from "@/lib/schemas/tracker";
-import type { Status } from "@/lib/types/tracker";
+import { GoalStatusEnum, ProjectStatusEnum } from "@/lib/schemas/tracker";
 import { ChevronDown, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const STATUSES = StatusEnum.options;
+const STATUSES = Array.from(
+  new Set([...GoalStatusEnum.options, ...ProjectStatusEnum.options])
+).sort((a, b) => a.localeCompare(b));
 
 interface StatusEnumFilterMultiSelectProps {
   selectedIds: string[];
@@ -34,7 +35,7 @@ export function StatusEnumFilterMultiSelect({
   const clear = useCallback(() => onChange([]), [onChange]);
 
   const labelByStatus = useMemo(
-    () => new Map<Status, string>(STATUSES.map((s) => [s, s])),
+    () => new Map<string, string>(STATUSES.map((s) => [s, s])),
     []
   );
 
@@ -48,7 +49,7 @@ export function StatusEnumFilterMultiSelect({
       <>
         <CircleDot className="h-3.5 w-3.5 text-zinc-400 shrink-0" aria-hidden />
         <span className="truncate min-w-0">
-          {labelByStatus.get(selectedIds[0] as Status) ?? selectedIds[0]}
+          {labelByStatus.get(selectedIds[0]) ?? selectedIds[0]}
         </span>
       </>
     ) : (

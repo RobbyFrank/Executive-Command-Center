@@ -13,6 +13,22 @@ import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { projectMatchesCloseWatchByOwnerMap } from "@/lib/closeWatch";
 import { isProjectZombie } from "@/lib/zombie";
 
+function isHighLeverageProject(
+  g: GoalWithProjects,
+  p: ProjectWithMilestones
+): boolean {
+  return (
+    (g.priority === "P0" || g.priority === "P1") && p.complexityScore <= 2
+  );
+}
+
+function isLowLeverageProject(
+  g: GoalWithProjects,
+  p: ProjectWithMilestones
+): boolean {
+  return g.priority === "P3" && p.complexityScore >= 4;
+}
+
 /** Multi-select status filters on the tracker (OR within selection). */
 export type TrackerStatusTagId =
   | "at_risk"
@@ -63,6 +79,7 @@ function projectSearchTextSelf(
   return [
     p.id,
     p.name,
+    p.description,
     p.goalId,
     personName(peopleById, p.ownerId),
     joinAssigneeNames(peopleById, p.assigneeIds),
@@ -93,8 +110,8 @@ function goalSearchTextSelf(
     g.companyId,
     g.description,
     g.measurableTarget,
+    g.whyItMatters,
     g.currentValue,
-    scoreBandSearchTokens(g.impactScore),
     scoreBandSearchTokens(g.confidenceScore),
     scoreBandSearchTokens(g.costOfDelay),
     personName(peopleById, g.ownerId),
@@ -320,6 +337,26 @@ export function filterTrackerHierarchyByStatusEnum(
     .filter((c): c is CompanyWithGoals => c !== null);
 }
 
+/** When `hideDone` is true, drops projects with status `Done` and prunes empty goals/companies. */
+export function filterTrackerHierarchyHideDoneProjects(
+  hierarchy: CompanyWithGoals[],
+  hideDone: boolean
+): CompanyWithGoals[] {
+  if (!hideDone) return hierarchy;
+
+  return hierarchy
+    .map((c) => ({
+      ...c,
+      goals: c.goals
+        .map((g) => ({
+          ...g,
+          projects: g.projects.filter((p) => p.status !== "Done"),
+        }))
+        .filter((g) => g.projects.length > 0),
+    }))
+    .filter((c) => c.goals.length > 0);
+}
+
 function goalMatchesStatusTags(
   g: GoalWithProjects,
   tags: Set<TrackerStatusTagId>,
@@ -354,16 +391,12 @@ function goalMatchesStatusTags(
     return true;
   if (
     tags.has("high_leverage") &&
-    g.projects.some(
-      (proj) => g.impactScore >= 4 && proj.complexityScore <= 2
-    )
+    g.projects.some((proj) => isHighLeverageProject(g, proj))
   )
     return true;
   if (
     tags.has("low_leverage") &&
-    g.projects.some(
-      (proj) => g.impactScore <= 2 && proj.complexityScore >= 4
-    )
+    g.projects.some((proj) => isLowLeverageProject(g, proj))
   )
     return true;
   return false;
@@ -393,10 +426,8 @@ function projectMatchesStatusTags(
   )
     return true;
   if (tags.has("zombie") && isProjectZombie(p)) return true;
-  if (tags.has("high_leverage") && g.impactScore >= 4 && p.complexityScore <= 2)
-    return true;
-  if (tags.has("low_leverage") && g.impactScore <= 2 && p.complexityScore >= 4)
-    return true;
+  if (tags.has("high_leverage") && isHighLeverageProject(g, p)) return true;
+  if (tags.has("low_leverage") && isLowLeverageProject(g, p)) return true;
   return false;
 }
 

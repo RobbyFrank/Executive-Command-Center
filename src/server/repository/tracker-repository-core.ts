@@ -283,7 +283,7 @@ export class TrackerRepositoryCore implements TrackerRepository {
       );
       const parts: string[] = [];
       if (goalsOwned.length > 0) {
-        parts.push(`${goalsOwned.length} goal(s) as owner`);
+        parts.push(`${goalsOwned.length} goal(s) as DRI`);
       }
       if (projectsOwned.length > 0) {
         parts.push(`${projectsOwned.length} project(s) as owner`);

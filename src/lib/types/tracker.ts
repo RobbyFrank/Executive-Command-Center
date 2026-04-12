@@ -8,10 +8,12 @@ import {
   TrackerDataSchema,
   EmploymentKindEnum,
   PriorityEnum,
-  StatusEnum,
+  GoalStatusEnum,
+  ProjectStatusEnum,
   ExecutionModeEnum,
   ProjectTypeEnum,
   MilestoneStatusEnum,
+  ReviewLogEntrySchema,
 } from "@/lib/schemas/tracker";
 
 export type Company = z.infer<typeof CompanySchema>;
@@ -22,11 +24,15 @@ export type Person = z.infer<typeof PersonSchema>;
 export type TrackerData = z.infer<typeof TrackerDataSchema>;
 
 export type Priority = z.infer<typeof PriorityEnum>;
-export type Status = z.infer<typeof StatusEnum>;
+export type GoalStatus = z.infer<typeof GoalStatusEnum>;
+export type ProjectStatus = z.infer<typeof ProjectStatusEnum>;
+/** Goal delivery status (legacy name — same as `GoalStatus`). */
+export type Status = GoalStatus;
 export type ExecutionMode = z.infer<typeof ExecutionModeEnum>;
 export type ProjectType = z.infer<typeof ProjectTypeEnum>;
 export type MilestoneStatus = z.infer<typeof MilestoneStatusEnum>;
 export type EmploymentKind = z.infer<typeof EmploymentKindEnum>;
+export type ReviewLogEntry = z.infer<typeof ReviewLogEntrySchema>;
 
 export interface GoalWithProjects extends Goal {
   projects: ProjectWithMilestones[];

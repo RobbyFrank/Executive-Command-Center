@@ -24,6 +24,7 @@ interface AutoConfidencePercentProps {
 }
 
 function barFillClass(pct: number): string {
+  if (pct <= 0) return "bg-red-700";
   if (pct >= 80) return "bg-emerald-500";
   if (pct >= 60) return "bg-sky-500";
   if (pct >= 40) return "bg-amber-500";
@@ -137,7 +138,7 @@ export function AutoConfidencePercent({
         onBlur={scheduleClose}
       >
         <div
-          className="relative h-5 w-full min-w-0 overflow-hidden rounded-full bg-zinc-800/90"
+          className="relative h-4 w-full min-w-0 overflow-hidden rounded-full bg-zinc-800/90"
           aria-hidden
         >
           <div
@@ -147,7 +148,7 @@ export function AutoConfidencePercent({
             )}
             style={{ width: `${pct}%` }}
           />
-          <span className="relative z-10 flex h-full w-full items-center justify-center text-[10px] font-semibold tabular-nums text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none">
+          <span className="relative z-10 flex h-full w-full items-center justify-center text-[9px] font-semibold tabular-nums text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none">
             {pct}%
           </span>
         </div>

@@ -27,32 +27,39 @@ import {
   deleteGoal,
   createGoal,
   createProject,
-  markGoalReviewed,
+  appendGoalReviewNote,
 } from "@/server/actions/tracker";
 import {
-  AlertTriangle,
   ChevronRight,
-  Plus,
   ArrowRightLeft,
   Layers,
   Flag,
   Sparkles,
 } from "lucide-react";
-import { ReviewAction } from "./ReviewAction";
 import { cn } from "@/lib/utils";
-import { clampAutonomy, isFounderPersonId } from "@/lib/autonomyRoster";
-import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { getSequentialQueueProjects } from "@/lib/sequentialProjects";
 import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
+import { WarningsBadge } from "./WarningsBadge";
+import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
 import { formatSlackChannelHash } from "@/lib/slackDisplay";
 
 import { ExecFlagMenu } from "./ExecFlagMenu";
+import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { CollapsePanel } from "./CollapsePanel";
 import {
   ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
   TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
 } from "@/lib/tracker-sticky-layout";
+import { minDueDateYmdAfterPreviousProject } from "@/lib/syncProjectDueDate";
+import {
+  TRACKER_FOOTER_TEXT_ACTION,
+  TRACKER_INLINE_TEXT_ACTION,
+} from "./tracker-text-actions";
+import { AiCreateButton } from "./AiCreateButton";
+
+/** Align editable cells with sticky column headers (no default resting inset). */
+const GRID_ALIGN = { trackerGridAlign: true as const };
 
 interface GoalSectionProps {
   goal: GoalWithProjects;
@@ -131,27 +138,18 @@ export function GoalSection({
     [goal.projects]
   );
 
-  const collapsedSummary = useMemo(() => {
-    const projects = goal.projects;
-    const projectCount = projects.length;
-    let warningCount = 0;
-    const highCod = goal.costOfDelay >= 4;
+  const collapsedSummary = useMemo(
+    () => ({ projectCount: goal.projects.length }),
+    [goal.projects.length]
+  );
 
-    for (const p of projects) {
-      if (p.milestones.length === 0) warningCount++;
-      if (p.milestones.some((ms) => ms.status !== "Done" && !ms.targetDate?.trim()))
-        warningCount++;
-      const raw = p.targetDate?.trim() ?? "";
-      if (!raw || parseCalendarDateString(raw) === null) warningCount++;
-      if (!p.ownerId) warningCount++;
-      if (highCod && p.ownerId) {
-        const owner = people.find((o) => o.id === p.ownerId);
-        if (owner && !isFounderPersonId(owner.id) && clampAutonomy(owner.autonomyScore) < 4)
-          warningCount++;
-      }
-    }
-    return { projectCount, warningCount };
-  }, [goal.projects, goal.costOfDelay, people]);
+  const goalHeaderWarnings = useMemo(
+    () =>
+      getGoalHeaderWarnings(goal, people, {
+        includeProjectWarnings: !expanded,
+      }),
+    [goal, people, expanded]
+  );
 
   useEffect(() => {
     if (bulkTick === 0) return;
@@ -212,15 +210,36 @@ export function GoalSection({
     [people]
   );
   const goalConfidenceAuto = useMemo(
-    () => computeGoalConfidence(goal.projects, peopleById),
-    [goal.projects, peopleById]
+    () => computeGoalConfidence(goal.projects, peopleById, goal.costOfDelay),
+    [goal.projects, peopleById, goal.costOfDelay]
   );
   const goalConfidenceExplain = useMemo(
     () => explainGoalConfidence(goal, peopleById),
     [goal, peopleById]
   );
   const ownerPerson = people.find((p) => p.id === goal.ownerId);
-  const isUnassigned = !goal.ownerId;
+
+  const addProjectToGoal = useCallback(async () => {
+    const project = await createProject({
+      goalId: goal.id,
+      name: "New project",
+      description: "",
+      ownerId: "",
+      assigneeIds: [],
+      type: "Engineering",
+      priority: "P2",
+      status: "Pending",
+      complexityScore: 3,
+      definitionOfDone: "",
+      startDate: "",
+      targetDate: "",
+      slackUrl: "",
+      atRisk: false,
+      spotlight: false,
+      reviewLog: [],
+    });
+    setNewProjectNameFocusId(project.id);
+  }, [goal.id]);
 
   const goalHeaderRef = useRef<HTMLDivElement>(null);
   const [goalHeaderPx, setGoalHeaderPx] = useState(
@@ -239,6 +258,7 @@ export function GoalSection({
   }, [
     goal.description,
     goal.measurableTarget,
+    goal.whyItMatters,
     goal.currentValue,
     goal.atRisk,
     goal.spotlight,
@@ -266,7 +286,7 @@ export function GoalSection({
         onClick={onGoalHeaderClick}
         style={{ top: goalStickyTopPx }}
         className={cn(
-          "sticky z-[27] group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-2 transition-colors rounded-md cursor-pointer",
+          "sticky z-[27] group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors rounded-md cursor-pointer",
           "shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           goal.atRisk
             ? "bg-amber-950/85 hover:bg-amber-950/55"
@@ -285,30 +305,35 @@ export function GoalSection({
           />
         </div>
 
-        {/* Description */}
+        {/* Goal title */}
         <div className="w-[280px] min-w-0 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={goal.description}
             onSave={(description) => updateGoal(goal.id, { description })}
-            displayClassName="font-medium text-zinc-200"
+            displayClassName="font-semibold text-zinc-100"
             startInEditMode={goal.id === focusGoalTitleEditId}
           />
         </div>
 
-        {/* Owner */}
-        <div className="w-40 min-w-0 shrink-0">
+        {/* DRI */}
+        <div className="w-36 min-w-0 shrink-0">
           <OwnerPickerCell
+            {...GRID_ALIGN}
             people={people}
             value={goal.ownerId}
             onSave={(ownerId) => updateGoal(goal.id, { ownerId })}
             priority={goal.priority}
             workloadMap={ownerWorkloadMap}
+            emphasizeUnassigned
+            restrictToGoalDriEligible
           />
         </div>
 
         {/* Priority */}
         <div className="w-14 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={goal.priority}
             onSave={(priority) => updateGoal(goal.id, { priority: priority as Priority })}
             type="select"
@@ -317,8 +342,10 @@ export function GoalSection({
           />
         </div>
 
+        {/* Description (measurable target) */}
         <div className="w-44 shrink-0 min-w-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={goal.measurableTarget}
             onSave={(measurableTarget) =>
               updateGoal(goal.id, { measurableTarget })
@@ -329,8 +356,25 @@ export function GoalSection({
           />
         </div>
 
+        <div
+          className="w-44 shrink-0 min-w-0"
+          title="Why it matters — what we stand to gain"
+        >
+          <InlineEditCell
+            {...GRID_ALIGN}
+            value={goal.whyItMatters}
+            onSave={(whyItMatters) =>
+              updateGoal(goal.id, { whyItMatters })
+            }
+            placeholder="Why it matters"
+            displayClassName="text-zinc-100 font-medium"
+            displayTruncateSingleLine
+          />
+        </div>
+
         <div className="w-44 shrink-0 min-w-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={goal.currentValue}
             onSave={(currentValue) =>
               updateGoal(goal.id, { currentValue })
@@ -341,20 +385,8 @@ export function GoalSection({
           />
         </div>
 
-        {/* Impact (higher = better) */}
-        <div
-          className="w-44 shrink-0"
-          title="Impact — higher is more valuable"
-        >
-          <InlineEditCell
-            value={String(goal.impactScore)}
-            onSave={(v) =>
-              updateGoal(goal.id, { impactScore: parseScoreBand(v) })
-            }
-            type="select"
-            options={SCORE_BAND_OPTIONS}
-          />
-        </div>
+        {/* Spacer: aligns with project Complexity so Next milestone / Status line up */}
+        <div className="w-44 shrink-0" aria-hidden />
 
         {/* Pad to align with project Complexity column */}
         <div className="w-28 shrink-0" aria-hidden />
@@ -370,6 +402,7 @@ export function GoalSection({
         {/* Cost of Delay */}
         <div className="w-32 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={String(goal.costOfDelay)}
             onSave={(v) =>
               updateGoal(goal.id, { costOfDelay: parseScoreBand(v) })
@@ -426,17 +459,7 @@ export function GoalSection({
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
 
-        {/* Review (72h staleness vs 24h on projects) — before signal badges so column aligns with GoalsColumnHeaders */}
-        <div className="w-[5.5rem] shrink-0 flex justify-end">
-          <ReviewAction
-            kind="goal"
-            lastReviewed={goal.lastReviewed}
-            onConfirm={() => markGoalReviewed(goal.id)}
-            ownerAutonomy={ownerPerson?.autonomyScore}
-          />
-        </div>
-
-        {/* At risk / Spotlight + project counts (collapsed) + Unassigned — right cluster */}
+        {/* At risk / Spotlight + project counts (collapsed) + warnings — right cluster */}
         <div className="flex shrink-0 items-center justify-end gap-1.5 flex-wrap">
           {goal.atRisk && (
             <span
@@ -488,26 +511,24 @@ export function GoalSection({
               {collapsedSummary.projectCount} project{collapsedSummary.projectCount === 1 ? "" : "s"}
             </span>
           )}
-          {!expanded && collapsedSummary.warningCount > 0 && (
+          {goalHeaderWarnings.length === 1 && (
             <span
-              className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-orange-400/30 bg-orange-500/8 px-1.5 py-0.5 text-[10px] font-medium text-orange-300/80"
-              title={`${collapsedSummary.warningCount} warning${collapsedSummary.warningCount === 1 ? "" : "s"} across projects — expand to review`}
+              className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
+              title={goalHeaderWarnings[0].title}
             >
-              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-              {collapsedSummary.warningCount} warning{collapsedSummary.warningCount === 1 ? "" : "s"}
+              {goalHeaderWarnings[0].label}
             </span>
           )}
-          {isUnassigned && (
-            <span
-              className="whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300/85"
-              title="No owner assigned"
-            >
-              Unassigned
-            </span>
+          {goalHeaderWarnings.length > 1 && (
+            <WarningsBadge warnings={goalHeaderWarnings} />
           )}
         </div>
 
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <ReviewNotesPopover
+            entries={goal.reviewLog}
+            onAppendNote={(t) => appendGoalReviewNote(goal.id, t)}
+          />
           <ExecFlagMenu
             atRisk={goal.atRisk}
             spotlight={goal.spotlight}
@@ -531,156 +552,191 @@ export function GoalSection({
         )}
       >
         <div>
-          <ProjectsColumnHeaders
-            stackTopPx={projectsColumnStackTopPx}
-            stickyZClass="z-[26]"
-          />
+          {goal.projects.length > 0 && (
+            <div className="ml-4 rounded-r-md border-l-2 border-zinc-700/50 bg-zinc-900/25 shadow-[inset_1px_0_0_rgba(0,0,0,0.2)]">
+              <ProjectsColumnHeaders
+                stackTopPx={projectsColumnStackTopPx}
+                stickyZClass="z-[26]"
+              />
 
-          {goal.projects.map((project, idx) => {
-            const rowRevealed =
-              !isSequentialMulti ||
-              sequentialShowAll ||
-              (queueSliceIdSet?.has(project.id) ?? true);
+              {goal.projects.map((project, idx) => {
+                const rowRevealed =
+                  !isSequentialMulti ||
+                  sequentialShowAll ||
+                  (queueSliceIdSet?.has(project.id) ?? true);
 
-            const rowInner = (
-              <div className="relative">
-                {isSequentialMulti && (
-                  <span className="absolute left-6 top-3 text-xs text-purple-400/40 font-mono">
-                    {idx + 1}.
-                  </span>
-                )}
-                <ProjectRow
-                  goalId={goal.id}
-                  project={project}
-                  people={people}
-                  expandForSearch={expandForSearch}
-                  goalCostOfDelay={goal.costOfDelay}
-                  ownerWorkloadMap={ownerWorkloadMap}
-                  focusProjectNameEditId={newProjectNameFocusId}
-                />
-              </div>
-            );
+                const syncDueDateMinYmd =
+                  goal.executionMode === "Sync" && idx > 0
+                    ? minDueDateYmdAfterPreviousProject(
+                        goal.projects[idx - 1]?.targetDate ?? ""
+                      )
+                    : undefined;
 
-            if (!isSequentialMulti) {
-              return <div key={project.id}>{rowInner}</div>;
-            }
+                const rowInner = (
+                  <div className="relative">
+                    {isSequentialMulti && (
+                      <span className="absolute left-6 top-3 text-xs text-purple-400/40 font-mono">
+                        {idx + 1}.
+                      </span>
+                    )}
+                    <ProjectRow
+                      goalId={goal.id}
+                      project={project}
+                      people={people}
+                      expandForSearch={expandForSearch}
+                      goalCostOfDelay={goal.costOfDelay}
+                      ownerWorkloadMap={ownerWorkloadMap}
+                      focusProjectNameEditId={newProjectNameFocusId}
+                      syncDueDateMinYmd={syncDueDateMinYmd}
+                    />
+                  </div>
+                );
 
-            return (
-              <div
-                key={project.id}
-                className={cn(
-                  "grid transition-[grid-template-rows] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none",
-                  rowRevealed ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-                )}
-              >
-                <div
-                  className={cn(
-                    "min-h-0 transition-opacity duration-[320ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
-                    rowRevealed ? "overflow-visible opacity-100" : "overflow-hidden opacity-0"
-                  )}
-                  inert={rowRevealed ? undefined : true}
-                  aria-hidden={!rowRevealed}
-                >
-                  {rowInner}
-                </div>
-              </div>
-            );
-          })}
-
-          {isSequentialMulti && goal.projects.length > 0 && (
-            <div className="pl-6 pr-4 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-1.5 text-[11px] leading-snug">
-              <span
-                className="text-zinc-500"
-                title="Runs in dependency order: finished work, current step, then what is next"
-              >
-                Sequential
-              </span>
-              <button
-                type="button"
-                onClick={() => setSequentialShowAll((v) => !v)}
-                className="font-medium text-purple-300/90 hover:text-purple-200 underline-offset-2 hover:underline transition-colors"
-                title={
-                  sequentialShowAll
-                    ? "Show only completed work and the current step (hide later stages)"
-                    : "Show every project in this goal"
+                if (!isSequentialMulti) {
+                  return <div key={project.id}>{rowInner}</div>;
                 }
-              >
-                {sequentialShowAll ? "Queue only" : "Show all"}
-              </button>
-              {hiddenSequentialCount > 0 && (
-                <span className="text-zinc-600 tabular-nums">
-                  · {hiddenSequentialCount} later hidden
-                </span>
+
+                return (
+                  <div
+                    key={project.id}
+                    className={cn(
+                      "grid transition-[grid-template-rows] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none",
+                      rowRevealed ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "min-h-0 transition-opacity duration-[320ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
+                        rowRevealed ? "overflow-visible opacity-100" : "overflow-hidden opacity-0"
+                      )}
+                      inert={rowRevealed ? undefined : true}
+                      aria-hidden={!rowRevealed}
+                    >
+                      {rowInner}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {isSequentialMulti && goal.projects.length > 0 && (
+                <div className="pl-6 pr-4 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-1.5 pb-1 text-[11px] leading-snug border-t border-zinc-800/60">
+                  <span
+                    className="text-zinc-500"
+                    title="Runs in dependency order: finished work, current step, then what is next"
+                  >
+                    Sequential
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSequentialShowAll((v) => !v)}
+                    className="font-medium text-purple-300/90 hover:text-purple-200 underline-offset-2 hover:underline transition-colors"
+                    title={
+                      sequentialShowAll
+                        ? "Show only completed work and the current step (hide later stages)"
+                        : "Show every project in this goal"
+                    }
+                  >
+                    {sequentialShowAll ? "Queue only" : "Show all"}
+                  </button>
+                  {hiddenSequentialCount > 0 && (
+                    <span className="text-zinc-600 tabular-nums">
+                      · {hiddenSequentialCount} later hidden
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           )}
 
-          <div
-            className={cn(
-              "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
-              "opacity-0 pointer-events-none transition-opacity duration-150",
-              "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
-              "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
-              "focus-within:pointer-events-auto focus-within:opacity-100"
-            )}
-          >
-            <button
-              type="button"
-              onClick={async () => {
-                const project = await createProject({
-                  goalId: goal.id,
-                  name: "New project",
-                  ownerId: "",
-                  assigneeIds: [],
-                  type: "Engineering",
-                  priority: "P2",
-                  status: "Not Started",
-                  complexityScore: 3,
-                  definitionOfDone: "",
-                  startDate: "",
-                  targetDate: "",
-                  slackUrl: "",
-                  lastReviewed: "",
-                  atRisk: false,
-                  spotlight: false,
-                });
-                setNewProjectNameFocusId(project.id);
-              }}
-              className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-            >
-              <Plus className="h-3 w-3" />
-              Add project
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                const g = await createGoal({
-                  companyId: goal.companyId,
-                  description: "New goal",
-                  measurableTarget: "",
-                  currentValue: "",
-                  impactScore: 3,
-                  confidenceScore: 3,
-                  costOfDelay: 3,
-                  ownerId: "",
-                  priority: "P2",
-                  executionMode: "Async",
-                  slackChannel: "",
-                  lastReviewed: "",
-                  status: "Not Started",
-                  atRisk: false,
-                  spotlight: false,
-                });
-                onGoalCreated?.(g.id);
-              }}
-              className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-            >
-              <Plus className="h-3 w-3" />
-              Add goal
-            </button>
-          </div>
+          {goal.projects.length === 0 && (
+            <div className="mt-1 ml-4 mr-4 mb-1 rounded-r-md border border-dashed border-zinc-800/90 border-l-2 border-l-zinc-700/50 bg-zinc-900/20 px-4 py-3.5">
+              <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+                No projects yet. Add a project to track milestones and delivery for this goal.&nbsp;
+                <button
+                  type="button"
+                  title="Add a new project to this goal"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void addProjectToGoal();
+                  }}
+                  className={TRACKER_INLINE_TEXT_ACTION}
+                >
+                  Add project
+                </button>
+                <AiCreateButton
+                  type="project"
+                  goalId={goal.id}
+                  onCreated={(id) => setNewProjectNameFocusId(id)}
+                  inline
+                />
+              </p>
+            </div>
+          )}
         </div>
       </CollapsePanel>
+
+      {/* Outside CollapsePanel so Add goal / Add project stay available when the goal is collapsed */}
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
+          "opacity-0 pointer-events-none transition-opacity duration-150",
+          "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
+          "group-hover/company:pointer-events-auto group-hover/company:opacity-100",
+          "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
+          "focus-within:pointer-events-auto focus-within:opacity-100"
+        )}
+      >
+        {goal.projects.length > 0 && (
+          <>
+            <button
+              type="button"
+              title="Add a new project to this goal"
+              onClick={() => void addProjectToGoal()}
+              className={TRACKER_FOOTER_TEXT_ACTION}
+            >
+              Add project
+            </button>
+            <AiCreateButton
+              type="project"
+              goalId={goal.id}
+              onCreated={(id) => setNewProjectNameFocusId(id)}
+            />
+          </>
+        )}
+        <button
+          type="button"
+          title="Add another goal under this company"
+          onClick={async () => {
+            const g = await createGoal({
+              companyId: goal.companyId,
+              description: "New goal",
+              measurableTarget: "",
+              whyItMatters: "",
+              currentValue: "",
+              impactScore: 3,
+              confidenceScore: 0,
+              costOfDelay: 3,
+              ownerId: "",
+              priority: "P2",
+              executionMode: "Async",
+              slackChannel: "",
+              status: "Not Started",
+              atRisk: false,
+              spotlight: false,
+              reviewLog: [],
+            });
+            onGoalCreated?.(g.id);
+          }}
+          className={TRACKER_FOOTER_TEXT_ACTION}
+        >
+          Add goal
+        </button>
+        <AiCreateButton
+          type="goal"
+          companyId={goal.companyId}
+          onCreated={(id) => onGoalCreated?.(id)}
+        />
+      </div>
     </div>
   );
 }

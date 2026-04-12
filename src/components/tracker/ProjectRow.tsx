@@ -3,14 +3,16 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
-import type { ProjectWithMilestones, Person } from "@/lib/types/tracker";
-import { StatusEnum, PriorityEnum } from "@/lib/schemas/tracker";
+import type {
+  ProjectWithMilestones,
+  Person,
+  ProjectStatus,
+  Priority,
+} from "@/lib/types/tracker";
+import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { OwnerPickerCell } from "./OwnerPickerCell";
 import { ProgressBar } from "./ProgressBar";
@@ -27,24 +29,32 @@ import {
   updateProject,
   deleteProject,
   createMilestone,
-  markProjectReviewed,
+  appendProjectReviewNote,
 } from "@/server/actions/tracker";
 import { ChevronRight, Flag, Link2, Plus } from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
-import { ReviewAction } from "./ReviewAction";
+import { ReviewNotesPopover } from "./ReviewNotesPopover";
+import { isReviewStale } from "@/lib/reviewStaleness";
 import { cn } from "@/lib/utils";
 
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import type { Priority, Status } from "@/lib/types/tracker";
 import { CollapsePanel } from "./CollapsePanel";
 import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { projectMatchesCloseWatch } from "@/lib/closeWatch";
 import {
   AUTONOMY_GROUP_LABEL,
   clampAutonomy,
-  isFounderPersonId,
+  isFounderPerson,
 } from "@/lib/autonomyRoster";
+import { getTrackerProjectWarnings } from "@/lib/tracker-project-warnings";
+import { WarningsBadge } from "./WarningsBadge";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
+import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
+import { ProjectStatusPill } from "./ProjectStatusPill";
+import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
+
+/** Align editable cells with sticky column headers (no default resting inset). */
+const GRID_ALIGN = { trackerGridAlign: true as const };
 
 interface ProjectRowProps {
   /** Parent goal id — used in single-project expansion mode */
@@ -57,6 +67,11 @@ interface ProjectRowProps {
   ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
   /** When this matches `project.id`, project name opens in edit mode on mount. */
   focusProjectNameEditId?: string | null;
+  /**
+   * Sync goals: minimum due date (`YYYY-MM-DD`, inclusive) so this row stays after
+   * the previous project’s due date. Set by parent from goal order.
+   */
+  syncDueDateMinYmd?: string;
 }
 
 export function ProjectRow({
@@ -67,6 +82,7 @@ export function ProjectRow({
   goalCostOfDelay,
   ownerWorkloadMap,
   focusProjectNameEditId = null,
+  syncDueDateMinYmd,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
@@ -183,7 +199,6 @@ export function ProjectRow({
     [toggleProjectRow]
   );
 
-  const statusOptions = StatusEnum.options.map((s) => ({ value: s, label: s }));
   const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
   const peopleById = useMemo(
     () => new Map(people.map((p) => [p.id, p])),
@@ -198,47 +213,25 @@ export function ProjectRow({
     [project, peopleById]
   );
   const ownerPerson = people.find((p) => p.id === project.ownerId);
-  const isUnassigned = !project.ownerId;
+  const projectInReviewQueue = useMemo(
+    () =>
+      isReviewStale(
+        project.lastReviewed,
+        "project",
+        ownerPerson?.autonomyScore
+      ),
+    [project.lastReviewed, ownerPerson?.autonomyScore]
+  );
 
   const nextPendingMilestone = useMemo(
     () => getNextPendingMilestone(project.milestones),
     [project.milestones]
   );
 
-  const missingTargetDate = useMemo(() => {
-    const raw = project.targetDate?.trim() ?? "";
-    if (!raw) return true;
-    return parseCalendarDateString(raw) === null;
-  }, [project.targetDate]);
-
-  const hasMilestoneMissingDate = useMemo(
-    () =>
-      project.milestones.some(
-        (ms) => ms.status !== "Done" && !ms.targetDate?.trim()
-      ),
-    [project.milestones]
+  const warnings = useMemo(
+    () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
+    [project, goalCostOfDelay, people]
   );
-
-  const highCodLowAutonomy = useMemo(() => {
-    if (!goalCostOfDelay || goalCostOfDelay < 4) return false;
-    if (!ownerPerson || isFounderPersonId(ownerPerson.id)) return false;
-    return clampAutonomy(ownerPerson.autonomyScore) < 4;
-  }, [goalCostOfDelay, ownerPerson]);
-
-  const warnings = useMemo(() => {
-    const list: { label: string; title: string }[] = [];
-    if (project.milestones.length === 0)
-      list.push({ label: "No milestones", title: "No milestones yet — add checkpoints to track delivery" });
-    if (hasMilestoneMissingDate)
-      list.push({ label: "Milestone undated", title: "One or more active milestones have no target date" });
-    if (missingTargetDate)
-      list.push({ label: "No due date", title: "No target date — set one in the Date column" });
-    if (isUnassigned)
-      list.push({ label: "Unassigned", title: "No owner assigned" });
-    if (highCodLowAutonomy)
-      list.push({ label: "Low autonomy / high CoD", title: "Owner autonomy is under 4 on a goal with high cost of delay — consider reassigning or increasing oversight" });
-    return list;
-  }, [project.milestones.length, hasMilestoneMissingDate, missingTargetDate, isUnassigned, highCodLowAutonomy]);
 
   const showCloseWatch = useMemo(
     () => projectMatchesCloseWatch(project, people),
@@ -246,16 +239,21 @@ export function ProjectRow({
   );
 
   const lowAutonomyOwnerHint = useMemo(() => {
-    if (!ownerPerson || isFounderPersonId(ownerPerson.id)) return null;
+    if (!ownerPerson || isFounderPerson(ownerPerson)) return null;
     const level = clampAutonomy(ownerPerson.autonomyScore);
     if (level > 2) return null;
     return AUTONOMY_GROUP_LABEL[level].title;
   }, [ownerPerson]);
 
+  const projectNeedsDueDate = useMemo(() => {
+    const raw = project.targetDate?.trim() ?? "";
+    return !raw || parseCalendarDateString(raw) === null;
+  }, [project.targetDate]);
+
   return (
     <div
       className={cn(
-        "max-w-full min-w-0",
+        "group/project max-w-full min-w-0",
         project.atRisk &&
           "rounded-md border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30",
         !project.atRisk &&
@@ -291,29 +289,34 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Name */}
-        <div className="w-[280px] min-w-0 shrink-0">
+        {/* Name — w-[264px] matches ProjectsColumnHeaders; goal rows use w-[280px] so columns align in ml-4 rail */}
+        <div className="w-[264px] min-w-0 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={project.name}
             onSave={(name) => updateProject(project.id, { name })}
             startInEditMode={project.id === focusProjectNameEditId}
+            displayClassName="text-zinc-200"
           />
         </div>
 
         {/* Owner */}
-        <div className="w-40 min-w-0 shrink-0">
+        <div className="w-36 min-w-0 shrink-0">
           <OwnerPickerCell
+            {...GRID_ALIGN}
             people={people}
             value={project.ownerId}
             onSave={(ownerId) => updateProject(project.id, { ownerId })}
             priority={project.priority}
             workloadMap={ownerWorkloadMap}
+            emphasizeUnassigned
           />
         </div>
 
         {/* Priority */}
         <div className="w-14 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={project.priority}
             onSave={(priority) =>
               updateProject(project.id, { priority: priority as Priority })
@@ -324,27 +327,62 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Status */}
-        <div className="w-44 shrink-0">
+        {/* Description — aligns under goal Description */}
+        <div className="w-44 shrink-0 min-w-0" onClick={(e) => e.stopPropagation()}>
           <InlineEditCell
-            value={project.status}
-            onSave={(status) =>
-              updateProject(project.id, { status: status as Status })
+            {...GRID_ALIGN}
+            value={project.description}
+            onSave={(description) =>
+              updateProject(project.id, { description })
             }
-            type="select"
-            options={statusOptions}
+            placeholder="Add description"
+            displayClassName="text-zinc-100 font-medium"
+            displayTruncateSingleLine
           />
         </div>
 
-        {/* Next milestone — derived from first milestone not Done */}
+        {/* Done when — aligns under goal Why */}
+        <div className="w-44 shrink-0 min-w-0" onClick={(e) => e.stopPropagation()}>
+          <InlineEditCell
+            {...GRID_ALIGN}
+            value={project.definitionOfDone}
+            onSave={(definitionOfDone) =>
+              updateProject(project.id, { definitionOfDone })
+            }
+            placeholder="Definition of done"
+            displayClassName="text-zinc-100 font-medium"
+            displayTruncateSingleLine
+          />
+        </div>
+
+        {/* Complexity — aligns under goal Current */}
         <div
-          className="group/next-ms w-44 shrink-0 min-w-0 py-1.5"
+          className="w-28 shrink-0"
+          title="Complexity — higher is harder to deliver"
+        >
+          <InlineEditCell
+            {...GRID_ALIGN}
+            value={String(project.complexityScore)}
+            onSave={(v) =>
+              updateProject(project.id, {
+                complexityScore: parseScoreBand(v),
+              })
+            }
+            type="select"
+            options={SCORE_BAND_OPTIONS}
+          />
+        </div>
+
+        {/* Next milestone */}
+        <div
+          className="w-44 shrink-0 min-w-0"
           onClick={(e) => e.stopPropagation()}
         >
           {project.milestones.length === 0 ? (
             <button
               type="button"
-              className="truncate text-left text-sm font-medium leading-snug text-zinc-500 cursor-pointer"
+              title="Click to add a milestone"
+              className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
               onClick={async () => {
                 const ms = await createMilestone({
                   projectId: project.id,
@@ -357,18 +395,16 @@ export function ProjectRow({
                 setShowMilestones(true);
               }}
             >
-              <span className="block truncate group-hover/next-ms:hidden">
-                No milestones
-              </span>
-              <span className="hidden min-w-0 items-center gap-1 truncate text-zinc-200 group-hover/next-ms:flex">
-                <Plus className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden />
-                Create milestone
-              </span>
+              <Plus
+                className="h-3 w-3 shrink-0 text-amber-300/90"
+                aria-hidden
+              />
+              <span className="min-w-0 truncate">Create milestone</span>
             </button>
           ) : (
             <p
               className={cn(
-                "truncate text-left text-sm font-medium leading-snug",
+                "truncate text-left text-xs font-medium leading-tight",
                 nextPendingMilestone ? "text-zinc-100" : "text-zinc-400"
               )}
               title={
@@ -384,33 +420,18 @@ export function ProjectRow({
           )}
         </div>
 
-        {/* Done when — same interaction as goal Current */}
-        <div className="w-44 shrink-0 min-w-0" onClick={(e) => e.stopPropagation()}>
+        {/* Status */}
+        <div className="w-44 shrink-0 min-w-0">
           <InlineEditCell
-            value={project.definitionOfDone}
-            onSave={(definitionOfDone) =>
-              updateProject(project.id, { definitionOfDone })
-            }
-            placeholder="Definition of done"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        {/* Complexity (higher = harder / worse) */}
-        <div
-          className="w-28 shrink-0"
-          title="Complexity — higher is harder to deliver"
-        >
-          <InlineEditCell
-            value={String(project.complexityScore)}
-            onSave={(v) =>
-              updateProject(project.id, {
-                complexityScore: parseScoreBand(v),
-              })
+            {...GRID_ALIGN}
+            value={project.status}
+            onSave={(status) =>
+              updateProject(project.id, { status: status as ProjectStatus })
             }
             type="select"
-            options={SCORE_BAND_OPTIONS}
+            options={PROJECT_STATUS_SELECT_OPTIONS}
+            formatDisplay={(v) => <ProjectStatusPill status={v} />}
+            selectPresentation="always"
           />
         </div>
 
@@ -426,18 +447,28 @@ export function ProjectRow({
           <ProgressBar percent={project.progress} />
         </div>
 
-        {/* Target Date */}
+        {/* Due date */}
         <div className="w-28 shrink-0">
           <InlineEditCell
+            {...GRID_ALIGN}
             value={project.targetDate}
             onSave={(targetDate) =>
-              updateProject(project.id, { targetDate })
+              void updateProject(project.id, { targetDate }).catch((e) => {
+                alert(
+                  e instanceof Error
+                    ? e.message
+                    : "Could not save due date."
+                );
+              })
             }
             type="date"
+            dateMin={syncDueDateMinYmd}
+            emptyLabel="Set due date"
+            emphasizeEmpty={projectNeedsDueDate}
           />
         </div>
 
-        {/* Slack URL (column header shows Slack mark) */}
+        {/* Slack URL — icon only on goal row above */}
         <div
           className={cn(
             "transition-[min-width,max-width] duration-150 ease-out",
@@ -476,15 +507,6 @@ export function ProjectRow({
         </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
-
-        <div className="w-[5.5rem] shrink-0 flex justify-end">
-          <ReviewAction
-            kind="project"
-            lastReviewed={project.lastReviewed}
-            onConfirm={() => markProjectReviewed(project.id)}
-            ownerAutonomy={ownerPerson?.autonomyScore}
-          />
-        </div>
 
         {/* Status flags + warnings — right cluster */}
         <div className="flex shrink-0 items-center justify-end gap-1.5">
@@ -525,7 +547,12 @@ export function ProjectRow({
           )}
         </div>
 
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <ReviewNotesPopover
+            entries={project.reviewLog}
+            onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
+            pulseAttention={projectInReviewQueue}
+          />
           <ExecFlagMenu
             atRisk={project.atRisk}
             spotlight={project.spotlight}
@@ -561,28 +588,28 @@ export function ProjectRow({
           ) : null}
           {project.milestones.length === 0 ? (
             <div className="mx-4 my-3 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-6 sm:pl-8">
-              <p className="mb-3 max-w-md text-sm text-zinc-500">
-                No milestones yet. Add a milestone to track delivery
-                checkpoints for this project.
+              <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+                No milestones yet. Add a milestone to track delivery checkpoints
+                for this project.&nbsp;
+                <button
+                  type="button"
+                  title="Add a new milestone to this project"
+                  onClick={async () => {
+                    const ms = await createMilestone({
+                      projectId: project.id,
+                      name: "New milestone",
+                      status: "Not Done",
+                      targetDate: "",
+                    });
+                    setNewMilestoneNameFocusId(ms.id);
+                    setExpanded(true);
+                    setShowMilestones(true);
+                  }}
+                  className={TRACKER_INLINE_TEXT_ACTION}
+                >
+                  Add milestone
+                </button>
               </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  const ms = await createMilestone({
-                    projectId: project.id,
-                    name: "New milestone",
-                    status: "Not Done",
-                    targetDate: "",
-                  });
-                  setNewMilestoneNameFocusId(ms.id);
-                  setExpanded(true);
-                  setShowMilestones(true);
-                }}
-                className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-600 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add milestone
-              </button>
             </div>
           ) : (
             <>
@@ -597,8 +624,8 @@ export function ProjectRow({
                 className={cn(
                   "py-1.5 pl-14 pr-4",
                   "opacity-0 pointer-events-none transition-opacity duration-150",
-                  "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
-                  "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
+                  "group-hover/project:pointer-events-auto group-hover/project:opacity-100",
+                  "group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100",
                   "focus-within:pointer-events-auto focus-within:opacity-100"
                 )}
               >
@@ -624,117 +651,5 @@ export function ProjectRow({
         </div>
       </CollapsePanel>
     </div>
-  );
-}
-
-const WARNINGS_HOVER_CLOSE_MS = 120;
-
-function WarningsBadge({
-  warnings,
-}: {
-  warnings: { label: string; title: string }[];
-}) {
-  const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => setMounted(true), []);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    };
-  }, []);
-
-  const cancelScheduledClose = useCallback(() => {
-    if (closeTimerRef.current) {
-      clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleClose = useCallback(() => {
-    cancelScheduledClose();
-    closeTimerRef.current = setTimeout(() => {
-      setOpen(false);
-      closeTimerRef.current = null;
-    }, WARNINGS_HOVER_CLOSE_MS);
-  }, [cancelScheduledClose]);
-
-  const handlePointerEnter = useCallback(() => {
-    cancelScheduledClose();
-    setOpen(true);
-  }, [cancelScheduledClose]);
-
-  const reposition = useCallback(() => {
-    if (!open || !anchorRef.current) {
-      setPos(null);
-      return;
-    }
-    const rect = anchorRef.current.getBoundingClientRect();
-    const panelW = 200;
-    const vw = window.innerWidth;
-    const margin = 8;
-    let left = rect.right - panelW;
-    left = Math.max(margin, Math.min(left, vw - panelW - margin));
-    setPos({ top: rect.bottom + 4, left });
-  }, [open]);
-
-  useLayoutEffect(() => reposition(), [reposition]);
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    window.addEventListener("resize", reposition);
-    window.addEventListener("scroll", reposition, true);
-    return () => {
-      window.removeEventListener("resize", reposition);
-      window.removeEventListener("scroll", reposition, true);
-    };
-  }, [open, reposition]);
-
-  const overlay =
-    mounted && open ? (
-      <>
-        {pos && (
-          <div
-            className="fixed z-[110] min-w-[180px] rounded-md border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg"
-            style={{ top: pos.top, left: pos.left }}
-            onMouseEnter={handlePointerEnter}
-            onMouseLeave={scheduleClose}
-          >
-            {warnings.map((w) => (
-              <p
-                key={w.label}
-                className="flex items-center gap-2 whitespace-nowrap px-2 py-1 text-[11px] text-zinc-300"
-                title={w.title}
-              >
-                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400/80" />
-                {w.label}
-              </p>
-            ))}
-          </div>
-        )}
-      </>
-    ) : null;
-
-  return (
-    <>
-      <button
-        ref={anchorRef}
-        type="button"
-        aria-expanded={open}
-        onClick={(e) => e.stopPropagation()}
-        onMouseEnter={handlePointerEnter}
-        onMouseLeave={scheduleClose}
-        onFocus={handlePointerEnter}
-        onBlur={scheduleClose}
-        className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95 cursor-help"
-      >
-        {warnings.length} warnings
-      </button>
-      {mounted && overlay ? createPortal(overlay, document.body) : null}
-    </>
   );
 }

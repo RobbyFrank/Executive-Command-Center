@@ -1,7 +1,7 @@
 import type { Person } from "@/lib/types/tracker";
 import {
   FOUNDERS_DEPARTMENT,
-  isFounderPersonId,
+  isFounderPerson,
 } from "@/lib/autonomyRoster";
 
 /**
@@ -30,13 +30,14 @@ export function departmentSelectOptions(
   for (const p of people) {
     const d = p.department?.trim();
     if (!d) continue;
-    if (d === FOUNDERS_DEPARTMENT && !isFounderPersonId(p.id)) continue;
+    if (d === FOUNDERS_DEPARTMENT && !isFounderPerson(p)) continue;
     set.add(d);
   }
   const cur = currentDepartment.trim();
   if (cur) {
     if (cur === FOUNDERS_DEPARTMENT) {
-      if (isFounderPersonId(forPersonId)) set.add(cur);
+      const who = people.find((x) => x.id === forPersonId);
+      if (who && isFounderPerson(who)) set.add(cur);
     } else {
       set.add(cur);
     }
@@ -48,10 +49,12 @@ export function departmentSelectOptions(
     { value: "", label: "No Department" },
     ...sorted.map((d) => ({ value: d, label: d })),
   ];
+  const who = people.find((x) => x.id === forPersonId);
+  const forTargetIsFounder = who ? isFounderPerson(who) : false;
   return options.filter(
     (o) =>
       o.value === "" ||
       o.value !== FOUNDERS_DEPARTMENT ||
-      isFounderPersonId(forPersonId)
+      forTargetIsFounder
   );
 }
