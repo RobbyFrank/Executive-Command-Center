@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import type { Company, EmploymentKind, Person, PersonWorkload } from "@/lib/types/tracker";
 import {
@@ -148,11 +149,11 @@ const TEAM_SLACK_ACTION_BUTTON_CLASS =
 const TEAM_SLACK_ACTION_ICON_CLASS = "h-4 w-4 shrink-0 opacity-90";
 
 /**
- * Sticky header row (not each `<th>`): per-cell sticky breaks table column alignment in browsers.
- * Applied on `<tr>` so `<th>` cells stay in the column grid.
+ * Sticky header row applied on `<tr>` so `<th>` cells stay in the column grid.
+ * `top` is set dynamically via the `--team-roster-sticky-top` CSS variable on the scroll wrapper.
  */
 const TEAM_ROSTER_HEADER_ROW_STICKY =
-  "sticky z-20 border-b border-zinc-800 bg-zinc-950/95 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.45)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/80 [&_th]:bg-zinc-950/95";
+  "sticky z-20 top-[var(--team-roster-sticky-top,0px)] border-b border-zinc-800 bg-zinc-950/95 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.45)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/80 [&_th]:bg-zinc-950/95";
 
 export function TeamRosterManager({
   initialPeople,
@@ -176,11 +177,23 @@ export function TeamRosterManager({
 
   const teamStickyToolbarRef = useRef<HTMLDivElement>(null);
   const [teamStickyToolbarPx, setTeamStickyToolbarPx] = useState(0);
+  const teamColumnHeaderRef = useRef<HTMLTableRowElement>(null);
+  const [teamColumnHeaderPx, setTeamColumnHeaderPx] = useState(40);
 
   useLayoutEffect(() => {
     const el = teamStickyToolbarRef.current;
     if (!el) return;
     const sync = () => setTeamStickyToolbarPx(el.getBoundingClientRect().height);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = teamColumnHeaderRef.current;
+    if (!el) return;
+    const sync = () => setTeamColumnHeaderPx(Math.round(el.getBoundingClientRect().height));
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(el);
@@ -520,7 +533,7 @@ export function TeamRosterManager({
         onClose={() => setSlackImportOpen(false)}
         existingSlackIds={existingSlackIds}
       />
-      <div className="space-y-4">
+      <div className="space-y-4 min-w-max">
       <div
         ref={teamStickyToolbarRef}
         className="sticky top-0 z-30 -mx-6 px-6 pt-6 pb-3 border-b border-zinc-800/90 bg-zinc-950/95 shadow-[0_1px_0_0_rgba(39,39,42,0.75)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/75"
@@ -719,7 +732,15 @@ export function TeamRosterManager({
       ) : null}
       </div>
 
-      <div className="team-roster-table-outer bg-zinc-900/40 rounded-lg border border-zinc-800">
+      <div
+        className="bg-zinc-900/40 rounded-lg border border-zinc-800 w-max min-w-full"
+        style={
+          {
+            "--team-roster-sticky-top": `${teamStickyToolbarPx}px`,
+            "--team-roster-group-top": `${teamStickyToolbarPx + teamColumnHeaderPx}px`,
+          } as CSSProperties
+        }
+      >
         {filterActive && filteredPeople.length === 0 ? (
           <p className="text-sm text-zinc-500 py-10 px-4 text-center border-b border-zinc-800">
             {searchActive ? (
@@ -738,8 +759,8 @@ export function TeamRosterManager({
         <table className="w-full text-sm min-w-[1380px]">
           <thead>
             <tr
+              ref={teamColumnHeaderRef}
               className={cn("text-xs text-zinc-500", TEAM_ROSTER_HEADER_ROW_STICKY)}
-              style={{ top: teamStickyToolbarPx }}
             >
               <th
                 className="text-left px-3 py-3 font-medium min-w-[220px]"
@@ -824,7 +845,12 @@ export function TeamRosterManager({
                     : `w-${group.tier}`;
             return (
               <tbody key={tbodyKey}>
-                <tr className={visual.header}>
+                <tr
+                  className={cn(
+                    visual.header,
+                    "sticky z-10 top-[var(--team-roster-group-top,0px)] bg-zinc-900 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.35)]"
+                  )}
+                >
                   <td colSpan={13} className="px-3 py-2.5">
                     <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">

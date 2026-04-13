@@ -91,6 +91,8 @@ interface GoalSectionProps {
   initialExpanded?: boolean;
   /** Fired when this goal is expanded/collapsed so the company can default new goals consistently. */
   onExpandedChange?: (goalId: string, expanded: boolean) => void;
+  /** How this goal sits in the company’s goal list — drives corner radius and separators. */
+  stackPosition?: "only" | "first" | "middle" | "last";
   allGoals: Goal[];
   allCompanies: Company[];
   mirrorPickerHierarchy: CompanyWithGoals[];
@@ -106,6 +108,7 @@ export function GoalSection({
   onGoalCreated,
   initialExpanded,
   onExpandedChange,
+  stackPosition = "only",
   allGoals,
   allCompanies,
   mirrorPickerHierarchy,
@@ -456,10 +459,17 @@ export function GoalSection({
     roadmapGoalRowStickyTopPx - ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX;
   const projectsColumnStackTopPx = goalStickyTopPx + goalHeaderPx;
 
+  const headerTopRounded =
+    stackPosition === "only" || stackPosition === "first";
+
   return (
     <div
       className={cn(
-        "group/goal mb-2 max-w-full min-w-0 rounded-md transition-colors duration-150",
+        "group/goal max-w-full min-w-0 transition-colors duration-150",
+        stackPosition === "only" && "mb-2 rounded-md",
+        stackPosition === "first" && "rounded-t-md border-b border-zinc-800/45",
+        stackPosition === "middle" && "border-b border-zinc-800/45",
+        stackPosition === "last" && "mb-2 rounded-b-md",
         !goal.atRisk &&
           !goal.spotlight &&
           "hover:bg-zinc-900/30",
@@ -477,7 +487,8 @@ export function GoalSection({
         onContextMenuCapture={goalContext.onContextMenuCapture}
         style={{ top: goalStickyTopPx }}
         className={cn(
-          "sticky z-[27] flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors rounded-md cursor-pointer",
+          "sticky z-[27] flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors cursor-pointer",
+          headerTopRounded ? "rounded-t-md" : "rounded-t-none",
           "shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           goal.atRisk
             ? "bg-amber-950/85"
@@ -850,10 +861,10 @@ export function GoalSection({
           )}
 
           {goal.projects.length === 0 && (
-            <div className="mt-1 ml-4 mr-4 mb-1 rounded-r-md border border-dashed border-zinc-800/90 border-l-2 border-l-zinc-700/50 bg-zinc-900/20 px-4 py-3.5">
-              <div
+            <div className="pl-6 pr-4 py-1.5">
+              <p
                 className={cn(
-                  "w-full min-w-0",
+                  "m-0 w-full min-w-0",
                   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
                 )}
               >
@@ -875,7 +886,7 @@ export function GoalSection({
                   onCreated={(id) => setNewProjectNameFocusId(id)}
                   inline
                 />
-              </div>
+              </p>
             </div>
           )}
 

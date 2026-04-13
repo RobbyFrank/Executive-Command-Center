@@ -332,8 +332,8 @@ export function CompanySection({
                 stackTopPx={goalsColumnStackTopPx}
                 stickyZClass="z-[28]"
               />
-              <div className="space-y-1">
-                {company.goals.map((goal) => (
+              <div>
+                {company.goals.map((goal, goalIndex) => (
                   <GoalSection
                     key={goal.id}
                     goal={goal}
@@ -345,6 +345,15 @@ export function CompanySection({
                     onGoalCreated={handleNewGoalRegistered}
                     initialExpanded={newGoalInitialExpandedById[goal.id]}
                     onExpandedChange={handleGoalExpandedChange}
+                    stackPosition={
+                      company.goals.length <= 1
+                        ? "only"
+                        : goalIndex === 0
+                          ? "first"
+                          : goalIndex === company.goals.length - 1
+                            ? "last"
+                            : "middle"
+                    }
                     allGoals={allGoals}
                     allCompanies={allCompanies}
                     mirrorPickerHierarchy={mirrorPickerHierarchy}

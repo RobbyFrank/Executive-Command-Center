@@ -38,13 +38,4 @@ body {
     cursor: not-allowed;
   }
 
-  /**
-   * Horizontal scroll for wide roster table without `overflow-x: auto` forcing `overflow-y: auto`
-   * (CSS 2.1), which would nest a scrollport and break `position: sticky` vs the dashboard main.
-   */
-  .team-roster-table-outer {
-    overflow-x: auto;
-    overflow-y: clip;
-    max-width: 100%;
-  }
 }
