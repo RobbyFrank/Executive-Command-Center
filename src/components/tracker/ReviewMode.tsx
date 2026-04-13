@@ -41,8 +41,8 @@ import {
   scoreBandLabel,
 } from "@/lib/tracker-score-bands";
 import { prioritySelectTextClass } from "@/lib/prioritySort";
-import { formatSlackChannelHash } from "@/lib/slackDisplay";
-import { Layers, ArrowRightLeft, Link2, Plus } from "lucide-react";
+import { SlackChannelPicker } from "./SlackChannelPicker";
+import { Layers, ArrowRightLeft, Plus } from "lucide-react";
 import {
   computeGoalConfidence,
   computeProjectConfidenceFromProject,
@@ -309,6 +309,8 @@ function collectReviewItems(
         confidence: computeGoalConfidence(g.projects, peopleById, g.costOfDelay),
       });
       for (const p of g.projects) {
+        /** One queue entry per project — mirrors are the same record under another goal. */
+        if (p.isMirror) continue;
         const projectItem: ReviewItem = {
           kind: "project",
           id: p.id,
@@ -562,17 +564,12 @@ function GoalFieldsEditor({
 
       <div className="min-w-0">
         <p className="text-[11px] text-zinc-500 mb-1">Slack channel</p>
-        <InlineEditCell
-          variant="plain"
-          value={goal.slackChannel}
-          onSave={(slackChannel) =>
-            void updateGoal(goal.id, { slackChannel }).then(refresh)
+        <SlackChannelPicker
+          channelName={goal.slackChannel}
+          channelId={goal.slackChannelId ?? ""}
+          onSave={({ name, id }) =>
+            void updateGoal(goal.id, { slackChannel: name, slackChannelId: id }).then(refresh)
           }
-          formatDisplay={(v) => formatSlackChannelHash(v)}
-          placeholder="vd-sales"
-          displayClassName="text-zinc-300 font-medium min-w-0 not-italic"
-          emptyLabel="Add channel"
-          displayTitle="Slack channel — click to edit"
         />
       </div>
 
@@ -670,6 +667,7 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     for (const company of hierarchy) {
       for (const goal of company.goals) {
         for (const project of goal.projects) {
+          if (project.isMirror) continue;
           if (!project.ownerId) continue;
           let entry = m.get(project.ownerId);
           if (!entry) {
@@ -1011,7 +1009,7 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     return (
       <div className="mx-auto w-full max-w-7xl px-6 py-12">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-          <h1 className="text-xl font-bold text-zinc-100">Review</h1>
+          <h1 className="text-xl font-bold text-zinc-100">Review <span className="ml-2 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span></h1>
           <div className="flex flex-wrap items-end gap-2 sm:gap-3">
             <div className="min-w-0 w-[min(100%,12rem)] sm:w-[12rem]">
               <CompanyFilterMultiSelect
@@ -1096,7 +1094,7 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     <div className="mx-auto w-full max-w-7xl px-6 pt-8 pb-10 sm:pt-10">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-zinc-100">Review</h1>
+          <h1 className="text-xl font-bold text-zinc-100">Review <span className="ml-2 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span></h1>
           <p className="text-sm text-zinc-500 tabular-nums mt-1">
             {index + 1} of {total}
             {sessionReviewed > 0 ? (
@@ -1552,35 +1550,6 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                 </div>
               </div>
 
-              <div className="min-w-0">
-                <p className="text-[11px] text-zinc-500 mb-1">Slack link</p>
-                <InlineEditCell
-                  value={currentProjectFromHierarchy.slackUrl}
-                  onSave={(slackUrl) =>
-                    void updateProject(currentProjectFromHierarchy.id, {
-                      slackUrl,
-                    }).then(() => router.refresh())
-                  }
-                  placeholder="https://…"
-                  linkBehavior
-                  displayClassName="not-italic"
-                  formatDisplay={(url) => (
-                    <Link2
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        /^https?:\/\//i.test(url.trim())
-                          ? "text-cyan-500/90"
-                          : "text-zinc-500"
-                      )}
-                      aria-hidden
-                    />
-                  )}
-                  emptyLabel={
-                    <Link2 className="h-3.5 w-3.5 text-zinc-600" aria-hidden />
-                  }
-                />
-              </div>
-
               <div>
                 <p className="text-[11px] text-zinc-500 mb-1">Progress</p>
                 <ProgressBar percent={currentProjectFromHierarchy.progress} />
@@ -1653,13 +1622,22 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                   </div>
                 ) : (
                   <div className="-mx-1 space-y-0">
-                    {currentProjectFromHierarchy.milestones.map((ms) => (
-                      <MilestoneRow
-                        key={ms.id}
-                        milestone={ms}
-                        startNameInEditMode={ms.id === milestoneNameFocusId}
-                      />
-                    ))}
+                    {currentProjectFromHierarchy.milestones.map((ms) => {
+                      const isNext =
+                        nextPendingMilestone != null &&
+                        ms.id === nextPendingMilestone.id;
+                      const isQueued =
+                        ms.status !== "Done" && !isNext;
+                      return (
+                        <MilestoneRow
+                          key={ms.id}
+                          milestone={ms}
+                          startNameInEditMode={ms.id === milestoneNameFocusId}
+                          isNextPendingMilestone={isNext}
+                          isQueuedPendingMilestone={isQueued}
+                        />
+                      );
+                    })}
                     <div className="pt-2 pl-3">
                       <button
                         type="button"

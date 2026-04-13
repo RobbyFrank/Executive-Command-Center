@@ -14,6 +14,7 @@ import {
   confidenceScoreToPercent,
 } from "@/lib/confidenceScore";
 import { cn } from "@/lib/utils";
+import { useCompanySectionOverlayOptional } from "./company-section-overlay-context";
 
 const CLOSE_DELAY_MS = 200;
 
@@ -49,6 +50,9 @@ export function AutoConfidencePercent({
   const [placement, setPlacement] = useState<{ top: number; left: number } | null>(
     null
   );
+
+  const { incrementOverlay, decrementOverlay } =
+    useCompanySectionOverlayOptional() ?? {};
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current != null) {
@@ -118,6 +122,12 @@ export function AutoConfidencePercent({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [panelOpen]);
+
+  useEffect(() => {
+    if (!panelOpen || !incrementOverlay || !decrementOverlay) return;
+    incrementOverlay();
+    return () => decrementOverlay();
+  }, [panelOpen, incrementOverlay, decrementOverlay]);
 
   return (
     <>

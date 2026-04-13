@@ -340,6 +340,7 @@ export function SummaryDashboard({
         if (g.costOfDelay >= 4 && g.status !== "In Progress") timeSensitive++;
 
         for (const p of g.projects) {
+          if (p.isMirror) continue;
           if (p.priority === "P0") p0Projects++;
           if (p.status === "Stuck") blocked++;
           if (isProjectZombie(p)) zombies++;
@@ -431,6 +432,7 @@ export function SummaryDashboard({
     for (const c of hierarchy) {
       for (const g of c.goals) {
         for (const p of g.projects) {
+          if (p.isMirror) continue;
           const raw = p.targetDate?.trim();
           if (raw) {
             const d = parseCalendarDateString(raw);
@@ -486,6 +488,7 @@ export function SummaryDashboard({
         <header className="pt-1 mb-10">
           <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">
             Summary
+            <span className="ml-2.5 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span>
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
             Portfolio health at a glance.
@@ -517,6 +520,7 @@ export function SummaryDashboard({
       <header className="pt-1">
         <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">
           Summary
+          <span className="ml-2.5 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span>
         </h1>
         <p className="text-sm text-zinc-500 mt-1">
           Portfolio health at a glance. Click a metric or row to open the

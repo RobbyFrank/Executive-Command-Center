@@ -13,16 +13,10 @@ export default async function TeamPage() {
   ]);
 
   return (
-    <div className="pt-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-zinc-100">Team</h1>
-      </div>
-
-      <TeamRosterManager
-        initialPeople={people}
-        companies={companies}
-        workloads={workloads}
-      />
-    </div>
+    <TeamRosterManager
+      initialPeople={people}
+      companies={companies}
+      workloads={workloads}
+    />
   );
 }

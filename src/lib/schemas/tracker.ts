@@ -140,6 +140,8 @@ export const GoalSchema = z.object({
   priority: PriorityEnum.default("P2"),
   executionMode: ExecutionModeEnum.default("Async"),
   slackChannel: z.string().default(""),
+  /** Slack channel ID (e.g. C0G9QF9GW); empty when set manually without the picker. */
+  slackChannelId: z.string().default(""),
   lastReviewed: z.string().default(""),
   status: GoalStatusEnum.default("Not Started"),
   /** Executive signal: goal needs attention (mutually exclusive with spotlight) */
@@ -155,6 +157,11 @@ export const ProjectSchema = z.object({
   /** Local calendar date (YYYY-MM-DD) when the project was created; not shown in UI. Empty for legacy rows. */
   createdAt: z.string().default(""),
   goalId: z.string(),
+  /**
+   * Additional goals where this project is mirrored (shown under those goals).
+   * Primary goal remains `goalId`.
+   */
+  mirroredGoalIds: z.array(z.string()).default([]),
   name: z.string().min(1),
   /** Outcome or scope (Roadmap **Description** column; aligns under goal Description). */
   description: z.string().default(""),
@@ -170,6 +177,7 @@ export const ProjectSchema = z.object({
   definitionOfDone: z.string().default(""),
   startDate: z.string().default(""),
   targetDate: z.string().default(""),
+  /** @deprecated Slack threads are now tracked per-milestone. Kept for backward-compat on load. */
   slackUrl: z.string().default(""),
   lastReviewed: z.string().default(""),
   /** Executive signal: project needs attention (mutually exclusive with spotlight) */
@@ -186,6 +194,7 @@ export const MilestoneSchema = z.object({
   name: z.string().min(1),
   status: MilestoneStatusEnum.default("Not Done"),
   targetDate: z.string().default(""),
+  slackUrl: z.string().default(""),
 });
 
 /** How someone is engaged: staff vs hourly in-house vs external. */

@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useId, useMemo, useState } from "react";
-import { GoalStatusEnum, ProjectStatusEnum } from "@/lib/schemas/tracker";
+import {
+  DELIVERY_STATUS_FILTER_OPTIONS,
+  GOAL_DELIVERY_STATUSES_FOR_FILTER,
+  PROJECT_STATUS_ORDER,
+} from "@/lib/projectStatus";
+import { ProjectStatusPill } from "./ProjectStatusPill";
 import { ChevronDown, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const STATUSES = Array.from(
-  new Set([...GoalStatusEnum.options, ...ProjectStatusEnum.options])
-).sort((a, b) => a.localeCompare(b));
 
 interface StatusEnumFilterMultiSelectProps {
   selectedIds: string[];
@@ -35,7 +36,10 @@ export function StatusEnumFilterMultiSelect({
   const clear = useCallback(() => onChange([]), [onChange]);
 
   const labelByStatus = useMemo(
-    () => new Map<string, string>(STATUSES.map((s) => [s, s])),
+    () =>
+      new Map<string, string>(
+        DELIVERY_STATUS_FILTER_OPTIONS.map((s) => [s, s])
+      ),
     []
   );
 
@@ -57,6 +61,14 @@ export function StatusEnumFilterMultiSelect({
         <CircleDot className="h-3.5 w-3.5 text-zinc-400 shrink-0" aria-hidden />
         <span className="truncate">{selectedIds.length} statuses</span>
       </>
+    );
+
+  const optionButtonClass = (selected: boolean) =>
+    cn(
+      "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
+      selected
+        ? "bg-zinc-800 text-zinc-50 ring-1 ring-inset ring-zinc-500/80"
+        : "text-zinc-200 hover:bg-zinc-800/60"
     );
 
   return (
@@ -97,26 +109,66 @@ export function StatusEnumFilterMultiSelect({
             <p className="px-2.5 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-zinc-500">
               Show rows matching any of
             </p>
-            <div className="px-1 pb-1">
-              {STATUSES.map((s) => {
-                const selected = selectedSet.has(s);
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => toggle(s)}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
-                      selected
-                        ? "bg-zinc-800 text-zinc-50 ring-1 ring-inset ring-zinc-500/80"
-                        : "text-zinc-200 hover:bg-zinc-800/60"
-                    )}
-                  >
-                    <span className="min-w-0 break-words">{s}</span>
-                  </button>
-                );
-              })}
+            <div className="px-1 pb-1 space-y-2">
+              <div>
+                <p
+                  className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500"
+                  title="Same order and styling as the Status column on projects"
+                >
+                  Project status
+                </p>
+                <div className="space-y-0.5">
+                  {PROJECT_STATUS_ORDER.map((s) => {
+                    const selected = selectedSet.has(s);
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => toggle(s)}
+                        className={optionButtonClass(selected)}
+                      >
+                        <span className="min-w-0 flex-1 [&_.inline-flex]:max-w-none">
+                          <ProjectStatusPill status={s} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="border-t border-zinc-800 pt-1">
+                <p
+                  className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500"
+                  title="Statuses used on goals (not all appear on projects)"
+                >
+                  Goal status
+                </p>
+                <div className="space-y-0.5">
+                  {GOAL_DELIVERY_STATUSES_FOR_FILTER.map((s) => {
+                    const selected = selectedSet.has(s);
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => toggle(s)}
+                        className={optionButtonClass(selected)}
+                      >
+                        <span
+                          className={cn(
+                            "inline-flex min-h-[28px] w-full min-w-0 max-w-full items-center rounded border px-1.5 py-0.5 text-[11px] font-medium leading-tight ring-1",
+                            selected
+                              ? "border-zinc-500 bg-zinc-800/90 text-zinc-50 ring-zinc-500/40"
+                              : "border-zinc-600/60 bg-zinc-800/50 text-zinc-200 ring-zinc-700/40"
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{s}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             {selectedIds.length > 0 ? (
               <div className="border-t border-zinc-800 px-2 py-1.5 whitespace-nowrap">

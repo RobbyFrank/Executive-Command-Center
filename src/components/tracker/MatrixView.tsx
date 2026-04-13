@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import type {
+  Company,
   CompanyWithGoals,
   Person,
   Priority,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/matrix-bands";
 import { cn } from "@/lib/utils";
 import { Building2, Grid3X3 } from "lucide-react";
+import { SharedBadge } from "./SharedBadge";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 
 export interface MatrixProjectCell {
@@ -108,6 +110,15 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
     [people]
   );
 
+  const allGoals = useMemo(
+    () => hierarchy.flatMap((c) => c.goals),
+    [hierarchy]
+  );
+  const allCompanies = useMemo(
+    (): Company[] => hierarchy.map(({ goals: _g, ...co }) => co),
+    [hierarchy]
+  );
+
   const cells = useMemo(
     () => collectProjects(hierarchyFiltered),
     [hierarchyFiltered]
@@ -137,7 +148,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
     return (
       <div className="px-6 pb-8">
         <header className="mb-6">
-          <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
+          <h1 className="text-xl font-bold text-zinc-100">Priority Matrix <span className="ml-2 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span></h1>
           <p className="text-sm text-zinc-500 mt-1">
             Projects positioned by goal priority and project complexity.
           </p>
@@ -162,7 +173,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
   return (
     <div className="px-6 pb-8 flex flex-col h-full">
       <header className="mb-6 shrink-0">
-        <h1 className="text-xl font-bold text-zinc-100">Priority Matrix</h1>
+        <h1 className="text-xl font-bold text-zinc-100">Priority Matrix <span className="ml-2 align-middle inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">Beta</span></h1>
         <p className="text-sm text-zinc-500 mt-1">
           Projects positioned by goal priority (rows) and project complexity (columns).
           Top-left is highest leverage; bottom-right is cut-or-defer territory.
@@ -280,7 +291,7 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
                             : undefined;
                           return (
                             <Link
-                              key={item.project.id}
+                              key={`${item.goalId}-${item.project.id}`}
                               href={roadmapLink(item.goalId, item.project.id)}
                               className="block rounded-md border border-zinc-800/80 bg-zinc-950/60 px-2 py-1.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
                             >
@@ -296,9 +307,21 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
                                   <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-zinc-600" />
                                 )}
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-xs font-medium text-zinc-200">
-                                    {item.project.name}
-                                  </p>
+                                  <div className="flex min-w-0 items-center gap-1.5">
+                                    <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">
+                                      {item.project.name}
+                                    </p>
+                                    <SharedBadge
+                                      isMirror={item.project.isMirror ?? false}
+                                      primaryGoalId={item.project.goalId}
+                                      mirroredGoalIds={
+                                        item.project.mirroredGoalIds ?? []
+                                      }
+                                      currentGoalId={item.goalId}
+                                      goals={allGoals}
+                                      companies={allCompanies}
+                                    />
+                                  </div>
                                   <p className="truncate text-[10px] text-zinc-500">
                                     {item.goalDescription}
                                   </p>

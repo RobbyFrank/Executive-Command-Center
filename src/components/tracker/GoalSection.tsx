@@ -8,7 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import type { GoalWithProjects, Person } from "@/lib/types/tracker";
+import type {
+  Company,
+  CompanyWithGoals,
+  Goal,
+  GoalWithProjects,
+  Person,
+} from "@/lib/types/tracker";
 import type { Priority } from "@/lib/types/tracker";
 import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
@@ -48,7 +54,7 @@ import { getSequentialQueueProjects } from "@/lib/sequentialProjects";
 import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
-import { formatSlackChannelHash } from "@/lib/slackDisplay";
+import { SlackChannelPicker } from "./SlackChannelPicker";
 
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
@@ -85,6 +91,9 @@ interface GoalSectionProps {
   initialExpanded?: boolean;
   /** Fired when this goal is expanded/collapsed so the company can default new goals consistently. */
   onExpandedChange?: (goalId: string, expanded: boolean) => void;
+  allGoals: Goal[];
+  allCompanies: Company[];
+  mirrorPickerHierarchy: CompanyWithGoals[];
 }
 
 export function GoalSection({
@@ -97,6 +106,9 @@ export function GoalSection({
   onGoalCreated,
   initialExpanded,
   onExpandedChange,
+  allGoals,
+  allCompanies,
+  mirrorPickerHierarchy,
 }: GoalSectionProps) {
   const [expanded, setExpanded] = useState(() => initialExpanded ?? true);
   /** After adding a project, name cell opens in edit mode so the user can type immediately. */
@@ -244,6 +256,7 @@ export function GoalSection({
   const addProjectToGoal = useCallback(async () => {
     const project = await createProject({
       goalId: goal.id,
+      mirroredGoalIds: [],
       name: "New project",
       description: "",
       ownerId: "",
@@ -255,7 +268,6 @@ export function GoalSection({
       definitionOfDone: "",
       startDate: "",
       targetDate: "",
-      slackUrl: "",
       atRisk: false,
       spotlight: false,
       reviewLog: [],
@@ -349,6 +361,7 @@ export function GoalSection({
             priority: "P2",
             executionMode: "Async",
             slackChannel: "",
+            slackChannelId: "",
             status: "Not Started",
             atRisk: false,
             spotlight: false,
@@ -384,7 +397,7 @@ export function GoalSection({
         type: "item",
         id: "expand-goal",
         label: expanded ? "Collapse goal" : "Expand goal",
-        icon: expanded ? ChevronDown : ChevronRight,
+        icon: expanded ? ChevronRight : ChevronDown,
         onClick: () => toggleGoalExpanded(),
       },
       { type: "divider", id: "goal-d3" },
@@ -484,7 +497,7 @@ export function GoalSection({
         </div>
 
         {/* Goal title */}
-        <div className="w-[280px] min-w-0 shrink-0">
+        <div className="w-[328px] min-w-0 shrink-0">
           <InlineEditCell
             {...GRID_ALIGN}
             value={goal.description}
@@ -620,21 +633,15 @@ export function GoalSection({
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) */}
-        <div
-          className="flex w-44 shrink-0 min-w-0 items-center"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <InlineEditCell
-            variant="plain"
-            value={goal.slackChannel}
-            onSave={(slackChannel) =>
-              updateGoal(goal.id, { slackChannel })
+        <div className="w-44 shrink-0 min-w-0">
+          <SlackChannelPicker
+            channelName={goal.slackChannel}
+            channelId={goal.slackChannelId ?? ""}
+            onSave={({ name, id }) =>
+              updateGoal(goal.id, { slackChannel: name, slackChannelId: id })
             }
-            placeholder="vd-sales"
-            displayClassName="text-zinc-300 font-medium min-w-0 not-italic"
-            formatDisplay={(v) => formatSlackChannelHash(v)}
-            emptyLabel="Add channel"
-            displayTitle="Slack channel — click to edit"
+            trackerGridAlign
+            variant="plain"
           />
         </div>
 
@@ -779,6 +786,9 @@ export function GoalSection({
                       ownerWorkloadMap={ownerWorkloadMap}
                       focusProjectNameEditId={newProjectNameFocusId}
                       syncDueDateMinYmd={syncDueDateMinYmd}
+                      allGoals={allGoals}
+                      allCompanies={allCompanies}
+                      mirrorPickerHierarchy={mirrorPickerHierarchy}
                     />
                   </div>
                 );
@@ -841,7 +851,7 @@ export function GoalSection({
 
           {goal.projects.length === 0 && (
             <div className="mt-1 ml-4 mr-4 mb-1 rounded-r-md border border-dashed border-zinc-800/90 border-l-2 border-l-zinc-700/50 bg-zinc-900/20 px-4 py-3.5">
-              <p
+              <div
                 className={cn(
                   "w-full min-w-0",
                   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
@@ -865,7 +875,7 @@ export function GoalSection({
                   onCreated={(id) => setNewProjectNameFocusId(id)}
                   inline
                 />
-              </p>
+              </div>
             </div>
           )}
 

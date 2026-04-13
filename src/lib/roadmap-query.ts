@@ -1,15 +1,12 @@
-import { GoalStatusEnum, ProjectStatusEnum } from "@/lib/schemas/tracker";
 import type { Priority } from "@/lib/types/tracker";
+import { DELIVERY_STATUS_FILTER_OPTIONS } from "@/lib/projectStatus";
 import type {
   DueDateFilterId,
   TrackerStatusTagId,
 } from "@/lib/tracker-search-filter";
 import { DUE_DATE_FILTER_OPTIONS } from "@/lib/tracker-search-filter";
 
-const DELIVERY_STATUSES = new Set<string>([
-  ...GoalStatusEnum.options,
-  ...ProjectStatusEnum.options,
-]);
+const DELIVERY_STATUSES = new Set<string>(DELIVERY_STATUS_FILTER_OPTIONS);
 const PRIORITIES = new Set<Priority>(["P0", "P1", "P2", "P3"]);
 
 const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [

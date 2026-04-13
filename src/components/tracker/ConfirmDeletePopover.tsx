@@ -172,6 +172,12 @@ export function ConfirmDeletePopover({
       ? "group-hover/project:opacity-100"
       : "group-hover/goal:opacity-100";
 
+  /** Same hover reveal as enabled, but dimmed — avoids resting `opacity-40` when delete is blocked. */
+  const rowGroupHoverOpacityDisabled =
+    rowGroup === "project"
+      ? "group-hover/project:opacity-40"
+      : "group-hover/goal:opacity-40 group-hover:opacity-40";
+
   return (
     <div className="relative" ref={anchorRef}>
       <button
@@ -185,7 +191,10 @@ export function ConfirmDeletePopover({
         className={cn(
           "p-1 transition-colors",
           disabled
-            ? "cursor-not-allowed text-zinc-600 opacity-40"
+            ? cn(
+                "cursor-not-allowed text-zinc-600 opacity-0",
+                rowGroupHoverOpacityDisabled
+              )
             : cn(
                 "cursor-pointer text-zinc-600 opacity-0 hover:opacity-100 hover:text-red-400 focus-visible:opacity-100",
                 rowGroupHoverOpacity

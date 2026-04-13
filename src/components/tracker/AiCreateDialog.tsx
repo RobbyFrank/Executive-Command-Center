@@ -230,6 +230,7 @@ export function AiCreateDialog({
           ownerId: "",
           executionMode: "Async",
           slackChannel: "",
+          slackChannelId: "",
           status: "Not Started",
           atRisk: false,
           spotlight: false,
@@ -240,6 +241,7 @@ export function AiCreateDialog({
         const p = proposal as ProjectProposal;
         const project = await createProject({
           goalId,
+          mirroredGoalIds: [],
           name: p.name || "New project",
           description: p.description || "",
           definitionOfDone: p.definitionOfDone || "",
@@ -251,7 +253,6 @@ export function AiCreateDialog({
           status: "Pending",
           startDate: "",
           targetDate: "",
-          slackUrl: "",
           atRisk: false,
           spotlight: false,
           reviewLog: [],

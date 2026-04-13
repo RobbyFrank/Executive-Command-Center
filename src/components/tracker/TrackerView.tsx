@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
+import type { Company, CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { CompanySection } from "./CompanySection";
 import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
 import { DueDateFilterSelect } from "./DueDateFilterSelect";
@@ -147,6 +147,15 @@ export function TrackerView({
     return () => window.removeEventListener("resize", update);
   }, [treeViewSelectMeasureLabel]);
 
+  const allGoals = useMemo(
+    () => hierarchy.flatMap((c) => c.goals),
+    [hierarchy]
+  );
+  const allCompanies = useMemo(
+    (): Company[] => hierarchy.map(({ goals: _goals, ...co }) => co),
+    [hierarchy]
+  );
+
   const searchActive = normalizeTrackerSearchQuery(searchQuery).length > 0;
   const companyFilterActive = companyFilterIds.length > 0;
   const ownerFilterActive = ownerFilterIds.length > 0;
@@ -273,6 +282,7 @@ export function TrackerView({
     for (const company of hierarchy) {
       for (const goal of company.goals) {
         for (const project of goal.projects) {
+          if (project.isMirror) continue;
           if (!project.ownerId) continue;
           let entry = m.get(project.ownerId);
           if (!entry) {
@@ -705,6 +715,9 @@ export function TrackerView({
               people={people}
               expandForSearch={filterActive}
               ownerWorkloadMap={ownerWorkloadMap}
+              allGoals={allGoals}
+              allCompanies={allCompanies}
+              mirrorPickerHierarchy={hierarchy}
             />
           ))
         )}

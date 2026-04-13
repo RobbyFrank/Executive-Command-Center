@@ -9,10 +9,13 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
 import type { Person } from "@/lib/types/tracker";
 import { isFounderPerson } from "@/lib/autonomyRoster";
 import { deletePerson, updatePerson } from "@/server/actions/tracker";
+import { scheduleSlackProfileRefresh } from "@/lib/slackRosterRefresh";
+import { SlackLogo } from "./SlackLogo";
 
 const PANEL_MIN_W = 220;
 
@@ -23,6 +26,7 @@ interface TeamRosterRowMenuProps {
 }
 
 export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<PanelView>("menu");
   const [pending, setPending] = useState(false);
@@ -38,6 +42,7 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
   } | null>(null);
 
   const founder = isFounderPerson(person);
+  const hasSlackId = Boolean(person.slackHandle?.trim());
 
   useEffect(() => {
     setMounted(true);
@@ -104,6 +109,14 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
     } finally {
       setPending(false);
     }
+  }
+
+  function onRefreshFromSlack() {
+    setError(null);
+    close();
+    scheduleSlackProfileRefresh(person.id, person.slackHandle, () =>
+      router.refresh()
+    );
   }
 
   async function onConfirmDelete() {
@@ -174,6 +187,18 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
                     Set as Founder
                   </button>
                 )}
+                {hasSlackId ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => void onRefreshFromSlack()}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    <span className="flex-1">Refresh from Slack</span>
+                    <SlackLogo alt="" className="h-3.5 w-3.5 opacity-50" />
+                  </button>
+                ) : null}
                 {!founder ? (
                   <>
                     <div

@@ -38,23 +38,23 @@ export const AUTONOMY_GROUP_LABEL: Record<
   { title: string; hint: string }
 > = {
   5: {
-    title: "5. Full ownership — sets direction and executes",
+    title: "5. Full ownership",
     hint: "",
   },
   4: {
-    title: "4. High ownership — owns major workstreams with light steering",
+    title: "4. High ownership",
     hint: "",
   },
   3: {
-    title: "3. Balanced — executes with periodic alignment",
+    title: "3. Balanced ownership",
     hint: "",
   },
   2: {
-    title: "2. Guided — needs clearer priorities and check-ins",
+    title: "2. Needs constant steering",
     hint: "",
   },
   1: {
-    title: "1. Directed — close coordination and task-level clarity",
+    title: "1. Needs every task assigned",
     hint: "",
   },
 };
@@ -63,9 +63,9 @@ export const AUTONOMY_GROUP_LABEL: Record<
 export const AUTONOMY_LEVEL_SELECT_LABEL: Record<AutonomyLevel, string> = {
   5: "5. Full ownership",
   4: "4. High ownership",
-  3: "3. Balanced",
-  2: "2. Guided",
-  1: "1. Directed",
+  3: "3. Balanced ownership",
+  2: "2. Needs constant steering",
+  1: "1. Needs every task assigned",
 };
 
 export const AUTONOMY_LEVEL_SELECT_OPTIONS: { value: string; label: string }[] =
@@ -76,13 +76,10 @@ export const AUTONOMY_LEVEL_SELECT_OPTIONS: { value: string; label: string }[] =
 
 /**
  * Name only (no leading "5." — level is shown on the autonomy filter icon).
- * Drops the clause after the em dash.
  */
 export function autonomyShortTitle(level: AutonomyLevel): string {
   const full = AUTONOMY_GROUP_LABEL[level].title;
-  const cut = full.indexOf(" — ");
-  const head = cut === -1 ? full : full.slice(0, cut);
-  return head.replace(/^\d+\.\s*/, "").trim();
+  return full.replace(/^\d+\.\s*/, "").trim();
 }
 
 export function groupPeopleByAutonomy(

@@ -1,6 +1,69 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicModel } from "@/lib/anthropicModel";
+import type { Company, Goal, TrackerData } from "@/lib/types/tracker";
 import { getRepository } from "@/server/repository";
+
+function formatCompanyDetail(c: Company): string {
+  const lines: string[] = [];
+  lines.push(`COMPANY — ${c.name} (${c.shortName})`);
+  const desc = c.description.trim();
+  if (desc) lines.push(`Description: ${desc}`);
+  const website = c.website.trim();
+  if (website) lines.push(`Website: ${website}`);
+  if (c.revenue > 0) {
+    lines.push(`MRR (thousands USD): ${c.revenue}`);
+  }
+  const launch = c.launchDate.trim();
+  if (launch) lines.push(`Launch date: ${launch}`);
+  const devStart = c.developmentStartDate.trim();
+  if (devStart) lines.push(`Development start: ${devStart}`);
+  return lines.join("\n");
+}
+
+function formatGoalDetail(g: Goal, goalOwnerName: string): string {
+  const lines: string[] = [];
+  lines.push(`GOAL — ${g.description}`);
+  const mt = g.measurableTarget.trim();
+  if (mt) lines.push(`Measurable target: ${mt}`);
+  const wim = g.whyItMatters.trim();
+  if (wim) lines.push(`Why it matters: ${wim}`);
+  const cv = g.currentValue.trim();
+  if (cv) lines.push(`Current state: ${cv}`);
+  lines.push(`Priority: ${g.priority}`);
+  lines.push(`Status: ${g.status}`);
+  lines.push(`Execution mode: ${g.executionMode}`);
+  if (goalOwnerName) lines.push(`Goal owner: ${goalOwnerName}`);
+  return lines.join("\n");
+}
+
+function buildParentContextBlock(
+  type: "goal" | "project",
+  data: TrackerData,
+  companyId: string | undefined,
+  goalId: string | undefined,
+): string {
+  if (type === "goal") {
+    if (!companyId) return "(No company id was provided.)";
+    const company = data.companies.find((c) => c.id === companyId);
+    if (!company) return "(Company not found in tracker data.)";
+    return formatCompanyDetail(company);
+  }
+
+  if (!goalId) return "(No goal id was provided.)";
+  const goal = data.goals.find((g) => g.id === goalId);
+  if (!goal) return "(Goal not found in tracker data.)";
+
+  const company = data.companies.find((c) => c.id === goal.companyId);
+  const goalOwnerName = goal.ownerId
+    ? (data.people.find((p) => p.id === goal.ownerId)?.name ?? "")
+    : "";
+
+  const companyBlock = company
+    ? formatCompanyDetail(company)
+    : "(Parent company record not found.)";
+  const goalBlock = formatGoalDetail(goal, goalOwnerName);
+  return `${companyBlock}\n\n${goalBlock}`;
+}
 
 const GOAL_FIELDS_DESCRIPTION = `
 Goal fields you must populate:
@@ -27,15 +90,25 @@ function buildSystemPrompt(
   type: "goal" | "project",
   trackerJson: string,
   entityName: string,
+  parentContextBlock: string,
 ) {
   const fieldsBlock =
     type === "goal" ? GOAL_FIELDS_DESCRIPTION : PROJECT_FIELDS_DESCRIPTION;
   const parentLabel = type === "goal" ? "company" : "goal";
+  const primarySubjectHint =
+    type === "goal"
+      ? "Align the new goal with this company's strategy and context. The same fields may appear again in the full JSON below."
+      : "Align the new project with this company and parent goal. The same fields may appear again in the full JSON below.";
 
   return `You are a concise executive writing assistant that helps create ${type}s for a portfolio tracker.
 
 CONTEXT: The user is adding a new ${type} under the ${parentLabel} "${entityName}".
 Today's date is ${new Date().toISOString().slice(0, 10)}.
+
+PRIMARY SUBJECT — detailed record for the parent ${type === "goal" ? "company" : "company and goal"} (read this first; weight it heavily):
+${parentContextBlock}
+
+${primarySubjectHint}
 
 STYLE RULES — study the existing tracker data below and match its tone exactly:
 - Concise, actionable, readable. No filler, no buzzwords, no marketing language.
@@ -126,10 +199,18 @@ export async function POST(req: Request) {
     }
   }
 
+  const parentContextBlock = buildParentContextBlock(
+    type,
+    data,
+    typeof raw.companyId === "string" ? raw.companyId : undefined,
+    typeof raw.goalId === "string" ? raw.goalId : undefined,
+  );
+
   const systemPrompt = buildSystemPrompt(
     type,
     JSON.stringify(data),
     entityName,
+    parentContextBlock,
   );
 
   const anthropic = new Anthropic({ apiKey });

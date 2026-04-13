@@ -40,6 +40,8 @@ export function RosterContactInput({
     if (t !== value.trim()) onSave(t);
   };
 
+  const looksFilled = draft.trim().length > 0;
+
   return (
     <div className={cn("min-w-0", className)}>
       <input
@@ -66,9 +68,13 @@ export function RosterContactInput({
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? hintId : undefined}
         className={cn(
-          "w-full min-w-0 rounded border border-zinc-700 bg-zinc-900/80 px-2 py-1.5 text-sm text-zinc-200",
-          "placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-600",
-          error && "border-red-600 focus:ring-red-600"
+          "w-full min-w-0 rounded px-2 py-1.5 text-sm transition-[background-color,border-color,box-shadow] duration-150",
+          "placeholder:text-zinc-600 focus:outline-none",
+          error
+            ? "border border-red-600 bg-zinc-900/80 text-zinc-200 focus:ring-1 focus:ring-red-600"
+            : looksFilled
+              ? "border border-transparent bg-transparent text-zinc-300 shadow-none hover:border-zinc-700 hover:bg-zinc-900/80 focus:border-zinc-700 focus:bg-zinc-900/80 focus:ring-1 focus:ring-blue-600"
+              : "border border-zinc-700 bg-zinc-900/80 text-zinc-200 focus:border-zinc-600 focus:ring-1 focus:ring-blue-600"
         )}
       />
       {error ? (

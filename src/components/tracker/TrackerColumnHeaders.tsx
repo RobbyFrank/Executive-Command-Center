@@ -1,6 +1,6 @@
 "use client";
 
-/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow (goal title w-[280px], project name w-[264px] in rail). */
+/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow (goal title w-[328px], project name w-[312px] in rail). */
 
 import { SlackLogo } from "./SlackLogo";
 import { RoadmapColumnHeader } from "./RoadmapColumnHeader";
@@ -42,7 +42,7 @@ export function GoalsColumnHeaders({
       <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <RoadmapColumnHeader
-          className="w-[280px] shrink-0"
+          className="w-[328px] shrink-0"
           tooltip="Goal title — what you are trying to achieve for this company."
         >
           Goal
@@ -142,7 +142,7 @@ export function ProjectsColumnHeaders({
       <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <RoadmapColumnHeader
-          className="w-[264px] shrink-0"
+          className="w-[312px] shrink-0"
           tooltip="Project name — a concrete initiative under this goal."
         >
           Project
@@ -170,7 +170,7 @@ export function ProjectsColumnHeaders({
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-44 shrink-0 min-w-0"
-          tooltip="Next milestone not yet done (from your milestone list)."
+          tooltip="The first milestone not marked done — your current focus before later milestones."
         >
           Next milestone
         </RoadmapColumnHeader>
@@ -180,12 +180,8 @@ export function ProjectsColumnHeaders({
         >
           Status
         </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-28 shrink-0"
-          tooltip="Confidence (0–100%). Hover or focus a cell for autonomy vs complexity."
-        >
-          Confidence
-        </RoadmapColumnHeader>
+        {/* Confidence — label on Goals row above; spacer keeps alignment with project cells */}
+        <div className="w-28 shrink-0" aria-hidden />
         <RoadmapColumnHeader
           className="w-32 shrink-0"
           tooltip="Progress — share of milestones marked done."
@@ -197,12 +193,6 @@ export function ProjectsColumnHeaders({
           tooltip="Due date — when you aim to finish this project. Sync goals: each row must be after the previous project’s due date."
         >
           Due date
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-44 shrink-0 min-w-0 flex items-center"
-          tooltip="Slack link or channel for this project."
-        >
-          <SlackLogo className="h-3.5 w-3.5 opacity-80" />
         </RoadmapColumnHeader>
         <div className="min-w-2 flex-1 shrink" aria-hidden />
       </div>

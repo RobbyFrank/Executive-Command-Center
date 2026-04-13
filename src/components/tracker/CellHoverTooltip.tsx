@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
+import { useCompanySectionOverlayOptional } from "./company-section-overlay-context";
 
 const CLOSE_DELAY_MS = 200;
 
@@ -70,7 +71,16 @@ export const CellHoverTooltip = forwardRef<
     null
   );
 
+  const { incrementOverlay, decrementOverlay } =
+    useCompanySectionOverlayOptional() ?? {};
+
   editingRef.current = editing;
+
+  useEffect(() => {
+    if (!panelOpen || !incrementOverlay || !decrementOverlay) return;
+    incrementOverlay();
+    return () => decrementOverlay();
+  }, [panelOpen, incrementOverlay, decrementOverlay]);
 
   useEffect(() => {
     setDraft(label);

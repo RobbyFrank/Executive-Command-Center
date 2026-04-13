@@ -144,8 +144,8 @@ export async function deleteGoal(
 // --- Projects ---
 
 export async function createProject(
-  data: Omit<Project, "id" | "lastReviewed" | "reviewLog" | "createdAt"> &
-    Partial<Pick<Project, "lastReviewed" | "reviewLog">>
+  data: Omit<Project, "id" | "lastReviewed" | "reviewLog" | "createdAt" | "slackUrl"> &
+    Partial<Pick<Project, "lastReviewed" | "reviewLog" | "slackUrl">>
 ): Promise<Project> {
   const id = uuid();
   const trimmedReviewed = data.lastReviewed?.trim() ?? "";
@@ -156,7 +156,9 @@ export async function createProject(
   const createdAt = calendarDateTodayLocal();
   const project = {
     id,
+    slackUrl: "",
     ...data,
+    mirroredGoalIds: data.mirroredGoalIds ?? [],
     lastReviewed,
     reviewLog: data.reviewLog ?? [],
     createdAt,
@@ -200,13 +202,51 @@ export async function deleteProject(id: string): Promise<void> {
   revalidate();
 }
 
+/** Attach a project to an additional goal (mirror). Primary goal remains `goalId`. */
+export async function mirrorProjectToGoal(
+  projectId: string,
+  mirrorGoalId: string
+): Promise<Project> {
+  const project = await repo.getProject(projectId);
+  if (!project) {
+    throw new Error(`Project ${projectId} not found`);
+  }
+  if (mirrorGoalId === project.goalId) {
+    throw new Error("That goal is already this project's primary goal.");
+  }
+  const goal = await repo.getGoal(mirrorGoalId);
+  if (!goal) {
+    throw new Error("Goal not found.");
+  }
+  const existing = project.mirroredGoalIds ?? [];
+  if (existing.includes(mirrorGoalId)) {
+    throw new Error("This project is already mirrored to that goal.");
+  }
+  return updateProject(projectId, {
+    mirroredGoalIds: [...existing, mirrorGoalId],
+  });
+}
+
+/** Remove a mirror link (project stays under its primary goal). */
+export async function unmirrorProjectFromGoal(
+  projectId: string,
+  mirrorGoalId: string
+): Promise<Project> {
+  const project = await repo.getProject(projectId);
+  if (!project) {
+    throw new Error(`Project ${projectId} not found`);
+  }
+  const next = (project.mirroredGoalIds ?? []).filter((g) => g !== mirrorGoalId);
+  return updateProject(projectId, { mirroredGoalIds: next });
+}
+
 // --- Milestones ---
 
 export async function createMilestone(
-  data: Omit<Milestone, "id">
+  data: Omit<Milestone, "id" | "slackUrl"> & Partial<Pick<Milestone, "slackUrl">>
 ): Promise<Milestone> {
   const id = uuid();
-  const milestone = { id, ...data };
+  const milestone: Milestone = { id, slackUrl: "", ...data };
   await repo.createMilestone(milestone);
   revalidate();
   return milestone;

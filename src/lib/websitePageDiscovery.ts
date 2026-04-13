@@ -25,6 +25,14 @@ function normalizeHost(host: string): string {
   return host.replace(/^www\./i, "").toLowerCase();
 }
 
+/** Bundler/framework routes that are never HTML pages (e.g. Next.js `/_next/image?url=…`). */
+function isFrameworkInternalPath(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  if (p === "/_next" || p.startsWith("/_next/")) return true;
+  if (p === "/_nuxt" || p.startsWith("/_nuxt/")) return true;
+  return false;
+}
+
 function scorePathname(pathname: string): number {
   const p = pathname.toLowerCase();
   if (p === "/" || p === "") return 4;
@@ -75,6 +83,7 @@ export function discoverInternalPageUrls(
     }
     if (u.protocol !== "http:" && u.protocol !== "https:") return;
     if (normalizeHost(u.hostname) !== originHost) return;
+    if (isFrameworkInternalPath(u.pathname)) return;
     if (EXCLUDE_PATH.test(u.pathname)) return;
     const norm = normalizePageUrl(u);
     if (seen.has(norm)) return;

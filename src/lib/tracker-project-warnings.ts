@@ -4,6 +4,8 @@ import type {
   ProjectWithMilestones,
 } from "@/lib/types/tracker";
 import { clampAutonomy, isFounderPerson } from "@/lib/autonomyRoster";
+import { isValidHttpUrl } from "@/lib/httpUrl";
+import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 
 export type TrackerWarning = { label: string; title: string };
@@ -23,9 +25,11 @@ export function getTrackerProjectWarnings(
   const missingTargetDate =
     !raw || parseCalendarDateString(raw) === null;
 
-  const hasMilestoneMissingDate = project.milestones.some(
-    (ms) => ms.status !== "Done" && !ms.targetDate?.trim()
-  );
+  const nextOpen = getNextPendingMilestone(project.milestones);
+  const nextMilestoneMissingDate =
+    nextOpen !== undefined && !nextOpen.targetDate?.trim();
+  const nextMilestoneMissingSlack =
+    nextOpen !== undefined && !isValidHttpUrl(nextOpen.slackUrl ?? "");
 
   const highCodLowAutonomy =
     cod >= 4 &&
@@ -38,10 +42,17 @@ export function getTrackerProjectWarnings(
       label: "No milestones",
       title: "No milestones yet — add checkpoints to track delivery",
     });
-  if (hasMilestoneMissingDate)
+  if (nextMilestoneMissingDate)
     list.push({
-      label: "Milestone undated",
-      title: "One or more active milestones have no target date",
+      label: "Next milestone undated",
+      title:
+        "The next open milestone (first not done) has no target date — set it on that row",
+    });
+  if (nextMilestoneMissingSlack)
+    list.push({
+      label: "Milestone: no Slack thread",
+      title:
+        "The next open milestone has no Slack thread URL — paste a message or thread link for that discussion",
     });
   if (missingTargetDate)
     list.push({

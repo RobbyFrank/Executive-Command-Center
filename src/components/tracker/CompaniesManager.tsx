@@ -200,9 +200,9 @@ export function CompaniesManager({
           <div className="text-left">Launched</div>
           <div className="text-left">Short</div>
           <div className="text-left">Revenue</div>
-          <div className="text-right tabular-nums">Goals</div>
-          <div className="text-right tabular-nums">Projects</div>
-          <div className="text-right tabular-nums">Owners</div>
+          <div className="text-center tabular-nums">Goals</div>
+          <div className="text-center tabular-nums">Projects</div>
+          <div className="text-center tabular-nums">Owners</div>
           <div className="text-left min-w-0 text-zinc-400">Momentum</div>
           <div className="text-right">
             <span className="sr-only">Actions</span>
@@ -329,7 +329,7 @@ export function CompaniesManager({
                       />
                     </div>
 
-                    <div className="flex items-center justify-end gap-1 text-zinc-300 tabular-nums text-sm min-w-0">
+                    <div className="flex items-center justify-center gap-1 text-zinc-300 tabular-nums text-sm min-w-0">
                       <span>{st.goals}</span>
                       {(st.goalsWithSpotlight > 0 || st.goalsWithAtRisk > 0) && (
                         <span className="flex shrink-0 gap-0.5" aria-hidden>
@@ -348,7 +348,7 @@ export function CompaniesManager({
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center justify-end gap-1 text-zinc-300 tabular-nums text-sm min-w-0">
+                    <div className="flex items-center justify-center gap-1 text-zinc-300 tabular-nums text-sm min-w-0">
                       <span>{st.projects}</span>
                       {(st.projectsWithSpotlight > 0 ||
                         st.projectsWithAtRisk > 0) && (
@@ -368,7 +368,7 @@ export function CompaniesManager({
                         </span>
                       )}
                     </div>
-                    <div className="text-right text-zinc-300 tabular-nums text-sm">
+                    <div className="text-center text-zinc-300 tabular-nums text-sm">
                       {st.owners}
                     </div>
 

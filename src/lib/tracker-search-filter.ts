@@ -68,7 +68,7 @@ function ownerAutonomy(
 
 /** Text for matching a milestone row (names, dates, status, id). */
 function milestoneSearchText(m: Milestone): string {
-  return [m.id, m.name, m.status, m.targetDate].join(" ");
+  return [m.id, m.name, m.status, m.targetDate, m.slackUrl].join(" ");
 }
 
 /** Project fields only — excludes milestone bodies (handled in filter). */
@@ -90,8 +90,8 @@ function projectSearchTextSelf(
     p.definitionOfDone,
     p.startDate,
     p.targetDate,
-    p.slackUrl,
     p.lastReviewed,
+    p.milestones.map((m) => m.slackUrl).join(" "),
     p.atRisk ? "at risk" : "",
     p.spotlight ? "spotlight momentum win" : "",
     projectMatchesCloseWatchByOwnerMap(p, peopleById)

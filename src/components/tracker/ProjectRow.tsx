@@ -11,6 +11,9 @@ import type {
   Person,
   ProjectStatus,
   Priority,
+  Goal,
+  Company,
+  CompanyWithGoals,
 } from "@/lib/types/tracker";
 import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
@@ -30,16 +33,17 @@ import {
   deleteProject,
   createMilestone,
   appendProjectReviewNote,
+  unmirrorProjectFromGoal,
 } from "@/server/actions/tracker";
 import {
   ChevronRight,
   ChevronDown,
   Flag,
-  Link2,
   Plus,
   Sparkles,
   Trash2,
   Pencil,
+  ArrowRightLeft,
 } from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
@@ -57,6 +61,8 @@ import {
 } from "@/lib/autonomyRoster";
 import { getTrackerProjectWarnings } from "@/lib/tracker-project-warnings";
 import { WarningsBadge } from "./WarningsBadge";
+import { SharedBadge } from "./SharedBadge";
+import { MirrorGoalPickerDialog } from "./MirrorGoalPickerDialog";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
@@ -86,6 +92,11 @@ interface ProjectRowProps {
    * the previous project’s due date. Set by parent from goal order.
    */
   syncDueDateMinYmd?: string;
+  /** Full goal list for shared/mirror labels (roadmap-wide). */
+  allGoals: Goal[];
+  allCompanies: Company[];
+  /** Full hierarchy for “Mirror to goal…” picker (unfiltered). */
+  mirrorPickerHierarchy: CompanyWithGoals[];
 }
 
 export function ProjectRow({
@@ -97,8 +108,12 @@ export function ProjectRow({
   ownerWorkloadMap,
   focusProjectNameEditId = null,
   syncDueDateMinYmd,
+  allGoals,
+  allCompanies,
+  mirrorPickerHierarchy,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
+  const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
   const [showMilestones, setShowMilestones] = useState(true);
   /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
@@ -107,7 +122,6 @@ export function ProjectRow({
   >(null);
   /** Increment to focus the project name field (context menu Rename). */
   const [projectRenameNonce, setProjectRenameNonce] = useState(0);
-  const [slackUrlEditing, setSlackUrlEditing] = useState(false);
   const {
     bulkTick,
     expandPreset,
@@ -267,6 +281,8 @@ export function ProjectRow({
     return !raw || parseCalendarDateString(raw) === null;
   }, [project.targetDate]);
 
+  const isMirror = project.isMirror ?? false;
+
   const projectMenuEntries = useMemo((): ContextMenuEntry[] => {
     const execBlock: ContextMenuEntry[] = [];
     if (!project.atRisk && !project.spotlight) {
@@ -332,7 +348,7 @@ export function ProjectRow({
         ? "Show milestones"
         : "Collapse project";
     const ExpandIcon =
-      !expanded || !showMilestones ? ChevronRight : ChevronDown;
+      !expanded || !showMilestones ? ChevronDown : ChevronRight;
 
     return [
       {
@@ -359,6 +375,30 @@ export function ProjectRow({
         icon: Pencil,
         onClick: () => setProjectRenameNonce((n) => n + 1),
       },
+      {
+        type: "item",
+        id: "mirror-to-goal",
+        label: "Mirror to goal…",
+        icon: ArrowRightLeft,
+        onClick: () => setMirrorPickerOpen(true),
+      },
+      ...(isMirror
+        ? ([
+            {
+              type: "item",
+              id: "remove-mirror",
+              label: "Remove mirror from this goal",
+              onClick: () =>
+                void unmirrorProjectFromGoal(project.id, goalId).catch(
+                  (e) => {
+                    alert(
+                      e instanceof Error ? e.message : "Could not remove mirror."
+                    );
+                  }
+                ),
+            },
+          ] as ContextMenuEntry[])
+        : []),
       { type: "divider", id: "p-d1" },
       ...execBlock,
       { type: "divider", id: "p-d2" },
@@ -373,15 +413,19 @@ export function ProjectRow({
       {
         type: "item",
         id: "delete-project",
-        label: "Delete project…",
+        label: isMirror ? "Delete project entirely…" : "Delete project…",
         icon: Trash2,
         destructive: true,
-        confirmMessage: `Delete this project? This can't be undone.`,
+        confirmMessage: isMirror
+          ? "Delete this project from every goal it appears on? This cannot be undone."
+          : `Delete this project? This can't be undone.`,
         onClick: () => void deleteProject(project.id),
       },
     ];
   }, [
     expanded,
+    goalId,
+    isMirror,
     project.atRisk,
     project.id,
     project.spotlight,
@@ -423,16 +467,34 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Name — w-[264px] matches ProjectsColumnHeaders; goal rows use w-[280px] so columns align in ml-4 rail */}
-        <div className="w-[264px] min-w-0 shrink-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={project.name}
-            onSave={(name) => updateProject(project.id, { name })}
-            startInEditMode={project.id === focusProjectNameEditId}
-            openEditNonce={projectRenameNonce}
-            displayClassName="text-zinc-200"
-          />
+        {/* Name + Shared/Mirror — w-[312px] matches ProjectsColumnHeaders */}
+        <div
+          className="w-[312px] min-w-0 shrink-0 flex items-center gap-1.5"
+          onClick={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("[data-shared-badge-root]")) e.stopPropagation();
+          }}
+        >
+          <div className="min-w-0 flex-1">
+            <InlineEditCell
+              {...GRID_ALIGN}
+              value={project.name}
+              onSave={(name) => updateProject(project.id, { name })}
+              startInEditMode={project.id === focusProjectNameEditId}
+              openEditNonce={projectRenameNonce}
+              displayClassName="text-zinc-200"
+            />
+          </div>
+          <div className="shrink-0" data-shared-badge-root>
+            <SharedBadge
+              isMirror={isMirror}
+              primaryGoalId={project.goalId}
+              mirroredGoalIds={project.mirroredGoalIds ?? []}
+              currentGoalId={goalId}
+              goals={allGoals}
+              companies={allCompanies}
+            />
+          </div>
         </div>
 
         {/* Owner */}
@@ -508,11 +570,8 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Next milestone */}
-        <div
-          className="w-44 shrink-0 min-w-0"
-          onClick={(e) => e.stopPropagation()}
-        >
+        {/* Next milestone — clicks pass through to the row so this expands/collapses like the rest of the project bar */}
+        <div className="w-44 shrink-0 min-w-0">
           {project.milestones.length === 0 ? (
             <button
               type="button"
@@ -536,21 +595,24 @@ export function ProjectRow({
               />
               <span className="min-w-0 truncate">Create milestone</span>
             </button>
+          ) : nextPendingMilestone ? (
+            <div
+              className="flex min-w-0 items-start gap-1.5 rounded-md border border-violet-500/30 bg-violet-950/25 px-1.5 py-1 ring-1 ring-inset ring-violet-500/10"
+              title="Next up — complete this milestone before later ones in the list"
+            >
+              <span className="mt-0.5 shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide text-violet-200/95 ring-1 ring-violet-500/35 bg-violet-500/15">
+                Next
+              </span>
+              <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
+                {nextPendingMilestone.name}
+              </p>
+            </div>
           ) : (
             <p
-              className={cn(
-                "truncate text-left text-xs font-medium leading-tight",
-                nextPendingMilestone ? "text-zinc-100" : "text-zinc-400"
-              )}
-              title={
-                nextPendingMilestone
-                  ? nextPendingMilestone.name
-                  : "All milestones are done"
-              }
+              className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
+              title="All milestones are done"
             >
-              {nextPendingMilestone
-                ? nextPendingMilestone.name
-                : "All milestones done"}
+              All milestones done
             </p>
           )}
         </div>
@@ -600,44 +662,6 @@ export function ProjectRow({
             dateMin={syncDueDateMinYmd}
             emptyLabel="Set due date"
             emphasizeEmpty={projectNeedsDueDate}
-          />
-        </div>
-
-        {/* Slack URL — icon only on goal row above */}
-        <div
-          className={cn(
-            "transition-[min-width,max-width] duration-150 ease-out",
-            slackUrlEditing
-              ? "relative z-20 min-w-0 max-w-md flex-1 basis-0"
-              : "w-44 shrink-0"
-          )}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <InlineEditCell
-            value={project.slackUrl}
-            onSave={(slackUrl) =>
-              updateProject(project.id, { slackUrl })
-            }
-            placeholder="https://…"
-            linkBehavior
-            onEditingChange={setSlackUrlEditing}
-            displayClassName="not-italic"
-            collapsedButtonClassName="w-auto min-w-[28px] px-1 inline-flex items-center justify-center shrink-0"
-            formatDisplay={(url) => (
-              <Link2
-                className={cn(
-                  "h-3.5 w-3.5",
-                  /^https?:\/\//i.test(url.trim())
-                    ? "text-cyan-500/90"
-                    : "text-zinc-500"
-                )}
-                aria-hidden
-              />
-            )}
-            emptyLabel={
-              <Link2 className="h-3.5 w-3.5 text-zinc-600" aria-hidden />
-            }
-            displayTitle="Add or edit Slack link"
           />
         </div>
 
@@ -697,7 +721,11 @@ export function ProjectRow({
             onCommit={(flags) => updateProject(project.id, flags)}
           />
           <ConfirmDeletePopover
-            entityName="this project"
+            entityName={
+              isMirror
+                ? "this project from every goal it is linked to"
+                : "this project"
+            }
             rowGroup="project"
             onConfirm={() => deleteProject(project.id)}
           />
@@ -712,18 +740,18 @@ export function ProjectRow({
         entries={projectMenuEntries}
       />
 
+      <MirrorGoalPickerDialog
+        open={mirrorPickerOpen}
+        onClose={() => setMirrorPickerOpen(false)}
+        hierarchy={mirrorPickerHierarchy}
+        projectId={project.id}
+        primaryGoalId={project.goalId}
+        mirroredGoalIds={project.mirroredGoalIds ?? []}
+      />
+
       {/* Milestones */}
       <CollapsePanel open={expanded && showMilestones}>
-        <div
-          className={cn(
-            "border-l-2 ml-8",
-            project.atRisk
-              ? "border-amber-800/45"
-              : project.spotlight
-                ? "border-emerald-800/45"
-                : "border-zinc-800"
-          )}
-        >
+        <div className="ml-8">
           {lowAutonomyOwnerHint ? (
             <div className="pl-14 pr-4 pt-1 pb-2 border-b border-zinc-800/80 mb-0.5">
               <p className="text-[11px] leading-snug text-zinc-400">
@@ -764,13 +792,22 @@ export function ProjectRow({
             </div>
           ) : (
             <>
-              {project.milestones.map((ms) => (
-                <MilestoneRow
-                  key={ms.id}
-                  milestone={ms}
-                  startNameInEditMode={ms.id === newMilestoneNameFocusId}
-                />
-              ))}
+              {project.milestones.map((ms) => {
+                const isNext =
+                  nextPendingMilestone != null &&
+                  ms.id === nextPendingMilestone.id;
+                const isQueued =
+                  ms.status !== "Done" && !isNext;
+                return (
+                  <MilestoneRow
+                    key={ms.id}
+                    milestone={ms}
+                    startNameInEditMode={ms.id === newMilestoneNameFocusId}
+                    isNextPendingMilestone={isNext}
+                    isQueuedPendingMilestone={isQueued}
+                  />
+                );
+              })}
               <div
                 className={cn(
                   "py-1.5 pl-14 pr-4",

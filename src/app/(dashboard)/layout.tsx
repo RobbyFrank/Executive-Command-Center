@@ -12,9 +12,9 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full min-h-0 overflow-hidden">
       <Sidebar username={session.username} />
-      <main className="min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
         {children}
       </main>
       <AiAssistantButton />

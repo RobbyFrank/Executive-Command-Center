@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRouter } from "next/navigation";
 import type { Company, EmploymentKind, Person, PersonWorkload } from "@/lib/types/tracker";
 import {
   buildTeamRosterGroups,
@@ -38,7 +45,9 @@ import {
   UserX,
   Activity,
   Users,
+  RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
 import { SlackLogo } from "./SlackLogo";
 import { WorkloadBar } from "./WorkloadBar";
 import {
@@ -46,6 +55,7 @@ import {
   SLACK_USER_ID_PLACEHOLDER,
   slackUserIdValidationError,
 } from "@/lib/slackUserId";
+import { scheduleSlackProfileRefresh } from "@/lib/slackRosterRefresh";
 import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
 import type { CompanyFilterOption } from "./CompanyFilterMultiSelect";
 import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
@@ -73,6 +83,9 @@ import {
 } from "@/lib/team-roster-filter";
 import { normalizeTrackerSearchQuery as normalizeSearch } from "@/lib/tracker-search-filter";
 import { formatUsdWhole } from "@/lib/formatUsd";
+import { SlackImportDialog } from "./SlackImportDialog";
+import { refreshPersonFromSlack } from "@/server/actions/slack";
+import { SLACK_REFRESH_NO_NEW_DATA_MESSAGE } from "@/lib/slack-refresh-messages";
 
 function EmploymentMiniIcon({ label }: { label: string }) {
   if (label === "Outsourced") {
@@ -125,11 +138,28 @@ interface TeamRosterManagerProps {
   workloads: PersonWorkload[];
 }
 
+/** Shared chrome for **Import from Slack** and **Refresh all from Slack** (toolbar). */
+const TEAM_SLACK_ACTION_BUTTON_CLASS =
+  "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-600 bg-zinc-900/85 px-3 py-1.5 text-xs font-medium text-zinc-200 shadow-sm " +
+  "transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 " +
+  "disabled:cursor-not-allowed disabled:opacity-40";
+
+const TEAM_SLACK_ACTION_ICON_CLASS = "h-4 w-4 shrink-0 opacity-90";
+
+/**
+ * Sticky header row (not each `<th>`): per-cell sticky breaks table column alignment in browsers.
+ * Applied on `<tr>` so `<th>` cells stay in the column grid.
+ */
+const TEAM_ROSTER_HEADER_ROW_STICKY =
+  "sticky z-20 border-b border-zinc-800 bg-zinc-950/95 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.45)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/80 [&_th]:bg-zinc-950/95";
+
 export function TeamRosterManager({
   initialPeople,
   companies,
   workloads,
 }: TeamRosterManagerProps) {
+  const router = useRouter();
   /** After adding a person, name cell opens in edit mode so the user can type immediately. */
   const [newPersonNameFocusId, setNewPersonNameFocusId] = useState<
     string | null
@@ -141,6 +171,35 @@ export function TeamRosterManager({
     useState<TeamRosterSortMode>("autonomy");
   /** When true, founders are excluded from the roster and filter counts. */
   const [hideFounders, setHideFounders] = useState(true);
+  const [slackImportOpen, setSlackImportOpen] = useState(false);
+  const [slackBulkRefreshRunning, setSlackBulkRefreshRunning] = useState(false);
+
+  const teamStickyToolbarRef = useRef<HTMLDivElement>(null);
+  const [teamStickyToolbarPx, setTeamStickyToolbarPx] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = teamStickyToolbarRef.current;
+    if (!el) return;
+    const sync = () => setTeamStickyToolbarPx(el.getBoundingClientRect().height);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const existingSlackIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of initialPeople) {
+      const h = p.slackHandle?.trim().toUpperCase();
+      if (h) s.add(h);
+    }
+    return s;
+  }, [initialPeople]);
+
+  const peopleWithSlackHandle = useMemo(
+    () => initialPeople.filter((p) => (p.slackHandle ?? "").trim() !== ""),
+    [initialPeople]
+  );
 
   const peopleForRosterView = useMemo(() => {
     if (!hideFounders) return initialPeople;
@@ -331,44 +390,142 @@ export function TeamRosterManager({
     setFilterState(emptyTeamRosterFilterState());
   }, []);
 
+  const onRefreshAllFromSlack = useCallback(async () => {
+    if (peopleWithSlackHandle.length === 0 || slackBulkRefreshRunning) return;
+    setSlackBulkRefreshRunning(true);
+    const total = peopleWithSlackHandle.length;
+    const loadId = toast.loading(`Syncing from Slack (0 / ${total})`, {
+      description: "Starting…",
+    });
+    let updated = 0;
+    let unchanged = 0;
+    let failed = 0;
+    const failures: { name: string; error: string }[] = [];
+    const avatarWarnings: string[] = [];
+
+    try {
+      for (let i = 0; i < peopleWithSlackHandle.length; i++) {
+        const p = peopleWithSlackHandle[i];
+        toast.loading(`Syncing from Slack (${i + 1} / ${total})`, {
+          id: loadId,
+          description: p.name,
+        });
+        const r = await refreshPersonFromSlack(p.id, p.slackHandle ?? "");
+        if (r.ok) {
+          updated += 1;
+          if (r.avatarWarning) {
+            avatarWarnings.push(`${p.name}: ${r.avatarWarning}`);
+          }
+        } else if (r.error === SLACK_REFRESH_NO_NEW_DATA_MESSAGE) {
+          unchanged += 1;
+        } else {
+          failed += 1;
+          failures.push({ name: p.name, error: r.error });
+        }
+      }
+
+      toast.dismiss(loadId);
+      router.refresh();
+
+      const summaryParts = [
+        updated > 0 ? `${updated} updated` : null,
+        unchanged > 0 ? `${unchanged} already up to date` : null,
+        failed > 0 ? `${failed} failed` : null,
+      ].filter(Boolean);
+
+      if (failed > 0) {
+        toast.warning(summaryParts.join(" · ") || "Some refreshes failed", {
+          description: failures
+            .slice(0, 8)
+            .map((f) => `${f.name}: ${f.error}`)
+            .join(" · "),
+        });
+      } else if (summaryParts.length > 0) {
+        toast.success(summaryParts.join(" · "));
+      }
+      if (avatarWarnings.length > 0) {
+        toast.warning("Some profile photos could not be saved", {
+          description: avatarWarnings.slice(0, 4).join(" · "),
+        });
+      }
+    } catch (e) {
+      toast.dismiss(loadId);
+      toast.error(e instanceof Error ? e.message : "Refresh failed");
+    } finally {
+      setSlackBulkRefreshRunning(false);
+    }
+  }, [peopleWithSlackHandle, slackBulkRefreshRunning, router]);
+
   if (initialPeople.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
-        <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
-          <Users className="h-7 w-7 text-zinc-500" />
+      <div className="pt-6">
+        <SlackImportDialog
+          open={slackImportOpen}
+          onClose={() => setSlackImportOpen(false)}
+          existingSlackIds={existingSlackIds}
+        />
+        <h1 className="text-xl font-bold text-zinc-100 mb-6">Team</h1>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+            <Users className="h-7 w-7 text-zinc-500" />
+          </div>
+          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No team members yet</h2>
+          <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
+            Your team roster is empty. Add your first team member to start tracking roles, departments, autonomy levels, and workloads.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                createPerson({
+                  name: "New team member",
+                  role: "",
+                  department: "",
+                  autonomyScore: 3,
+                  slackHandle: "",
+                  profilePicturePath: "",
+                  joinDate: "",
+                  email: "",
+                  phone: "",
+                  estimatedMonthlySalary: 0,
+                  employment: "inhouse_salaried",
+                })
+              }
+              className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <Plus className="h-4 w-4" />
+              Add your first team member
+            </button>
+            <button
+              type="button"
+              onClick={() => setSlackImportOpen(true)}
+              className={cn(
+                TEAM_SLACK_ACTION_BUTTON_CLASS,
+                "min-h-10 px-4 py-2 text-sm cursor-pointer"
+              )}
+            >
+              <SlackLogo alt="" className={TEAM_SLACK_ACTION_ICON_CLASS} />
+              Import from Slack
+            </button>
+          </div>
         </div>
-        <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No team members yet</h2>
-        <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
-          Your team roster is empty. Add your first team member to start tracking roles, departments, autonomy levels, and workloads.
-        </p>
-        <button
-          type="button"
-          onClick={() =>
-            createPerson({
-              name: "New team member",
-              role: "",
-              department: "",
-              autonomyScore: 3,
-              slackHandle: "",
-              profilePicturePath: "",
-              joinDate: "",
-              email: "",
-              phone: "",
-              estimatedMonthlySalary: 0,
-              employment: "inhouse_salaried",
-            })
-          }
-          className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
-        >
-          <Plus className="h-4 w-4" />
-          Add your first team member
-        </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <>
+      <SlackImportDialog
+        open={slackImportOpen}
+        onClose={() => setSlackImportOpen(false)}
+        existingSlackIds={existingSlackIds}
+      />
+      <div className="space-y-4">
+      <div
+        ref={teamStickyToolbarRef}
+        className="sticky top-0 z-30 -mx-6 px-6 pt-6 pb-3 border-b border-zinc-800/90 bg-zinc-950/95 shadow-[0_1px_0_0_rgba(39,39,42,0.75)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/75"
+      >
+        <h1 className="text-xl font-bold text-zinc-100 mb-4">Team</h1>
       <div className="flex flex-wrap items-center gap-3 min-h-[2.25rem]">
         <div
           className={cn(
@@ -489,6 +646,39 @@ export function TeamRosterManager({
           </button>
         ) : null}
 
+        <div className="inline-flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSlackImportOpen(true)}
+            className={TEAM_SLACK_ACTION_BUTTON_CLASS}
+          >
+            <SlackLogo alt="" className={TEAM_SLACK_ACTION_ICON_CLASS} />
+            Import from Slack
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRefreshAllFromSlack()}
+            disabled={
+              slackBulkRefreshRunning || peopleWithSlackHandle.length === 0
+            }
+            title={
+              peopleWithSlackHandle.length === 0
+                ? "Add Slack user IDs to team members first"
+                : "Update name, email, join date, and photos from Slack for everyone with a Slack ID"
+            }
+            className={TEAM_SLACK_ACTION_BUTTON_CLASS}
+          >
+            <RefreshCw
+              className={cn(
+                TEAM_SLACK_ACTION_ICON_CLASS,
+                slackBulkRefreshRunning && "animate-spin"
+              )}
+              aria-hidden
+            />
+            Refresh all from Slack
+          </button>
+        </div>
+
         <div className="ml-auto shrink-0">
           <select
             id="team-roster-sort-mode"
@@ -511,7 +701,7 @@ export function TeamRosterManager({
       </div>
 
       {filterActive ? (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-500 pt-1">
           Showing{" "}
           <span className="tabular-nums text-zinc-400">{filteredPeople.length}</span>
           {" of "}
@@ -527,8 +717,9 @@ export function TeamRosterManager({
           ) : null}
         </p>
       ) : null}
+      </div>
 
-      <div className="bg-zinc-900/40 rounded-lg border border-zinc-800 overflow-x-auto">
+      <div className="team-roster-table-outer bg-zinc-900/40 rounded-lg border border-zinc-800">
         {filterActive && filteredPeople.length === 0 ? (
           <p className="text-sm text-zinc-500 py-10 px-4 text-center border-b border-zinc-800">
             {searchActive ? (
@@ -546,7 +737,10 @@ export function TeamRosterManager({
         {!(filterActive && filteredPeople.length === 0) ? (
         <table className="w-full text-sm min-w-[1380px]">
           <thead>
-            <tr className="border-b border-zinc-800 text-xs text-zinc-500">
+            <tr
+              className={cn("text-xs text-zinc-500", TEAM_ROSTER_HEADER_ROW_STICKY)}
+              style={{ top: teamStickyToolbarPx }}
+            >
               <th
                 className="text-left px-3 py-3 font-medium min-w-[220px]"
                 scope="col"
@@ -587,7 +781,11 @@ export function TeamRosterManager({
               <th className="text-left px-3 py-3 font-medium" scope="col">
                 <SlackLogo alt="Slack" className="h-4 w-4" />
               </th>
-              <th className="w-10 py-3 pr-4" scope="col" aria-label="Actions" />
+              <th
+                className="w-10 py-3 pr-4"
+                scope="col"
+                aria-label="Actions"
+              />
             </tr>
           </thead>
           {rosterGroups.map((group) => {
@@ -878,11 +1076,22 @@ export function TeamRosterManager({
                     <td className="px-3 py-2 align-middle max-w-[120px]">
                       <InlineEditCell
                         value={person.slackHandle}
-                        onSave={(slackHandle) =>
-                          updatePerson(person.id, {
-                            slackHandle: parseSlackUserIdInput(slackHandle) ?? "",
-                          })
-                        }
+                        onSave={(slackHandle) => {
+                          const parsed =
+                            parseSlackUserIdInput(slackHandle) ?? "";
+                          void (async () => {
+                            await updatePerson(person.id, {
+                              slackHandle: parsed,
+                            });
+                            if (parsed) {
+                              scheduleSlackProfileRefresh(
+                                person.id,
+                                parsed,
+                                () => router.refresh()
+                              );
+                            }
+                          })();
+                        }}
                         validate={(draft) => {
                           const t = draft.trim();
                           if (t === "") return undefined;
@@ -934,5 +1143,6 @@ export function TeamRosterManager({
         </button>
       </div>
     </div>
+    </>
   );
 }

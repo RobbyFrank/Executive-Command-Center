@@ -107,3 +107,118 @@ export async function saveUploadedImage(args: {
 
   return { ok: true, webPath };
 }
+
+function normalizeImageMime(raw: string | undefined): string {
+  const m = raw?.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (m === "image/jpg") return "image/jpeg";
+  return m;
+}
+
+function sniffImageMime(buf: Buffer): string | null {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    buf.length >= 8 &&
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  if (
+    buf.length >= 6 &&
+    buf[0] === 0x47 &&
+    buf[1] === 0x49 &&
+    buf[2] === 0x46 &&
+    buf[3] === 0x38
+  ) {
+    return "image/gif";
+  }
+  if (
+    buf.length >= 12 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  const head = buf.subarray(0, Math.min(256, buf.length)).toString("utf8").trimStart();
+  if (head.startsWith("<?xml") || head.startsWith("<svg")) {
+    return "image/svg+xml";
+  }
+  return null;
+}
+
+/**
+ * Download a remote image and store it in Vercel Blob (same layout as manual person uploads).
+ * Used by Slack import; requires BLOB_READ_WRITE_TOKEN.
+ */
+export async function savePersonProfileFromRemoteUrl(args: {
+  personId: string;
+  imageUrl: string;
+}): Promise<SaveUploadResult> {
+  if (!blobUploadsEnabled()) {
+    return {
+      ok: false,
+      error:
+        "Vercel Blob is not configured. Set BLOB_READ_WRITE_TOKEN to store profile photos.",
+    };
+  }
+
+  const url = args.imageUrl?.trim();
+  if (!url) {
+    return { ok: false, error: "No image URL" };
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      redirect: "follow",
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    return { ok: false, error: "Could not download profile image (network error)." };
+  }
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: `Could not download profile image (${res.status}).`,
+    };
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length === 0) {
+    return { ok: false, error: "Empty image" };
+  }
+  if (buf.length > MAX_BYTES) {
+    return { ok: false, error: "Image must be 5MB or smaller" };
+  }
+
+  let mime = normalizeImageMime(res.headers.get("content-type") ?? undefined);
+  if (!ALLOWED.has(mime)) {
+    const sniffed = sniffImageMime(buf);
+    if (sniffed) mime = sniffed;
+  }
+
+  if (!ALLOWED.has(mime)) {
+    return {
+      ok: false,
+      error: "Downloaded file is not a supported image (JPEG, PNG, WebP, GIF, or SVG).",
+    };
+  }
+
+  const ext = MIME_TO_EXT[mime];
+  const safe = sanitizeId(args.personId);
+  const pathname = `uploads/people/${safe}.${ext}`;
+
+  const blob = await put(pathname, buf, {
+    access: "public",
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+    addRandomSuffix: true,
+  });
+
+  return { ok: true, webPath: blob.url };
+}

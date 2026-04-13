@@ -146,6 +146,12 @@ export class TrackerRepositoryCore implements TrackerRepository {
           `Cannot delete this goal: ${projectsForGoal.length} project(s) still exist. Delete those projects first.`
         );
       }
+      for (const p of data.projects) {
+        const mids = p.mirroredGoalIds ?? [];
+        if (mids.includes(id)) {
+          p.mirroredGoalIds = mids.filter((g) => g !== id);
+        }
+      }
       data.goals = data.goals.filter((g) => g.id !== id);
     });
   }
@@ -309,13 +315,25 @@ export class TrackerRepositoryCore implements TrackerRepository {
         .filter((g) => g.companyId === company.id)
         .sort((a, b) => comparePriority(a.priority, b.priority));
       const goals: GoalWithProjects[] = companyGoals.map((goal) => {
-        const goalProjects = data.projects.filter((p) => p.goalId === goal.id);
-        const orderedProjects =
+        const primary = data.projects.filter((p) => p.goalId === goal.id);
+        const mirrors = data.projects.filter(
+          (p) =>
+            p.goalId !== goal.id &&
+            (p.mirroredGoalIds ?? []).includes(goal.id)
+        );
+        const orderedPrimary =
           goal.executionMode === "Sync"
-            ? goalProjects
-            : [...goalProjects].sort((a, b) =>
+            ? primary
+            : [...primary].sort((a, b) =>
                 comparePriority(a.priority, b.priority)
               );
+        const orderedMirrors =
+          goal.executionMode === "Sync"
+            ? mirrors
+            : [...mirrors].sort((a, b) =>
+                comparePriority(a.priority, b.priority)
+              );
+        const orderedProjects = [...orderedPrimary, ...orderedMirrors];
         const projects: ProjectWithMilestones[] = orderedProjects.map(
           (project) => {
             const projectMilestones = data.milestones
@@ -325,6 +343,7 @@ export class TrackerRepositoryCore implements TrackerRepository {
               ...project,
               milestones: projectMilestones,
               progress: milestoneProgressPercent(projectMilestones),
+              isMirror: project.goalId !== goal.id,
             };
           }
         );

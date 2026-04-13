@@ -41,6 +41,8 @@ export interface GoalWithProjects extends Goal {
 export interface ProjectWithMilestones extends Project {
   milestones: Milestone[];
   progress: number;
+  /** True when this row is shown under a mirrored goal (not the project's primary `goalId`). */
+  isMirror?: boolean;
 }
 
 export interface CompanyWithGoals extends Company {

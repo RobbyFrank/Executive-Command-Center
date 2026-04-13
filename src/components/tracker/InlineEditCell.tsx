@@ -14,22 +14,12 @@ import {
   formatRelativeCalendarDate,
 } from "@/lib/relativeCalendarDate";
 import { cn } from "@/lib/utils";
+import { isValidHttpUrl } from "@/lib/httpUrl";
 import {
   CellHoverTooltip,
   type CellHoverTooltipEditExtrasContext,
   type CellHoverTooltipHandle,
 } from "./CellHoverTooltip";
-
-function isValidHttpUrl(raw: string): boolean {
-  const t = raw.trim();
-  if (!/^https?:\/\//i.test(t)) return false;
-  try {
-    const u = new URL(t);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 interface InlineEditCellProps {
   value: string;

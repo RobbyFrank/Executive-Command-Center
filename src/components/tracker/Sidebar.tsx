@@ -23,6 +23,8 @@ type NavItem = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
+  /** Subtle beta indicator in the expanded sidebar */
+  beta?: boolean;
 };
 
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
@@ -33,9 +35,9 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Insights",
     items: [
-      { href: "/summary", label: "Summary", icon: BarChart3 },
-      { href: "/matrix", label: "Matrix", icon: Grid3X3 },
-      { href: "/review", label: "Review", icon: ClipboardCheck },
+      { href: "/summary", label: "Summary", icon: BarChart3, beta: true },
+      { href: "/matrix", label: "Matrix", icon: Grid3X3, beta: true },
+      { href: "/review", label: "Review", icon: ClipboardCheck, beta: true },
     ],
   },
   {
@@ -74,7 +76,7 @@ export function Sidebar({ username }: { username: string }) {
   return (
     <aside
       className={cn(
-        "border-r border-zinc-800 bg-zinc-950 flex flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out",
+        "border-r border-zinc-800 bg-zinc-950 flex min-h-0 flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out",
         collapsed ? "w-16" : "w-64"
       )}
     >
@@ -118,7 +120,7 @@ export function Sidebar({ username }: { username: string }) {
         )}
       </div>
 
-      <nav className="flex-1 p-3 flex flex-col gap-0">
+      <nav className="min-h-0 flex-1 overflow-y-auto p-3 flex flex-col gap-0">
         {NAV_GROUPS.map((group, groupIndex) => (
           <div
             key={group.title}
@@ -140,12 +142,15 @@ export function Sidebar({ username }: { username: string }) {
                   item.href === "/"
                     ? pathname === "/"
                     : pathname.startsWith(item.href);
+                const collapsedHint = item.beta
+                  ? `${item.label} (beta)`
+                  : item.label;
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    title={collapsed ? item.label : undefined}
-                    aria-label={collapsed ? item.label : undefined}
+                    title={collapsed ? collapsedHint : undefined}
+                    aria-label={collapsed ? collapsedHint : undefined}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "flex items-center rounded-md text-sm transition-colors",
@@ -158,7 +163,16 @@ export function Sidebar({ username }: { username: string }) {
                     )}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
-                    {!collapsed && <span>{item.label}</span>}
+                    {!collapsed && (
+                      <>
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {item.beta ? (
+                          <span className="shrink-0 text-[9px] font-normal text-zinc-600/70">
+                            Beta
+                          </span>
+                        ) : null}
+                      </>
+                    )}
                   </Link>
                 );
               })}

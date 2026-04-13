@@ -7,8 +7,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
-import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
+import type { Company, CompanyWithGoals, Goal, Person } from "@/lib/types/tracker";
 import { GoalSection } from "./GoalSection";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { ChevronRight, Building2, ChevronDown, Plus } from "lucide-react";
@@ -33,6 +34,11 @@ import {
 import { AiCreateButton } from "./AiCreateButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
+import {
+  CompanySectionOverlayProvider,
+  useCompanySectionOverlayOptional,
+} from "./company-section-overlay-context";
+import { CollapsePanel } from "./CollapsePanel";
 
 interface CompanySectionProps {
   company: CompanyWithGoals;
@@ -40,6 +46,9 @@ interface CompanySectionProps {
   /** When true (e.g. tracker search is active), expand so matches are visible */
   expandForSearch?: boolean;
   ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
+  allGoals: Goal[];
+  allCompanies: Company[];
+  mirrorPickerHierarchy: CompanyWithGoals[];
 }
 
 export function CompanySection({
@@ -47,6 +56,9 @@ export function CompanySection({
   people,
   expandForSearch = false,
   ownerWorkloadMap,
+  allGoals,
+  allCompanies,
+  mirrorPickerHierarchy,
 }: CompanySectionProps) {
   const [expanded, setExpanded] = useState(true);
   /** Per-goal expanded state so we can default new goals when siblings are all collapsed. */
@@ -128,7 +140,7 @@ export function CompanySection({
 
   const goalCount = company.goals.length;
   const projectCount = company.goals.reduce(
-    (sum, g) => sum + g.projects.length,
+    (sum, g) => sum + g.projects.filter((p) => !p.isMirror).length,
     0
   );
   const statsLabel = `${goalCount} goal${goalCount !== 1 ? "s" : ""} · ${projectCount} project${projectCount !== 1 ? "s" : ""}`;
@@ -148,6 +160,7 @@ export function CompanySection({
         priority: "P2",
         executionMode: "Async",
         slackChannel: "",
+        slackChannelId: "",
         status: "Not Started",
         atRisk: false,
         spotlight: false,
@@ -175,6 +188,7 @@ export function CompanySection({
   }, [company.id, expanded, handleNewGoalRegistered]);
 
   return (
+    <CompanySectionOverlayProvider>
     <div className="group/company mb-6 min-w-0 max-w-full">
       <div
         ref={companyHeaderRef}
@@ -208,50 +222,43 @@ export function CompanySection({
         )}
 
         <div className="flex-1 min-w-0">
-          <div className="flex min-w-0 items-baseline justify-start gap-3">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
             <h2 className="min-w-0 max-w-full shrink truncate font-semibold text-zinc-100 text-base">
               {company.name}
             </h2>
-            <span className="group/stats relative inline-flex shrink-0">
-              <span
-                className="cursor-default text-xs tabular-nums text-zinc-600 whitespace-nowrap"
-                aria-hidden
-              >
-                {goalCount} · {projectCount}
+            <span
+              className="shrink-0 cursor-default text-xs tabular-nums text-zinc-600 whitespace-nowrap"
+              aria-label={statsLabel}
+            >
+              {goalCount} goal{goalCount !== 1 ? "s" : ""}
+              <span className="text-zinc-500/70" aria-hidden>
+                {" "}
+                ·{" "}
               </span>
-              <span
-                className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 w-max max-w-[min(100vw-2rem,20rem)] rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-left text-xs font-normal leading-snug text-zinc-300 shadow-lg opacity-0 transition-opacity duration-150 group-hover/stats:opacity-100"
-                aria-hidden
-              >
-                {statsLabel}
-              </span>
-              <span className="sr-only">{statsLabel}</span>
+              {projectCount} project{projectCount !== 1 ? "s" : ""}
             </span>
+            {company.launchDate ? (
+              <span
+                className="shrink-0 text-xs text-zinc-600/70"
+                title={`Launched — ${formatCalendarDateHint(company.launchDate)}`}
+              >
+                Launched{" "}
+                <span className="text-zinc-500">
+                  {formatRelativeCalendarDate(company.launchDate)}
+                </span>
+              </span>
+            ) : company.developmentStartDate ? (
+              <span
+                className="shrink-0 text-xs text-zinc-600/70"
+                title={`Started — ${formatCalendarDateHint(company.developmentStartDate)}`}
+              >
+                Dev started{" "}
+                <span className="text-zinc-500">
+                  {formatRelativeCalendarDate(company.developmentStartDate)}
+                </span>
+              </span>
+            ) : null}
           </div>
-          {(company.developmentStartDate || company.launchDate) && (
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-              {company.developmentStartDate ? (
-                <span
-                  title={`Started — ${formatCalendarDateHint(company.developmentStartDate)}`}
-                >
-                  Dev started{" "}
-                  <span className="text-zinc-400">
-                    {formatRelativeCalendarDate(company.developmentStartDate)}
-                  </span>
-                </span>
-              ) : null}
-              {company.launchDate ? (
-                <span
-                  title={`Launched — ${formatCalendarDateHint(company.launchDate)}`}
-                >
-                  Launched{" "}
-                  <span className="text-zinc-400">
-                    {formatRelativeCalendarDate(company.launchDate)}
-                  </span>
-                </span>
-              ) : null}
-            </div>
-          )}
         </div>
         </button>
         <ContextMenu
@@ -264,11 +271,18 @@ export function CompanySection({
         />
       </div>
 
-      {expanded && (
+      <CollapsePanel
+        open={expanded}
+        transitionClassName="duration-[300ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150"
+        innerClassName={cn(
+          "transition-opacity duration-[280ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
+          expanded ? "opacity-100" : "opacity-0"
+        )}
+      >
         <div className="mt-1">
           {company.goals.length === 0 ? (
             <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8">
-              <p
+              <div
                 className={cn(
                   "w-full min-w-0",
                   TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS
@@ -292,6 +306,7 @@ export function CompanySection({
                       priority: "P2",
                       executionMode: "Async",
                       slackChannel: "",
+                      slackChannelId: "",
                       status: "Not Started",
                       atRisk: false,
                       spotlight: false,
@@ -309,7 +324,7 @@ export function CompanySection({
                   onCreated={(id) => handleNewGoalRegistered(id)}
                   inline
                 />
-              </p>
+              </div>
             </div>
           ) : (
             <>
@@ -330,15 +345,15 @@ export function CompanySection({
                     onGoalCreated={handleNewGoalRegistered}
                     initialExpanded={newGoalInitialExpandedById[goal.id]}
                     onExpandedChange={handleGoalExpandedChange}
+                    allGoals={allGoals}
+                    allCompanies={allCompanies}
+                    mirrorPickerHierarchy={mirrorPickerHierarchy}
                   />
                 ))}
               </div>
               {/* Outside goal CollapsePanels so “Add goal” stays visible when every goal is collapsed */}
-              <div
-                className={cn(
-                  "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
-                  TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS
-                )}
+              <CompanyAddGoalFooterRow
+                className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5"
               >
                 <button
                   type="button"
@@ -357,6 +372,7 @@ export function CompanySection({
                       priority: "P2",
                       executionMode: "Async",
                       slackChannel: "",
+                      slackChannelId: "",
                       status: "Not Started",
                       atRisk: false,
                       spotlight: false,
@@ -373,11 +389,35 @@ export function CompanySection({
                   companyId={company.id}
                   onCreated={(id) => handleNewGoalRegistered(id)}
                 />
-              </div>
+              </CompanyAddGoalFooterRow>
             </>
           )}
         </div>
+      </CollapsePanel>
+    </div>
+    </CompanySectionOverlayProvider>
+  );
+}
+
+/** Keeps footer legible while portaled cell preview panels are open (pointer leaves `group/company`). */
+function CompanyAddGoalFooterRow({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  const overlay = useCompanySectionOverlayOptional();
+  const portaledActive = (overlay?.overlayCount ?? 0) > 0;
+  return (
+    <div
+      className={cn(
+        className,
+        TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS,
+        portaledActive && "opacity-100"
       )}
+    >
+      {children}
     </div>
   );
 }
