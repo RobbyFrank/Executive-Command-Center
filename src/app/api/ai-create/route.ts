@@ -18,6 +18,9 @@ Project fields you must populate:
 - description: What this project delivers — scope and outcome in 1-2 sentences
 - definitionOfDone: Concrete criteria to know the project is complete
 - complexityScore: 1-5 integer (1 = trivial, 5 = very complex)
+- milestones: An array of 3-6 milestones that break the project into concrete, sequential deliverables. Each milestone is an object with:
+  - name: Short deliverable name, e.g. "API endpoints implemented"
+  - targetDate: ISO date string (YYYY-MM-DD). Space milestones realistically from today, accounting for the project complexity.
 `.trim();
 
 function buildSystemPrompt(
@@ -32,6 +35,7 @@ function buildSystemPrompt(
   return `You are a concise executive writing assistant that helps create ${type}s for a portfolio tracker.
 
 CONTEXT: The user is adding a new ${type} under the ${parentLabel} "${entityName}".
+Today's date is ${new Date().toISOString().slice(0, 10)}.
 
 STYLE RULES — study the existing tracker data below and match its tone exactly:
 - Concise, actionable, readable. No filler, no buzzwords, no marketing language.
@@ -49,7 +53,7 @@ FINAL OUTPUT RULES:
 - The JSON block MUST be valid JSON wrapped in \`\`\`json ... \`\`\` fences.
 - ${fieldsBlock}
 - Do NOT include any fields beyond those listed above.
-- Do NOT include id, status, dates, or other metadata — those are set automatically.
+- Do NOT include id, status, or other metadata — those are set automatically. (Exception: milestone targetDate is required.)
 
 EXISTING TRACKER DATA (use this to match writing style and understand context):
 ${trackerJson}`;

@@ -89,6 +89,11 @@ interface InlineEditCellProps {
    */
   startInEditMode?: boolean;
   /**
+   * Increment from the parent (e.g. `setState((n) => n + 1)`) to open edit mode after mount — used for
+   * context-menu **Rename**. The initial value establishes a baseline without opening.
+   */
+  openEditNonce?: number;
+  /**
    * Roadmap goal/project grid: omit default resting left padding so values line up with sticky column headers.
    */
   trackerGridAlign?: boolean;
@@ -123,6 +128,7 @@ export function InlineEditCell({
   truncateTooltipAlwaysHover = false,
   validate,
   startInEditMode = false,
+  openEditNonce,
   trackerGridAlign = false,
   emphasizeEmpty = false,
   dateMin,
@@ -131,6 +137,7 @@ export function InlineEditCell({
   const [draft, setDraft] = useState(value);
   const [validationError, setValidationError] = useState<string | undefined>();
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
+  const lastOpenEditNonce = useRef<number | null>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const truncateTooltipRef = useRef<CellHoverTooltipHandle>(null);
   const validationHintId = `${useId()}-validation`;
@@ -148,6 +155,18 @@ export function InlineEditCell({
     setDraft(value);
     setValidationError(undefined);
   }, [value]);
+
+  useEffect(() => {
+    if (openEditNonce === undefined) return;
+    if (lastOpenEditNonce.current === null) {
+      lastOpenEditNonce.current = openEditNonce;
+      return;
+    }
+    if (openEditNonce !== lastOpenEditNonce.current) {
+      lastOpenEditNonce.current = openEditNonce;
+      setEditing(true);
+    }
+  }, [openEditNonce]);
 
   useEffect(() => {
     if (editing && inputRef.current) {

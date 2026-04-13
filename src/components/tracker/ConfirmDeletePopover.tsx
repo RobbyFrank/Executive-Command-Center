@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type DeleteResult = { error: string | null };
 
@@ -28,6 +29,8 @@ interface ConfirmDeletePopoverProps {
     | Promise<void>
     | DeleteResult
     | Promise<DeleteResult>;
+  /** Roadmap: `group/goal` vs `group/project` for row hover. Default: goal rows. */
+  rowGroup?: "goal" | "project";
 }
 
 const PANEL_MAX_W = 288;
@@ -37,6 +40,7 @@ export function ConfirmDeletePopover({
   disabled = false,
   disabledReason,
   onConfirm,
+  rowGroup = "goal",
 }: ConfirmDeletePopoverProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -163,6 +167,11 @@ export function ConfirmDeletePopover({
       </>
     ) : null;
 
+  const rowGroupHoverOpacity =
+    rowGroup === "project"
+      ? "group-hover/project:opacity-100"
+      : "group-hover/goal:opacity-100";
+
   return (
     <div className="relative" ref={anchorRef}>
       <button
@@ -173,11 +182,15 @@ export function ConfirmDeletePopover({
           setOpen(!open);
           setError(null);
         }}
-        className={`p-1 transition-colors ${
+        className={cn(
+          "p-1 transition-colors",
           disabled
             ? "cursor-not-allowed text-zinc-600 opacity-40"
-            : "cursor-pointer text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
-        }`}
+            : cn(
+                "cursor-pointer text-zinc-600 opacity-0 hover:opacity-100 hover:text-red-400 focus-visible:opacity-100",
+                rowGroupHoverOpacity
+              )
+        )}
         title={
           disabled ? (disabledReason ?? "Cannot delete") : "Delete"
         }

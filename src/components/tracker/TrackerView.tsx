@@ -18,7 +18,7 @@ import { PriorityFilterMultiSelect } from "./PriorityFilterMultiSelect";
 import { StatusEnumFilterMultiSelect } from "./StatusEnumFilterMultiSelect";
 import {
   TrackerExpandProvider,
-  type TrackerBulkExpandTarget,
+  type TrackerExpandPreset,
 } from "./tracker-expand-context";
 import { RoadmapViewProvider } from "./roadmap-view-context";
 import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
@@ -49,6 +49,8 @@ import { firstNameFromFullName } from "@/lib/personDisplayName";
 import { cn } from "@/lib/utils";
 import type { RoadmapInitialFilters } from "@/lib/roadmap-query";
 import { emptyRoadmapFilters } from "@/lib/roadmap-query";
+
+const ROADMAP_FOCUS_MODE_STORAGE_KEY = "ecc-roadmap-focus-mode";
 
 interface TrackerViewProps {
   hierarchy: CompanyWithGoals[];
@@ -90,21 +92,26 @@ export function TrackerView({
   );
   /** When false, project rows with status Done are hidden. */
   const [showCompletedProjects, setShowCompletedProjects] = useState(true);
-  const [bulkTick, setBulkTick] = useState(0);
-  /** Last bulk preset applied; null = none yet this session (manual expansion) */
-  const [bulkTarget, setBulkTarget] = useState<TrackerBulkExpandTarget>(null);
+  /** Increment so goal/project rows re-apply the tree expansion preset */
+  const [bulkTick, setBulkTick] = useState(1);
+  /** Tree expansion dropdown: default Goals only */
+  const [expandPreset, setExpandPreset] = useState<TrackerExpandPreset>("goals_only");
+  /** Focus mode — default off; restored from `localStorage` after mount */
+  const [focusMode, setFocusMode] = useState(false);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
   const [focusEnforceTick, setFocusEnforceTick] = useState(0);
-  const focusProjectMode = bulkTarget === "single_project";
+  const focusProjectMode = focusMode;
+  /** After reading Focus from localStorage — avoids persisting before restore */
+  const [focusPreferenceHydrated, setFocusPreferenceHydrated] = useState(false);
 
-  /** Width hint for the tree dropdown (widest preset label; no preset uses blank value). */
+  /** Width hint for the tree dropdown (widest preset label). */
   const treeViewSelectMeasureLabel = "Goals + projects";
 
-  /** Visible label for the closed select — only real presets; no “Custom” row. */
+  /** Visible label for styling — matches closed select (Custom when no preset). */
   const treeViewSelectDisplayLabel = useMemo(() => {
-    if (bulkTarget === null || bulkTarget === "single_project") return "";
-    switch (bulkTarget) {
+    if (expandPreset === null) return "Custom";
+    switch (expandPreset) {
       case "collapse":
         return "All collapsed";
       case "goals_only":
@@ -114,9 +121,9 @@ export function TrackerView({
       case "goals_projects_milestones":
         return "Full tree";
       default:
-        return "";
+        return "Custom";
     }
-  }, [bulkTarget]);
+  }, [expandPreset]);
 
   const expandModeMeasureRef = useRef<HTMLSpanElement>(null);
   const [expandSelectWidthPx, setExpandSelectWidthPx] = useState<number | null>(
@@ -166,13 +173,41 @@ export function TrackerView({
     setStatusEnumFilterIds([]);
   }, []);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ROADMAP_FOCUS_MODE_STORAGE_KEY);
+      if (raw === "1" || raw === "true") {
+        setFocusMode(true);
+        setFocusEnforceTick((x) => x + 1);
+      }
+    } catch {
+      /* ignore quota / private mode */
+    }
+    setFocusPreferenceHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!focusPreferenceHydrated) return;
+    try {
+      localStorage.setItem(
+        ROADMAP_FOCUS_MODE_STORAGE_KEY,
+        focusMode ? "1" : "0"
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [focusMode, focusPreferenceHydrated]);
+
   const onExpandModeChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const raw = e.target.value;
       setFocusedGoalId(null);
       setFocusedProjectId(null);
-      if (!raw) return;
-      setBulkTarget(raw as TrackerBulkExpandTarget);
+      if (raw === "") {
+        setExpandPreset(null);
+      } else {
+        setExpandPreset(raw as TrackerExpandPreset);
+      }
       setBulkTick((t) => t + 1);
     },
     []
@@ -182,25 +217,25 @@ export function TrackerView({
     if (filterActive) return;
     setFocusedGoalId(null);
     setFocusedProjectId(null);
-    if (bulkTarget === "single_project") {
-      setBulkTarget(null);
+    if (focusMode) {
+      setFocusMode(false);
       setBulkTick((t) => t + 1);
     } else {
-      setBulkTarget("single_project");
+      setFocusMode(true);
       setFocusEnforceTick((x) => x + 1);
     }
-  }, [filterActive, bulkTarget]);
+  }, [filterActive, focusMode]);
 
   useEffect(() => {
     if (!filterActive) return;
     setFocusedGoalId(null);
     setFocusedProjectId(null);
-    setBulkTarget((prev) => (prev === "single_project" ? null : prev));
+    setFocusMode(false);
   }, [filterActive]);
 
   useEffect(() => {
     if (!initialFocus?.goalId || !initialFocus?.projectId) return;
-    setBulkTarget("single_project");
+    setFocusMode(true);
     setFocusedGoalId(initialFocus.goalId);
     setFocusedProjectId(initialFocus.projectId);
     setBulkTick((t) => t + 1);
@@ -210,7 +245,7 @@ export function TrackerView({
   const bulkValue = useMemo(
     () => ({
       bulkTick,
-      bulkTarget,
+      expandPreset,
       focusProjectMode,
       focusedGoalId,
       setFocusedGoalId,
@@ -220,7 +255,7 @@ export function TrackerView({
     }),
     [
       bulkTick,
-      bulkTarget,
+      expandPreset,
       focusProjectMode,
       focusedGoalId,
       focusedProjectId,
@@ -564,16 +599,16 @@ export function TrackerView({
             title={
               filterActive
                 ? "Unavailable while search or filters are active"
-                : bulkTarget === "single_project"
+                : focusMode
                   ? "Exit Focus — only one goal and one project stay open; click to return to normal"
                   : "Focus — only one goal and one project expanded; opening another closes the rest"
             }
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40 ${
-              bulkTarget === "single_project"
+              focusMode
                 ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-950/55"
                 : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
             }`}
-            aria-pressed={bulkTarget === "single_project"}
+            aria-pressed={focusMode}
           >
             <Crosshair className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
             Focus
@@ -591,18 +626,11 @@ export function TrackerView({
             </span>
             <select
               id="tracker-expand-mode"
-              value={
-                bulkTarget === "collapse" ||
-                bulkTarget === "goals_only" ||
-                bulkTarget === "goals_and_projects" ||
-                bulkTarget === "goals_projects_milestones"
-                  ? bulkTarget
-                  : ""
-              }
+              value={expandPreset ?? ""}
               onChange={onExpandModeChange}
               className={cn(
                 "max-w-full rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-2.5 pr-8 text-xs font-medium shadow-sm cursor-pointer hover:bg-zinc-800 hover:border-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500 appearance-none bg-[length:0.875rem] bg-[right_0.4rem_center] bg-no-repeat",
-                treeViewSelectDisplayLabel === "" && "text-zinc-500"
+                treeViewSelectDisplayLabel === "Custom" && "text-zinc-500"
               )}
               style={{
                 ...(expandSelectWidthPx != null
@@ -611,27 +639,25 @@ export function TrackerView({
                 backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
               }}
               aria-label={
-                bulkTarget === null || bulkTarget === "single_project"
+                expandPreset === null
                   ? "Tree expansion — Custom (manual); choose a preset to expand or collapse the tree"
                   : "Tree expansion mode"
               }
               title={
-                bulkTarget === null || bulkTarget === "single_project"
+                expandPreset === null
                   ? "Custom — manual expansion; pick a preset below to apply it, or click rows yourself"
-                  : bulkTarget === "collapse"
+                  : expandPreset === "collapse"
                     ? "Companies, goals, projects, and milestones collapsed"
-                    : bulkTarget === "goals_only"
+                    : expandPreset === "goals_only"
                       ? "Companies expanded; goal rows visible; project lists stay collapsed"
-                      : bulkTarget === "goals_and_projects"
+                      : expandPreset === "goals_and_projects"
                         ? "Projects expanded; milestone lists stay collapsed"
-                        : bulkTarget === "goals_projects_milestones"
+                        : expandPreset === "goals_projects_milestones"
                           ? "Expand goals, projects, and milestone lists"
                           : "Custom — manual expansion; pick a preset below to apply it, or click rows yourself"
               }
             >
-              <option value="" disabled hidden>
-                &#8203;
-              </option>
+              <option value="">Custom</option>
               <option value="collapse">All collapsed</option>
               <option value="goals_only">Goals only</option>
               <option value="goals_and_projects">Goals + projects</option>

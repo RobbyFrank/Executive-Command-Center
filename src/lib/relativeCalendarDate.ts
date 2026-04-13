@@ -19,6 +19,14 @@ export function parseCalendarDateString(s: string): Date | null {
   return date;
 }
 
+/** Today's calendar date in local time as `YYYY-MM-DD` (same convention as target/start dates). */
+export function calendarDateTodayLocal(now = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /** Calendar-day difference: `target − reference` in whole days (local). */
 function calendarDaysBetween(target: Date, reference: Date): number {
   const t = Date.UTC(

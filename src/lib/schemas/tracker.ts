@@ -119,6 +119,8 @@ export const CompanySchema = z.object({
 
 export const GoalSchema = z.object({
   id: z.string(),
+  /** Local calendar date (YYYY-MM-DD) when the goal was created; not shown in UI. Empty for legacy rows. */
+  createdAt: z.string().default(""),
   companyId: z.string(),
   description: z.string().min(1),
   measurableTarget: z.string().default(""),
@@ -150,6 +152,8 @@ export const GoalSchema = z.object({
 
 export const ProjectSchema = z.object({
   id: z.string(),
+  /** Local calendar date (YYYY-MM-DD) when the project was created; not shown in UI. Empty for legacy rows. */
+  createdAt: z.string().default(""),
   goalId: z.string(),
   name: z.string().min(1),
   /** Outcome or scope (Roadmap **Description** column; aligns under goal Description). */

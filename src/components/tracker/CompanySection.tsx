@@ -1,10 +1,17 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { GoalSection } from "./GoalSection";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import { ChevronRight, Building2 } from "lucide-react";
+import { ChevronRight, Building2, ChevronDown, Plus } from "lucide-react";
 import { createGoal } from "@/server/actions/tracker";
 import { cn } from "@/lib/utils";
 import {
@@ -17,8 +24,15 @@ import {
   ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
   TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
 } from "@/lib/tracker-sticky-layout";
-import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
+import {
+  TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS,
+  TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS,
+  TRACKER_FOOTER_TEXT_ACTION,
+  TRACKER_INLINE_TEXT_ACTION,
+} from "./tracker-text-actions";
 import { AiCreateButton } from "./AiCreateButton";
+import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
+import { useContextMenu } from "@/hooks/useContextMenu";
 
 interface CompanySectionProps {
   company: CompanyWithGoals;
@@ -35,14 +49,48 @@ export function CompanySection({
   ownerWorkloadMap,
 }: CompanySectionProps) {
   const [expanded, setExpanded] = useState(true);
+  /** Per-goal expanded state so we can default new goals when siblings are all collapsed. */
+  const [goalExpandedById, setGoalExpandedById] = useState<
+    Record<string, boolean>
+  >({});
+  /** First-mount `expanded` for goals created in this session (key = goal id). */
+  const [newGoalInitialExpandedById, setNewGoalInitialExpandedById] = useState<
+    Record<string, boolean>
+  >({});
   /** After adding a goal, title (description) opens in edit mode so the user can type immediately. */
   const [newGoalTitleFocusId, setNewGoalTitleFocusId] = useState<
     string | null
   >(null);
-  const { bulkTick, bulkTarget } = useTrackerExpandBulk();
+
+  const handleGoalExpandedChange = useCallback(
+    (goalId: string, isExpanded: boolean) => {
+      setGoalExpandedById((prev) => {
+        if (prev[goalId] === isExpanded) return prev;
+        return { ...prev, [goalId]: isExpanded };
+      });
+    },
+    []
+  );
+
+  const handleNewGoalRegistered = useCallback(
+    (newGoalId: string) => {
+      const siblings = company.goals.filter((g) => g.id !== newGoalId);
+      const allCollapsed =
+        siblings.length > 0 &&
+        siblings.every((g) => goalExpandedById[g.id] === false);
+      setNewGoalInitialExpandedById((prev) => ({
+        ...prev,
+        [newGoalId]: !allCollapsed,
+      }));
+      setNewGoalTitleFocusId(newGoalId);
+    },
+    [company.goals, goalExpandedById]
+  );
+  const { bulkTick, expandPreset } = useTrackerExpandBulk();
   const { stickyTopPx } = useRoadmapView();
   const toolbarPx =
     stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
+  const companyContext = useContextMenu();
   const companyHeaderRef = useRef<HTMLDivElement>(null);
   const [companyHeaderPx, setCompanyHeaderPx] = useState(56);
 
@@ -65,14 +113,14 @@ export function CompanySection({
     if (bulkTick === 0) return;
     queueMicrotask(() => {
       if (
-        bulkTarget === "goals_only" ||
-        bulkTarget === "goals_and_projects" ||
-        bulkTarget === "goals_projects_milestones"
+        expandPreset === "goals_only" ||
+        expandPreset === "goals_and_projects" ||
+        expandPreset === "goals_projects_milestones"
       )
         setExpanded(true);
-      else if (bulkTarget === "collapse") setExpanded(false);
+      else if (expandPreset === "collapse") setExpanded(false);
     });
-  }, [bulkTick, bulkTarget]);
+  }, [bulkTick, expandPreset]);
 
   useEffect(() => {
     if (expandForSearch) setExpanded(true);
@@ -85,6 +133,47 @@ export function CompanySection({
   );
   const statsLabel = `${goalCount} goal${goalCount !== 1 ? "s" : ""} · ${projectCount} project${projectCount !== 1 ? "s" : ""}`;
 
+  const companyMenuEntries = useMemo((): ContextMenuEntry[] => {
+    async function addGoal() {
+      const goal = await createGoal({
+        companyId: company.id,
+        description: "New goal",
+        measurableTarget: "",
+        whyItMatters: "",
+        currentValue: "",
+        impactScore: 3,
+        confidenceScore: 0,
+        costOfDelay: 3,
+        ownerId: "",
+        priority: "P2",
+        executionMode: "Async",
+        slackChannel: "",
+        status: "Not Started",
+        atRisk: false,
+        spotlight: false,
+        reviewLog: [],
+      });
+      handleNewGoalRegistered(goal.id);
+    }
+    return [
+      {
+        type: "item" as const,
+        id: "add-goal",
+        label: "Add goal",
+        icon: Plus,
+        onClick: () => void addGoal(),
+      },
+      { type: "divider", id: "d1" },
+      {
+        type: "item" as const,
+        id: "expand-collapse",
+        label: expanded ? "Collapse company" : "Expand company",
+        icon: expanded ? ChevronDown : ChevronRight,
+        onClick: () => setExpanded((v) => !v),
+      },
+    ];
+  }, [company.id, expanded, handleNewGoalRegistered]);
+
   return (
     <div className="group/company mb-6 min-w-0 max-w-full">
       <div
@@ -95,6 +184,7 @@ export function CompanySection({
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
+          onContextMenu={companyContext.onContextMenu}
           aria-expanded={expanded}
           className="group flex w-full items-center gap-3 px-4 py-3 text-left bg-zinc-900/60 rounded-lg border border-zinc-800 hover:bg-zinc-900/85 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
         >
@@ -164,13 +254,26 @@ export function CompanySection({
           )}
         </div>
         </button>
+        <ContextMenu
+          open={companyContext.open}
+          x={companyContext.x}
+          y={companyContext.y}
+          onClose={companyContext.close}
+          ariaLabel={`Actions for ${company.name}`}
+          entries={companyMenuEntries}
+        />
       </div>
 
       {expanded && (
         <div className="mt-1">
           {company.goals.length === 0 ? (
             <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8">
-              <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+              <p
+                className={cn(
+                  "w-full min-w-0",
+                  TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS
+                )}
+              >
                 No goals yet. Add a goal to plan work and projects for this company.&nbsp;
                 <button
                   type="button"
@@ -194,7 +297,7 @@ export function CompanySection({
                       spotlight: false,
                       reviewLog: [],
                     });
-                    setNewGoalTitleFocusId(goal.id);
+                    handleNewGoalRegistered(goal.id);
                   }}
                   className={TRACKER_INLINE_TEXT_ACTION}
                 >
@@ -203,7 +306,7 @@ export function CompanySection({
                 <AiCreateButton
                   type="goal"
                   companyId={company.id}
-                  onCreated={(id) => setNewGoalTitleFocusId(id)}
+                  onCreated={(id) => handleNewGoalRegistered(id)}
                   inline
                 />
               </p>
@@ -224,9 +327,52 @@ export function CompanySection({
                     ownerWorkloadMap={ownerWorkloadMap}
                     roadmapGoalRowStickyTopPx={roadmapGoalRowStickyTopPx}
                     focusGoalTitleEditId={newGoalTitleFocusId}
-                    onGoalCreated={setNewGoalTitleFocusId}
+                    onGoalCreated={handleNewGoalRegistered}
+                    initialExpanded={newGoalInitialExpandedById[goal.id]}
+                    onExpandedChange={handleGoalExpandedChange}
                   />
                 ))}
+              </div>
+              {/* Outside goal CollapsePanels so “Add goal” stays visible when every goal is collapsed */}
+              <div
+                className={cn(
+                  "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
+                  TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS
+                )}
+              >
+                <button
+                  type="button"
+                  title="Add another goal under this company"
+                  onClick={async () => {
+                    const g = await createGoal({
+                      companyId: company.id,
+                      description: "New goal",
+                      measurableTarget: "",
+                      whyItMatters: "",
+                      currentValue: "",
+                      impactScore: 3,
+                      confidenceScore: 0,
+                      costOfDelay: 3,
+                      ownerId: "",
+                      priority: "P2",
+                      executionMode: "Async",
+                      slackChannel: "",
+                      status: "Not Started",
+                      atRisk: false,
+                      spotlight: false,
+                      reviewLog: [],
+                    });
+                    handleNewGoalRegistered(g.id);
+                  }}
+                  className={TRACKER_FOOTER_TEXT_ACTION}
+                >
+                  Add goal
+                </button>
+                <AiCreateButton
+                  type="goal"
+                  companyId={company.id}
+                  onCreated={(id) => handleNewGoalRegistered(id)}
+                />
               </div>
             </>
           )}

@@ -8,7 +8,7 @@ import {
 } from "react";
 import { X, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { createGoal, createProject } from "@/server/actions/tracker";
+import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
 
 type MessageRole = "user" | "assistant";
 interface Message {
@@ -24,12 +24,18 @@ interface GoalProposal {
   currentValue: string;
 }
 
+interface ProposedMilestone {
+  name: string;
+  targetDate: string;
+}
+
 interface ProjectProposal {
   name: string;
   priority: string;
   description: string;
   definitionOfDone: string;
   complexityScore: number;
+  milestones?: ProposedMilestone[];
 }
 
 type Proposal = GoalProposal | ProjectProposal;
@@ -250,6 +256,16 @@ export function AiCreateDialog({
           spotlight: false,
           reviewLog: [],
         });
+        if (p.milestones?.length) {
+          for (const m of p.milestones) {
+            await createMilestone({
+              projectId: project.id,
+              name: m.name,
+              status: "Not Done",
+              targetDate: m.targetDate || "",
+            });
+          }
+        }
         onCreated?.(project.id);
       }
       onClose();
@@ -378,6 +394,34 @@ export function AiCreateDialog({
                   );
                 })}
               </dl>
+              {type === "project" &&
+                (displayProposal as ProjectProposal).milestones?.length ? (
+                <div className="mt-3 border-t border-emerald-800/30 pt-2.5">
+                  <div className="mb-1.5 text-xs text-zinc-500">
+                    Milestones
+                  </div>
+                  <ol className="space-y-1">
+                    {(displayProposal as ProjectProposal).milestones!.map(
+                      (m, i) => (
+                        <li
+                          key={i}
+                          className="flex items-baseline gap-2 text-zinc-200"
+                        >
+                          <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+                            {i + 1}.
+                          </span>
+                          <span className="min-w-0 flex-1">{m.name}</span>
+                          {m.targetDate && (
+                            <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+                              {m.targetDate}
+                            </span>
+                          )}
+                        </li>
+                      ),
+                    )}
+                  </ol>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -404,6 +448,10 @@ export function AiCreateDialog({
                   <Check className="h-3.5 w-3.5" />
                 )}
                 Create {type}
+                {type === "project" &&
+                  (proposal as ProjectProposal | null)?.milestones?.length
+                  ? ` + ${(proposal as ProjectProposal).milestones!.length} milestones`
+                  : ""}
               </button>
               <button
                 type="button"

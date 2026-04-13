@@ -140,13 +140,12 @@ export class TrackerRepositoryCore implements TrackerRepository {
 
   async deleteGoal(id: string): Promise<void> {
     await this.commitWithRetry((data) => {
-      const projectIds = new Set(
-        data.projects.filter((p) => p.goalId === id).map((p) => p.id)
-      );
-      data.milestones = data.milestones.filter(
-        (m) => !projectIds.has(m.projectId)
-      );
-      data.projects = data.projects.filter((p) => p.goalId !== id);
+      const projectsForGoal = data.projects.filter((p) => p.goalId === id);
+      if (projectsForGoal.length > 0) {
+        throw new Error(
+          `Cannot delete this goal: ${projectsForGoal.length} project(s) still exist. Delete those projects first.`
+        );
+      }
       data.goals = data.goals.filter((g) => g.id !== id);
     });
   }

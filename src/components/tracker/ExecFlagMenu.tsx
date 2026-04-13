@@ -66,6 +66,11 @@ interface ExecFlagMenuProps {
   onCommit: (flags: { atRisk: boolean; spotlight: boolean }) => void;
   /** Shown in aria-labels, e.g. "Goal" or "Project" */
   entityLabel: string;
+  /**
+   * Roadmap rows use `group/goal` vs `group/project` so hover-revealed controls stay per-row.
+   * Default matches goal rows.
+   */
+  rowGroup?: "goal" | "project";
 }
 
 export function ExecFlagMenu({
@@ -73,6 +78,7 @@ export function ExecFlagMenu({
   spotlight,
   onCommit,
   entityLabel,
+  rowGroup = "goal",
 }: ExecFlagMenuProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -82,6 +88,10 @@ export function ExecFlagMenu({
   } | null>(null);
   const listId = useId();
   const mode = modeFromFlags(atRisk, spotlight);
+  const rowGroupHoverOpacity =
+    rowGroup === "project"
+      ? "group-hover/project:opacity-100"
+      : "group-hover/goal:opacity-100";
 
   const updateMenuPlacement = useCallback(() => {
     const el = triggerRef.current;
@@ -203,7 +213,11 @@ export function ExecFlagMenu({
         className={cn(
           "inline-flex items-center justify-center rounded p-1 transition-colors",
           mode === "none" &&
-            "text-zinc-500 hover:text-zinc-400 opacity-0 group-hover:opacity-100",
+            cn(
+              "text-zinc-500 opacity-0 hover:opacity-100 focus-visible:opacity-100",
+              rowGroupHoverOpacity
+            ),
+          mode === "none" && open && "opacity-100",
           mode === "at_risk" &&
             "text-amber-300 ring-1 ring-amber-400/40 bg-amber-500/10 opacity-100",
           mode === "spotlight" &&

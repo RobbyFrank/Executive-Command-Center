@@ -38,6 +38,7 @@ A strategic objective with multiple workstreams. The test: "Does this have multi
 | Field | Type | Notes |
 |---|---|---|
 | ID | String | UUID (v4). Older seed data may still use legacy prefixed ids (e.g. VD-1). |
+| Created At | YYYY-MM-DD (internal) | Local calendar date when the goal was created (always “today” on create); stored as `createdAt`, not shown in the UI. Legacy rows may be empty. |
 | Description | Text | e.g., "Grow VoiceDrop to $1M MRR" |
 | Measurable Target | Text | e.g., "$1M MRR," "250 trials/month" |
 | Current Value | Text (optional) | For KPI-type goals, e.g., "$380K MRR" |
@@ -61,6 +62,7 @@ A single deliverable or workstream with a clear owner and definition of done.
 
 | Field | Type | Notes |
 |---|---|---|
+| Created At | YYYY-MM-DD (internal) | Local calendar date when the project was created (always “today” on create); stored as `createdAt`, not shown in the UI. Legacy rows may be empty. |
 | Name | Text | e.g., "AI SDR Leon V1 Launch" |
 | Owner | Person | Single owner, accountable for delivery |
 | Assignees | List of People | Contributors beyond the owner |

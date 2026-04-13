@@ -24,12 +24,15 @@ interface ReviewNotesPopoverProps {
    * Review queue (same rule as Roadmap “Need review” / stale vs last reviewed).
    */
   pulseAttention?: boolean;
+  /** Roadmap: `group/goal` vs `group/project` for row hover. Default: goal rows. */
+  rowGroup?: "goal" | "project";
 }
 
 export function ReviewNotesPopover({
   entries,
   onAppendNote,
   pulseAttention = false,
+  rowGroup = "goal",
 }: ReviewNotesPopoverProps) {
   const router = useRouter();
   const list = entries ?? [];
@@ -38,6 +41,10 @@ export function ReviewNotesPopover({
     [list]
   );
   const count = list.length;
+  const rowGroupHoverOpacity =
+    rowGroup === "project"
+      ? "group-hover/project:opacity-100"
+      : "group-hover/goal:opacity-100";
 
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -194,8 +201,14 @@ export function ReviewNotesPopover({
           !pulseAttention &&
             cn(
               count > 0
-                ? "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-300 focus-visible:opacity-100"
-                : "text-zinc-500 hover:text-zinc-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+                ? cn(
+                    "text-zinc-400 opacity-0 hover:opacity-100 hover:text-zinc-300 focus-visible:opacity-100",
+                    rowGroupHoverOpacity
+                  )
+                : cn(
+                    "text-zinc-500 opacity-0 hover:opacity-100 hover:text-zinc-400 focus-visible:opacity-100",
+                    rowGroupHoverOpacity
+                  ),
               open && "opacity-100"
             )
         )}

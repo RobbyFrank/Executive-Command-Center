@@ -38,6 +38,7 @@ import { ProgressBar } from "./ProgressBar";
 import {
   SCORE_BAND_OPTIONS,
   parseScoreBand,
+  scoreBandLabel,
 } from "@/lib/tracker-score-bands";
 import { prioritySelectTextClass } from "@/lib/prioritySort";
 import { formatSlackChannelHash } from "@/lib/slackDisplay";
@@ -57,6 +58,7 @@ import {
 } from "@/lib/reviewStaleness";
 import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
+import { costOfDelayFormatDisplay } from "./CostOfDelayDisplay";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { MilestoneRow } from "./MilestoneRow";
 import { WarningsBadge } from "./WarningsBadge";
@@ -553,6 +555,8 @@ function GoalFieldsEditor({
           }
           type="select"
           options={SCORE_BAND_OPTIONS}
+          formatDisplay={costOfDelayFormatDisplay}
+          displayTitle={`Cost of delay — ${scoreBandLabel(goal.costOfDelay)} (${goal.costOfDelay}/5)`}
         />
       </div>
 
@@ -1624,8 +1628,8 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                   ) : null}
                 </div>
                 {currentProjectFromHierarchy.milestones.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/50 px-3 py-4">
-                    <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+                  <div className="py-2">
+                    <p className="w-full min-w-0 text-sm text-zinc-500/90 leading-relaxed [text-wrap:pretty]">
                       No milestones yet. Add a milestone to track delivery
                       checkpoints for this project.&nbsp;
                       <button

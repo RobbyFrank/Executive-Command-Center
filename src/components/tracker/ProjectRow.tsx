@@ -31,7 +31,16 @@ import {
   createMilestone,
   appendProjectReviewNote,
 } from "@/server/actions/tracker";
-import { ChevronRight, Flag, Link2, Plus } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronDown,
+  Flag,
+  Link2,
+  Plus,
+  Sparkles,
+  Trash2,
+  Pencil,
+} from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { isReviewStale } from "@/lib/reviewStaleness";
@@ -51,7 +60,12 @@ import { WarningsBadge } from "./WarningsBadge";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
-import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
+import {
+  TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
+  TRACKER_INLINE_TEXT_ACTION,
+} from "./tracker-text-actions";
+import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
+import { useContextMenu } from "@/hooks/useContextMenu";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -91,16 +105,19 @@ export function ProjectRow({
   const [newMilestoneNameFocusId, setNewMilestoneNameFocusId] = useState<
     string | null
   >(null);
+  /** Increment to focus the project name field (context menu Rename). */
+  const [projectRenameNonce, setProjectRenameNonce] = useState(0);
   const [slackUrlEditing, setSlackUrlEditing] = useState(false);
   const {
     bulkTick,
-    bulkTarget,
+    expandPreset,
     focusProjectMode,
     setFocusedGoalId,
     focusedProjectId,
     setFocusedProjectId,
     focusEnforceTick,
   } = useTrackerExpandBulk();
+  const projectContext = useContextMenu();
 
   useEffect(() => {
     if (!focusProjectMode || focusEnforceTick === 0) return;
@@ -119,7 +136,7 @@ export function ProjectRow({
   useEffect(() => {
     if (bulkTick === 0) return;
     queueMicrotask(() => {
-      switch (bulkTarget) {
+      switch (expandPreset) {
         case "goals_only":
           setExpanded(false);
           setShowMilestones(false);
@@ -140,7 +157,7 @@ export function ProjectRow({
           break;
       }
     });
-  }, [bulkTick, bulkTarget]);
+  }, [bulkTick, expandPreset]);
 
   useEffect(() => {
     if (expandForSearch) {
@@ -250,6 +267,129 @@ export function ProjectRow({
     return !raw || parseCalendarDateString(raw) === null;
   }, [project.targetDate]);
 
+  const projectMenuEntries = useMemo((): ContextMenuEntry[] => {
+    const execBlock: ContextMenuEntry[] = [];
+    if (!project.atRisk && !project.spotlight) {
+      execBlock.push(
+        {
+          type: "item",
+          id: "p-exec-at-risk",
+          label: "Mark at risk",
+          icon: Flag,
+          onClick: () =>
+            void updateProject(project.id, { atRisk: true, spotlight: false }),
+        },
+        {
+          type: "item",
+          id: "p-exec-spotlight",
+          label: "Mark spotlight",
+          icon: Sparkles,
+          onClick: () =>
+            void updateProject(project.id, { atRisk: false, spotlight: true }),
+        }
+      );
+    } else if (project.atRisk) {
+      execBlock.push(
+        {
+          type: "item",
+          id: "p-exec-clear",
+          label: "Clear executive signal",
+          onClick: () =>
+            void updateProject(project.id, { atRisk: false, spotlight: false }),
+        },
+        {
+          type: "item",
+          id: "p-exec-to-spotlight",
+          label: "Switch to spotlight",
+          icon: Sparkles,
+          onClick: () =>
+            void updateProject(project.id, { atRisk: false, spotlight: true }),
+        }
+      );
+    } else {
+      execBlock.push(
+        {
+          type: "item",
+          id: "p-exec-clear",
+          label: "Clear executive signal",
+          onClick: () =>
+            void updateProject(project.id, { atRisk: false, spotlight: false }),
+        },
+        {
+          type: "item",
+          id: "p-exec-to-at-risk",
+          label: "Switch to at risk",
+          icon: Flag,
+          onClick: () =>
+            void updateProject(project.id, { atRisk: true, spotlight: false }),
+        }
+      );
+    }
+
+    const expandLabel = !expanded
+      ? "Expand project"
+      : !showMilestones
+        ? "Show milestones"
+        : "Collapse project";
+    const ExpandIcon =
+      !expanded || !showMilestones ? ChevronRight : ChevronDown;
+
+    return [
+      {
+        type: "item",
+        id: "add-milestone",
+        label: "Add milestone",
+        icon: Plus,
+        onClick: async () => {
+          const ms = await createMilestone({
+            projectId: project.id,
+            name: "New milestone",
+            status: "Not Done",
+            targetDate: "",
+          });
+          setNewMilestoneNameFocusId(ms.id);
+          setExpanded(true);
+          setShowMilestones(true);
+        },
+      },
+      {
+        type: "item",
+        id: "rename-project",
+        label: "Rename project",
+        icon: Pencil,
+        onClick: () => setProjectRenameNonce((n) => n + 1),
+      },
+      { type: "divider", id: "p-d1" },
+      ...execBlock,
+      { type: "divider", id: "p-d2" },
+      {
+        type: "item",
+        id: "expand-project",
+        label: expandLabel,
+        icon: ExpandIcon,
+        onClick: () => toggleProjectRow(),
+      },
+      { type: "divider", id: "p-d3" },
+      {
+        type: "item",
+        id: "delete-project",
+        label: "Delete project…",
+        icon: Trash2,
+        destructive: true,
+        confirmMessage: `Delete this project? This can't be undone.`,
+        onClick: () => void deleteProject(project.id),
+      },
+    ];
+  }, [
+    expanded,
+    project.atRisk,
+    project.id,
+    project.spotlight,
+    setProjectRenameNonce,
+    showMilestones,
+    toggleProjectRow,
+  ]);
+
   return (
     <div
       className={cn(
@@ -270,14 +410,8 @@ export function ProjectRow({
               : "Collapse project (click row)"
         }
         onClick={onProjectRowClick}
-        className={cn(
-          "group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer",
-          project.atRisk
-            ? "hover:bg-amber-950/55"
-            : project.spotlight
-              ? "hover:bg-emerald-950/45"
-              : "hover:bg-zinc-900/50"
-        )}
+        onContextMenuCapture={projectContext.onContextMenuCapture}
+        className="group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
           <ChevronRight
@@ -296,6 +430,7 @@ export function ProjectRow({
             value={project.name}
             onSave={(name) => updateProject(project.id, { name })}
             startInEditMode={project.id === focusProjectNameEditId}
+            openEditNonce={projectRenameNonce}
             displayClassName="text-zinc-200"
           />
         </div>
@@ -552,19 +687,30 @@ export function ProjectRow({
             entries={project.reviewLog}
             onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
             pulseAttention={projectInReviewQueue}
+            rowGroup="project"
           />
           <ExecFlagMenu
             atRisk={project.atRisk}
             spotlight={project.spotlight}
             entityLabel="Project"
+            rowGroup="project"
             onCommit={(flags) => updateProject(project.id, flags)}
           />
           <ConfirmDeletePopover
             entityName="this project"
+            rowGroup="project"
             onConfirm={() => deleteProject(project.id)}
           />
         </div>
       </div>
+      <ContextMenu
+        open={projectContext.open}
+        x={projectContext.x}
+        y={projectContext.y}
+        onClose={projectContext.close}
+        ariaLabel={`Actions for project ${project.name}`}
+        entries={projectMenuEntries}
+      />
 
       {/* Milestones */}
       <CollapsePanel open={expanded && showMilestones}>
@@ -587,8 +733,13 @@ export function ProjectRow({
             </div>
           ) : null}
           {project.milestones.length === 0 ? (
-            <div className="mx-4 my-3 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-6 sm:pl-8">
-              <p className="w-full min-w-0 text-sm text-zinc-500 leading-relaxed [text-wrap:pretty]">
+            <div className="pl-14 pr-4 py-2">
+              <p
+                className={cn(
+                  "w-full min-w-0",
+                  TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
+                )}
+              >
                 No milestones yet. Add a milestone to track delivery checkpoints
                 for this project.&nbsp;
                 <button

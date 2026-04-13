@@ -20,6 +20,7 @@ import {
 } from "@/lib/companyMomentum";
 import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
 import { validateSyncDueDateVsPrevious } from "@/lib/syncProjectDueDate";
+import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 
 const repo = getRepository();
 
@@ -79,7 +80,7 @@ export async function deleteCompany(
 // --- Goals ---
 
 export async function createGoal(
-  data: Omit<Goal, "id" | "lastReviewed" | "reviewLog"> &
+  data: Omit<Goal, "id" | "lastReviewed" | "reviewLog" | "createdAt"> &
     Partial<Pick<Goal, "lastReviewed" | "reviewLog">>
 ): Promise<Goal> {
   const id = uuid();
@@ -88,7 +89,14 @@ export async function createGoal(
     trimmedReviewed !== ""
       ? trimmedReviewed
       : new Date().toISOString();
-  const goal = { id, ...data, lastReviewed, reviewLog: data.reviewLog ?? [] };
+  const createdAt = calendarDateTodayLocal();
+  const goal = {
+    id,
+    ...data,
+    lastReviewed,
+    reviewLog: data.reviewLog ?? [],
+    createdAt,
+  };
   await repo.createGoal(goal);
   revalidate();
   return goal;
@@ -113,20 +121,30 @@ export async function updateGoal(
       }
     }
   }
-  const result = await repo.updateGoal(id, updates);
+  const { createdAt: _omitCreatedAt, ...goalUpdates } = updates;
+  const result = await repo.updateGoal(id, goalUpdates);
   revalidate();
   return result;
 }
 
-export async function deleteGoal(id: string): Promise<void> {
-  await repo.deleteGoal(id);
+export async function deleteGoal(
+  id: string
+): Promise<{ error: string | null }> {
+  try {
+    await repo.deleteGoal(id);
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : "Could not delete goal.",
+    };
+  }
   revalidate();
+  return { error: null };
 }
 
 // --- Projects ---
 
 export async function createProject(
-  data: Omit<Project, "id" | "lastReviewed" | "reviewLog"> &
+  data: Omit<Project, "id" | "lastReviewed" | "reviewLog" | "createdAt"> &
     Partial<Pick<Project, "lastReviewed" | "reviewLog">>
 ): Promise<Project> {
   const id = uuid();
@@ -135,11 +153,13 @@ export async function createProject(
     trimmedReviewed !== ""
       ? trimmedReviewed
       : new Date().toISOString();
+  const createdAt = calendarDateTodayLocal();
   const project = {
     id,
     ...data,
     lastReviewed,
     reviewLog: data.reviewLog ?? [],
+    createdAt,
   };
   await repo.createProject(project);
   revalidate();
@@ -169,7 +189,8 @@ export async function updateProject(
       }
     }
   }
-  const result = await repo.updateProject(id, updates);
+  const { createdAt: _omitCreatedAt, ...projectUpdates } = updates;
+  const result = await repo.updateProject(id, projectUpdates);
   revalidate();
   return result;
 }

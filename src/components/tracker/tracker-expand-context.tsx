@@ -9,19 +9,17 @@ import {
 } from "react";
 
 /** Expansion preset for the roadmap tree (toolbar dropdown + bulk apply tick) */
-export type TrackerBulkExpandTarget =
+export type TrackerExpandPreset =
   | "goals_only"
   | "goals_and_projects"
   | "goals_projects_milestones"
   | "collapse"
-  /** At most one goal and one project expanded at a time (manual drill-in) */
-  | "single_project"
   | null;
 
 export type TrackerExpandBulk = {
   bulkTick: number;
-  bulkTarget: TrackerBulkExpandTarget;
-  /** True when `bulkTarget === "single_project"` */
+  expandPreset: TrackerExpandPreset;
+  /** Focus (single drill-in): at most one goal and one project expanded at a time */
   focusProjectMode: boolean;
   /** Which goal row is expanded in single-project mode; null means none */
   focusedGoalId: string | null;
@@ -29,7 +27,7 @@ export type TrackerExpandBulk = {
   /** Which project row is expanded in single-project mode; null means none */
   focusedProjectId: string | null;
   setFocusedProjectId: Dispatch<SetStateAction<string | null>>;
-  /** Incremented when single-project mode is selected to collapse goals and projects */
+  /** Incremented when Focus mode is turned on to collapse other goals/projects */
   focusEnforceTick: number;
 };
 

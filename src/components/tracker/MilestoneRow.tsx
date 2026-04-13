@@ -1,10 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
 import type { Milestone } from "@/lib/types/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import { updateMilestone, deleteMilestone } from "@/server/actions/tracker";
-import { Check, Circle } from "lucide-react";
+import { Check, Circle, Trash2 } from "lucide-react";
+import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
+import { useContextMenu } from "@/hooks/useContextMenu";
 
 interface MilestoneRowProps {
   milestone: Milestone;
@@ -17,9 +20,38 @@ export function MilestoneRow({
   startNameInEditMode = false,
 }: MilestoneRowProps) {
   const isDone = milestone.status === "Done";
+  const milestoneContext = useContextMenu();
+
+  const milestoneMenuEntries = useMemo((): ContextMenuEntry[] => {
+    return [
+      {
+        type: "item",
+        id: "toggle-done",
+        label: isDone ? "Mark not done" : "Mark done",
+        icon: isDone ? Circle : Check,
+        onClick: () =>
+          void updateMilestone(milestone.id, {
+            status: isDone ? "Not Done" : "Done",
+          }),
+      },
+      { type: "divider", id: "ms-d1" },
+      {
+        type: "item",
+        id: "delete-ms",
+        label: "Delete milestone…",
+        icon: Trash2,
+        destructive: true,
+        confirmMessage: `Delete milestone "${milestone.name}"? This can't be undone.`,
+        onClick: () => void deleteMilestone(milestone.id),
+      },
+    ];
+  }, [isDone, milestone.id, milestone.name]);
 
   return (
-    <div className="group flex items-center gap-3 pl-14 pr-4 py-1 hover:bg-zinc-900/50 transition-colors">
+    <div
+      className="group flex items-center gap-3 pl-14 pr-4 py-1 transition-colors hover:bg-zinc-900/50"
+      onContextMenuCapture={milestoneContext.onContextMenuCapture}
+    >
       <button
         type="button"
         onClick={() =>
@@ -62,7 +94,16 @@ export function MilestoneRow({
 
       <ConfirmDeletePopover
         entityName="this milestone"
+        rowGroup="project"
         onConfirm={() => deleteMilestone(milestone.id)}
+      />
+      <ContextMenu
+        open={milestoneContext.open}
+        x={milestoneContext.x}
+        y={milestoneContext.y}
+        onClose={milestoneContext.close}
+        ariaLabel={`Actions for milestone ${milestone.name}`}
+        entries={milestoneMenuEntries}
       />
     </div>
   );
