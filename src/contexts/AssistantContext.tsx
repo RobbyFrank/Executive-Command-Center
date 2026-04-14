@@ -10,7 +10,7 @@ import {
 } from "react";
 
 export type AssistantEntityTag = {
-  type: "goal" | "project" | "milestone";
+  type: "company" | "goal" | "project" | "milestone";
   id: string;
   label: string;
 };

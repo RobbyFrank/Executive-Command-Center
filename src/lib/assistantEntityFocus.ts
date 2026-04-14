@@ -19,13 +19,54 @@ function formatMilestonesForFocus(
  */
 export function buildEntityFocusBlock(
   data: TrackerData,
-  entity: { type: "goal" | "project" | "milestone"; id: string; label: string },
+  entity: {
+    type: "company" | "goal" | "project" | "milestone";
+    id: string;
+    label: string;
+  },
 ): string {
   const lines: string[] = [];
   lines.push(
     `FOCUSED ENTITY: ${entity.type.toUpperCase()} — "${entity.label}" (id: ${entity.id})`,
   );
   lines.push("");
+
+  if (entity.type === "company") {
+    const c = data.companies.find((x) => x.id === entity.id);
+    if (!c) {
+      lines.push("(Company record not found in data.)");
+      return lines.join("\n");
+    }
+    lines.push(`Name: ${c.name}`);
+    lines.push(`Short name: ${c.shortName}`);
+    if (c.revenue > 0) lines.push(`MRR (USD thousands): ${c.revenue}`);
+    if (c.website.trim()) lines.push(`Website: ${c.website}`);
+    if (c.developmentStartDate.trim())
+      lines.push(`Development start: ${c.developmentStartDate}`);
+    if (c.launchDate.trim()) lines.push(`Launch: ${c.launchDate}`);
+    if (c.description.trim()) lines.push(`Description: ${c.description}`);
+
+    const goals = data.goals.filter((g) => g.companyId === c.id);
+    lines.push("");
+    lines.push(`Goals (${goals.length}):`);
+    if (goals.length === 0) {
+      lines.push("  (none)");
+    } else {
+      for (const g of goals) {
+        const owner = g.ownerId
+          ? data.people.find((p) => p.id === g.ownerId)?.name
+          : "";
+        lines.push(
+          `- ${g.description} [${g.status}] P${g.priority}${owner ? ` — ${owner}` : ""}`,
+        );
+        const projects = data.projects.filter((p) => p.goalId === g.id);
+        if (projects.length > 0) {
+          lines.push(`  Projects: ${projects.map((p) => p.name).join("; ")}`);
+        }
+      }
+    }
+    return lines.join("\n");
+  }
 
   if (entity.type === "goal") {
     const g = data.goals.find((x) => x.id === entity.id);

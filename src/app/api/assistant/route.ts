@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicModel } from "@/lib/anthropicModel";
 import { buildEntityFocusBlock } from "@/lib/assistantEntityFocus";
+import {
+  mentionKey,
+  parseEccMentionsFromText,
+} from "@/lib/assistantMentions";
 import { getRepository } from "@/server/repository";
 
 export async function POST(req: Request) {
@@ -51,7 +55,9 @@ export async function POST(req: Request) {
   const repo = getRepository();
   const data = await repo.load();
 
-  let entityBlock = "";
+  const seen = new Set<string>();
+  const focusChunks: string[] = [];
+
   const ec = raw.entityContext;
   if (
     ec &&
@@ -63,22 +69,45 @@ export async function POST(req: Request) {
   ) {
     const type = (ec as { type: string }).type;
     if (
+      type === "company" ||
       type === "goal" ||
       type === "project" ||
       type === "milestone"
     ) {
-      entityBlock = `The user opened the assistant while focusing on this item — prioritize it when relevant, but they may ask about anything in the workspace.
+      const id = (ec as { id: string }).id;
+      const label = (ec as { label: string }).label;
+      seen.add(mentionKey(type, id));
+      focusChunks.push(
+        `The user opened the assistant with this roadmap item pre-selected (prioritize when relevant; full workspace JSON is still authoritative):
+
+${buildEntityFocusBlock(data, { type: type as "company" | "goal" | "project" | "milestone", id, label })}`,
+      );
+    }
+  }
+
+  const inline = parseEccMentionsFromText(question);
+  for (const m of inline) {
+    const k = mentionKey(m.type, m.id);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    focusChunks.push(
+      `The user @-tagged this item in their message:
 
 ${buildEntityFocusBlock(data, {
-        type,
-        id: (ec as { id: string }).id,
-        label: (ec as { label: string }).label,
-      })}
+        type: m.type,
+        id: m.id,
+        label: m.label,
+      })}`,
+    );
+  }
+
+  let entityBlock = "";
+  if (focusChunks.length > 0) {
+    entityBlock = `${focusChunks.join("\n\n---\n\n")}
 
 ---
 
 `;
-    }
   }
 
   const systemPrompt = `${entityBlock}You are an executive analyst assistant for the MLabs portfolio strategic tracker. Answer questions using ONLY the JSON data below. Be concise, direct, and actionable. If something is not in the data, say you do not have that information.
