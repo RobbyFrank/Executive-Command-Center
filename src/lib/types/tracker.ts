@@ -10,7 +10,6 @@ import {
   PriorityEnum,
   GoalStatusEnum,
   ProjectStatusEnum,
-  ExecutionModeEnum,
   ProjectTypeEnum,
   MilestoneStatusEnum,
   ReviewLogEntrySchema,
@@ -28,7 +27,6 @@ export type GoalStatus = z.infer<typeof GoalStatusEnum>;
 export type ProjectStatus = z.infer<typeof ProjectStatusEnum>;
 /** Goal delivery status (legacy name — same as `GoalStatus`). */
 export type Status = GoalStatus;
-export type ExecutionMode = z.infer<typeof ExecutionModeEnum>;
 export type ProjectType = z.infer<typeof ProjectTypeEnum>;
 export type MilestoneStatus = z.infer<typeof MilestoneStatusEnum>;
 export type EmploymentKind = z.infer<typeof EmploymentKindEnum>;
@@ -43,6 +41,10 @@ export interface ProjectWithMilestones extends Project {
   progress: number;
   /** True when this row is shown under a mirrored goal (not the project's primary `goalId`). */
   isMirror?: boolean;
+  /** True when `blockedByProjectId` points at a project that is not fully complete (milestones). */
+  isBlocked?: boolean;
+  /** Name of the blocking project (for tooltip when `isBlocked`). */
+  blockedByProjectName?: string;
 }
 
 export interface CompanyWithGoals extends Company {

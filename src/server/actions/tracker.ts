@@ -19,7 +19,6 @@ import {
   MOMENTUM_RECENT_REVIEW_DAYS,
 } from "@/lib/companyMomentum";
 import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
-import { validateSyncDueDateVsPrevious } from "@/lib/syncProjectDueDate";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 
 const repo = getRepository();
@@ -144,7 +143,15 @@ export async function deleteGoal(
 // --- Projects ---
 
 export async function createProject(
-  data: Omit<Project, "id" | "lastReviewed" | "reviewLog" | "createdAt" | "slackUrl"> &
+  data: Omit<
+    Project,
+    | "id"
+    | "lastReviewed"
+    | "reviewLog"
+    | "createdAt"
+    | "slackUrl"
+    | "blockedByProjectId"
+  > &
     Partial<Pick<Project, "lastReviewed" | "reviewLog" | "slackUrl">>
 ): Promise<Project> {
   const id = uuid();
@@ -157,6 +164,7 @@ export async function createProject(
   const project = {
     id,
     slackUrl: "",
+    blockedByProjectId: "",
     ...data,
     mirroredGoalIds: data.mirroredGoalIds ?? [],
     lastReviewed,
@@ -172,23 +180,10 @@ export async function updateProject(
   id: string,
   updates: Partial<Project>
 ): Promise<Project> {
-  if (updates.targetDate !== undefined) {
-    const existing = await repo.getProject(id);
-    if (existing) {
-      const goal = await repo.getGoal(existing.goalId);
-      if (goal?.executionMode === "Sync") {
-        const siblings = await repo.getProjectsByGoal(existing.goalId);
-        const ix = siblings.findIndex((p) => p.id === id);
-        if (ix > 0) {
-          const prev = siblings[ix - 1];
-          const err = validateSyncDueDateVsPrevious({
-            executionMode: goal.executionMode,
-            previousProjectTargetDate: prev.targetDate,
-            newTargetDate: updates.targetDate,
-          });
-          if (err) throw new Error(err);
-        }
-      }
+  if (updates.blockedByProjectId !== undefined) {
+    const raw = updates.blockedByProjectId.trim();
+    if (raw !== "" && raw === id) {
+      throw new Error("A project cannot be blocked by itself.");
     }
   }
   const { createdAt: _omitCreatedAt, ...projectUpdates } = updates;

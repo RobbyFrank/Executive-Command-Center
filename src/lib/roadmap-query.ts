@@ -19,6 +19,7 @@ const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [
   "high_leverage",
   "low_leverage",
   "time_sensitive",
+  "blocked_by_dep",
 ] as const;
 const TAG_SET = new Set<string>(TRACKER_STATUS_TAGS);
 

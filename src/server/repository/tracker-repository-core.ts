@@ -1,5 +1,6 @@
 import { TrackerDataSchema } from "@/lib/schemas/tracker";
 import { milestoneProgressPercent } from "@/lib/milestone-progress";
+import { isBlockingProjectIncomplete } from "@/lib/blocked-status";
 import type {
   Company,
   Goal,
@@ -195,6 +196,11 @@ export class TrackerRepositoryCore implements TrackerRepository {
 
   async deleteProject(id: string): Promise<void> {
     await this.commitWithRetry((data) => {
+      for (const p of data.projects) {
+        if ((p.blockedByProjectId ?? "").trim() === id) {
+          p.blockedByProjectId = "";
+        }
+      }
       data.milestones = data.milestones.filter((m) => m.projectId !== id);
       data.projects = data.projects.filter((p) => p.id !== id);
     });
@@ -321,29 +327,43 @@ export class TrackerRepositoryCore implements TrackerRepository {
             p.goalId !== goal.id &&
             (p.mirroredGoalIds ?? []).includes(goal.id)
         );
-        const orderedPrimary =
-          goal.executionMode === "Sync"
-            ? primary
-            : [...primary].sort((a, b) =>
-                comparePriority(a.priority, b.priority)
-              );
-        const orderedMirrors =
-          goal.executionMode === "Sync"
-            ? mirrors
-            : [...mirrors].sort((a, b) =>
-                comparePriority(a.priority, b.priority)
-              );
+        const orderedPrimary = [...primary].sort((a, b) =>
+          comparePriority(a.priority, b.priority)
+        );
+        const orderedMirrors = [...mirrors].sort((a, b) =>
+          comparePriority(a.priority, b.priority)
+        );
         const orderedProjects = [...orderedPrimary, ...orderedMirrors];
         const projects: ProjectWithMilestones[] = orderedProjects.map(
           (project) => {
             const projectMilestones = data.milestones
               .filter((m) => m.projectId === project.id)
               .sort(compareMilestonesByTargetDate);
+            const lastDatedMilestone = [...projectMilestones]
+              .reverse()
+              .find((m) => m.targetDate?.trim());
+            const derivedTargetDate = lastDatedMilestone?.targetDate ?? "";
+
+            const blockerId = (project.blockedByProjectId ?? "").trim();
+            const blocker = blockerId
+              ? data.projects.find((p) => p.id === blockerId)
+              : undefined;
+            const blockerMilestones = blocker
+              ? data.milestones.filter((m) => m.projectId === blocker.id)
+              : [];
+
             return {
               ...project,
+              targetDate: derivedTargetDate,
               milestones: projectMilestones,
               progress: milestoneProgressPercent(projectMilestones),
               isMirror: project.goalId !== goal.id,
+              ...(blocker
+                ? {
+                    isBlocked: isBlockingProjectIncomplete(blockerMilestones),
+                    blockedByProjectName: blocker.name,
+                  }
+                : {}),
             };
           }
         );

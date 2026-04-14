@@ -70,6 +70,11 @@ interface InlineEditCellProps {
   /** When true, hover always opens the readonly panel when label is non-empty (e.g. character-capped preview). */
   truncateTooltipAlwaysHover?: boolean;
   /**
+   * With `displayTruncateSingleLine`: wrap trigger in `group/trigger` and brighten one-line preview on hover
+   * before the floating panel opens (Roadmap long-text fields).
+   */
+  truncateSubduedPreview?: boolean;
+  /**
    * When set, `draft` is checked before save. Return an error message to block commit and keep editing.
    */
   validate?: (draft: string) => string | undefined;
@@ -91,6 +96,11 @@ interface InlineEditCellProps {
   emphasizeEmpty?: boolean;
   /** When `type` is `date`, minimum allowed `YYYY-MM-DD` (native `min` — inclusive). */
   dateMin?: string;
+  /**
+   * Overlay `select` (`formatDisplay` + invisible native select): skip the default hover grey wash
+   * so text-only cells (e.g. project Status) stay borderless until `group-hover` on the wrapper.
+   */
+  overlaySelectQuiet?: boolean;
 }
 
 export function InlineEditCell({
@@ -116,12 +126,14 @@ export function InlineEditCell({
   tooltipLabel,
   truncateTooltipEditExtras,
   truncateTooltipAlwaysHover = false,
+  truncateSubduedPreview = false,
   validate,
   startInEditMode = false,
   openEditNonce,
   trackerGridAlign = false,
   emphasizeEmpty = false,
   dateMin,
+  overlaySelectQuiet = false,
 }: InlineEditCellProps) {
   const [editing, setEditing] = useState(() => Boolean(startInEditMode));
   const [draft, setDraft] = useState(value);
@@ -243,7 +255,7 @@ export function InlineEditCell({
 
   if (overlaySelect) {
     return (
-      <div className="relative isolate w-full min-w-0">
+      <div className={cn("relative isolate w-full min-w-0", className)}>
         <div
           className={cn(
             "pointer-events-none flex min-h-8 max-w-full items-center rounded py-0.5 text-left text-sm",
@@ -262,9 +274,8 @@ export function InlineEditCell({
           }}
           className={cn(
             "peer absolute inset-0 z-[1] min-h-8 w-full max-w-full cursor-pointer appearance-none rounded border-0 bg-transparent opacity-0",
-            "hover:bg-zinc-800",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
-            className
+            overlaySelectQuiet ? "hover:bg-transparent" : "hover:bg-zinc-800",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600"
           )}
           title={displayTitle ?? "Choose an option"}
           aria-label={displayTitle ?? "Choose an option"}
@@ -276,7 +287,12 @@ export function InlineEditCell({
           ))}
         </select>
         <ChevronDown
-          className="pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity peer-hover:opacity-100 peer-focus-visible:opacity-100"
+          className={cn(
+            "pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity",
+            overlaySelectQuiet
+              ? "opacity-0 group-hover/status:opacity-100 peer-focus-visible:opacity-100"
+              : "opacity-0 peer-hover:opacity-100 peer-focus-visible:opacity-100"
+          )}
           aria-hidden
         />
       </div>
@@ -500,7 +516,10 @@ export function InlineEditCell({
         <div
           role="button"
           tabIndex={0}
-          className={collapsedClassName}
+          className={cn(
+            collapsedClassName,
+            truncateSubduedPreview && "group/trigger"
+          )}
           title={undefined}
           aria-label={collapsedTitle}
           onClick={(e) => {
@@ -523,6 +542,11 @@ export function InlineEditCell({
             placeholder={placeholder}
             editExtras={truncateTooltipEditExtras}
             alwaysHoverReadonly={truncateTooltipAlwaysHover}
+            triggerClassName={
+              truncateSubduedPreview
+                ? "transition-colors group-hover/trigger:text-zinc-200"
+                : undefined
+            }
           >
             {collapsedInner}
           </CellHoverTooltip>

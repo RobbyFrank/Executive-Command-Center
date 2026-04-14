@@ -40,8 +40,6 @@ import {
 import {
   ChevronRight,
   ChevronDown,
-  ArrowRightLeft,
-  Layers,
   Flag,
   Sparkles,
   Plus,
@@ -50,7 +48,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import { getSequentialQueueProjects } from "@/lib/sequentialProjects";
 import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
@@ -63,7 +60,6 @@ import {
   ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
   TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
 } from "@/lib/tracker-sticky-layout";
-import { minDueDateYmdAfterPreviousProject } from "@/lib/syncProjectDueDate";
 import {
   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
   TRACKER_FOOTER_TEXT_ACTION,
@@ -118,7 +114,6 @@ export function GoalSection({
   const [newProjectNameFocusId, setNewProjectNameFocusId] = useState<
     string | null
   >(null);
-  const [sequentialShowAll, setSequentialShowAll] = useState(false);
   /** Increment to focus the goal title field (context menu Rename). */
   const [goalRenameNonce, setGoalRenameNonce] = useState(0);
   const {
@@ -147,24 +142,6 @@ export function GoalSection({
       setExpanded(false);
     }
   }, [focusProjectMode, focusedGoalId, goal.id]);
-
-  const isSequentialMulti =
-    goal.executionMode === "Sync" && goal.projects.length > 1;
-
-  const sequentialQueueSlice = useMemo(() => {
-    if (!isSequentialMulti) return null;
-    return getSequentialQueueProjects(goal.projects);
-  }, [goal.projects, isSequentialMulti]);
-
-  const queueSliceIdSet = useMemo(() => {
-    if (!sequentialQueueSlice) return null;
-    return new Set(sequentialQueueSlice.map((p) => p.id));
-  }, [sequentialQueueSlice]);
-
-  const hiddenSequentialCount =
-    isSequentialMulti && !sequentialShowAll && sequentialQueueSlice
-      ? goal.projects.length - sequentialQueueSlice.length
-      : 0;
 
   const atRiskProjectCount = useMemo(
     () => goal.projects.filter((p) => p.atRisk).length,
@@ -362,7 +339,6 @@ export function GoalSection({
             costOfDelay: 3,
             ownerId: "",
             priority: "P2",
-            executionMode: "Async",
             slackChannel: "",
             slackChannelId: "",
             status: "Not Started",
@@ -382,19 +358,6 @@ export function GoalSection({
       },
       { type: "divider", id: "goal-d1" },
       ...execBlock,
-      {
-        type: "item",
-        id: "toggle-exec-mode",
-        label:
-          goal.executionMode === "Sync"
-            ? "Switch execution to Async"
-            : "Switch execution to Sync",
-        icon: goal.executionMode === "Sync" ? ArrowRightLeft : Layers,
-        onClick: () =>
-          void updateGoal(goal.id, {
-            executionMode: goal.executionMode === "Sync" ? "Async" : "Sync",
-          }),
-      },
       { type: "divider", id: "goal-d2" },
       {
         type: "item",
@@ -422,7 +385,6 @@ export function GoalSection({
     goal.atRisk,
     goal.companyId,
     goal.description,
-    goal.executionMode,
     goal.id,
     goal.projects.length,
     goal.spotlight,
@@ -480,16 +442,14 @@ export function GoalSection({
           "border-l-4 border-emerald-400/85 bg-emerald-950/40 shadow-[inset_6px_0_0_0_rgba(52,211,153,0.28)] ring-1 ring-emerald-500/25 hover:bg-emerald-950/48"
       )}
     >
-      {/* Goal header — click row (not inline controls) to expand/collapse */}
+      {/* Goal header — click row (not inline controls) to expand/collapse; description strip below when expanded */}
       <div
         ref={goalHeaderRef}
-        onClick={onGoalHeaderClick}
-        onContextMenuCapture={goalContext.onContextMenuCapture}
         style={{ top: goalStickyTopPx }}
+        onContextMenuCapture={goalContext.onContextMenuCapture}
         className={cn(
-          "sticky z-[27] flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors cursor-pointer",
+          "sticky z-[27] w-full min-w-0 max-w-full shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           headerTopRounded ? "rounded-t-md" : "rounded-t-none",
-          "shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           goal.atRisk
             ? "bg-amber-950/85"
             : goal.spotlight
@@ -497,6 +457,12 @@ export function GoalSection({
               : "bg-zinc-950/90"
         )}
       >
+        <div
+          onClick={onGoalHeaderClick}
+          className={cn(
+            "flex w-full min-w-max cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
+          )}
+        >
         <div className="w-8 shrink-0 flex items-center justify-center">
           <ChevronRight
             className={cn(
@@ -508,7 +474,7 @@ export function GoalSection({
         </div>
 
         {/* Goal title */}
-        <div className="w-[328px] min-w-0 shrink-0">
+        <div className="w-[360px] min-w-0 shrink-0">
           <InlineEditCell
             {...GRID_ALIGN}
             value={goal.description}
@@ -520,7 +486,7 @@ export function GoalSection({
         </div>
 
         {/* DRI */}
-        <div className="w-36 min-w-0 shrink-0">
+        <div className="w-[5.85rem] min-w-0 shrink-0">
           <OwnerPickerCell
             {...GRID_ALIGN}
             people={people}
@@ -545,65 +511,8 @@ export function GoalSection({
           />
         </div>
 
-        {/* Description (measurable target) */}
-        <div className="w-44 shrink-0 min-w-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={goal.measurableTarget}
-            onSave={(measurableTarget) =>
-              updateGoal(goal.id, { measurableTarget })
-            }
-            placeholder="Add description"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        <div
-          className="w-44 shrink-0 min-w-0"
-          title="Why it matters — what we stand to gain"
-        >
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={goal.whyItMatters}
-            onSave={(whyItMatters) =>
-              updateGoal(goal.id, { whyItMatters })
-            }
-            placeholder="Why it matters"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        <div className="w-44 shrink-0 min-w-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={goal.currentValue}
-            onSave={(currentValue) =>
-              updateGoal(goal.id, { currentValue })
-            }
-            placeholder="Current value"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        {/* Spacer: aligns with project Complexity so Next milestone / Status line up */}
-        <div className="w-44 shrink-0" aria-hidden />
-
-        {/* Pad to align with project Complexity column */}
-        <div className="w-28 shrink-0" aria-hidden />
-
-        {/* Confidence — auto: average of project scores */}
-        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
-          <AutoConfidencePercent
-            score={goalConfidenceAuto}
-            explanation={goalConfidenceExplain}
-          />
-        </div>
-
-        {/* Cost of Delay */}
-        <div className="w-32 shrink-0">
+        {/* Cost of delay — w-28 aligns above project Complexity */}
+        <div className="w-28 shrink-0 min-w-0">
           <InlineEditCell
             {...GRID_ALIGN}
             value={String(goal.costOfDelay)}
@@ -617,30 +526,12 @@ export function GoalSection({
           />
         </div>
 
-        {/* Execution Mode */}
-        <div className="w-28 shrink-0" title={`Execution: ${goal.executionMode}`}>
-          <button
-            type="button"
-            onClick={() =>
-              updateGoal(goal.id, {
-                executionMode:
-                  goal.executionMode === "Sync" ? "Async" : "Sync",
-              })
-            }
-            className={cn(
-              "flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors",
-              goal.executionMode === "Sync"
-                ? "bg-purple-500/20 text-purple-400"
-                : "bg-cyan-500/20 text-cyan-400"
-            )}
-          >
-            {goal.executionMode === "Sync" ? (
-              <Layers className="h-3 w-3" />
-            ) : (
-              <ArrowRightLeft className="h-3 w-3" />
-            )}
-            {goal.executionMode}
-          </button>
+        {/* Confidence — auto: average of project scores; w-28 aligns with project Confidence */}
+        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+          <AutoConfidencePercent
+            score={goalConfidenceAuto}
+            explanation={goalConfidenceExplain}
+          />
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) */}
@@ -741,6 +632,75 @@ export function GoalSection({
             onConfirm={() => deleteGoal(goal.id)}
           />
         </div>
+        </div>
+
+        {expanded ? (
+          <div
+            className="border-t border-zinc-800/65 pl-6 pr-4 pb-2 pt-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Same horizontal rhythm as goal header: pl-6 + w-8 + gap-2 aligns with Goal title column */}
+            <div className="flex gap-2">
+              <div className="w-8 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Description
+                  </p>
+                  <InlineEditCell
+                    {...GRID_ALIGN}
+                    value={goal.measurableTarget}
+                    onSave={(measurableTarget) =>
+                      updateGoal(goal.id, { measurableTarget })
+                    }
+                    placeholder="Outcome or metric for this goal"
+                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
+                    type="textarea"
+                    displayTruncateSingleLine
+                    truncateTooltipAlwaysHover
+                    truncateSubduedPreview
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Why
+                  </p>
+                  <InlineEditCell
+                    {...GRID_ALIGN}
+                    value={goal.whyItMatters}
+                    onSave={(whyItMatters) =>
+                      updateGoal(goal.id, { whyItMatters })
+                    }
+                    placeholder="Why this goal matters — what we stand to gain"
+                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
+                    type="textarea"
+                    displayTruncateSingleLine
+                    truncateTooltipAlwaysHover
+                    truncateSubduedPreview
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Current value
+                  </p>
+                  <InlineEditCell
+                    {...GRID_ALIGN}
+                    value={goal.currentValue}
+                    onSave={(currentValue) =>
+                      updateGoal(goal.id, { currentValue })
+                    }
+                    placeholder="Progress or value vs the description / target"
+                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
+                    type="textarea"
+                    displayTruncateSingleLine
+                    truncateTooltipAlwaysHover
+                    truncateSubduedPreview
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
       <ContextMenu
         open={goalContext.open}
@@ -762,107 +722,34 @@ export function GoalSection({
       >
         <div>
           {goal.projects.length > 0 && (
-            <div className="ml-4 rounded-r-md border-l-2 border-zinc-700/50 bg-zinc-900/25 shadow-[inset_1px_0_0_rgba(0,0,0,0.2)]">
+            <div className="rounded-r-md border-l-2 border-zinc-700/50 bg-zinc-900/25 shadow-[inset_1px_0_0_rgba(0,0,0,0.2)]">
               <ProjectsColumnHeaders
                 stackTopPx={projectsColumnStackTopPx}
                 stickyZClass="z-[26]"
               />
 
-              {goal.projects.map((project, idx) => {
-                const rowRevealed =
-                  !isSequentialMulti ||
-                  sequentialShowAll ||
-                  (queueSliceIdSet?.has(project.id) ?? true);
-
-                const syncDueDateMinYmd =
-                  goal.executionMode === "Sync" && idx > 0
-                    ? minDueDateYmdAfterPreviousProject(
-                        goal.projects[idx - 1]?.targetDate ?? ""
-                      )
-                    : undefined;
-
-                const rowInner = (
-                  <div className="relative">
-                    {isSequentialMulti && (
-                      <span className="absolute left-6 top-3 text-xs text-purple-400/40 font-mono">
-                        {idx + 1}.
-                      </span>
-                    )}
-                    <ProjectRow
-                      goalId={goal.id}
-                      project={project}
-                      people={people}
-                      expandForSearch={expandForSearch}
-                      goalCostOfDelay={goal.costOfDelay}
-                      ownerWorkloadMap={ownerWorkloadMap}
-                      focusProjectNameEditId={newProjectNameFocusId}
-                      syncDueDateMinYmd={syncDueDateMinYmd}
-                      allGoals={allGoals}
-                      allCompanies={allCompanies}
-                      mirrorPickerHierarchy={mirrorPickerHierarchy}
-                    />
-                  </div>
-                );
-
-                if (!isSequentialMulti) {
-                  return <div key={project.id}>{rowInner}</div>;
-                }
-
-                return (
-                  <div
-                    key={project.id}
-                    className={cn(
-                      "grid transition-[grid-template-rows] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none",
-                      rowRevealed ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "min-h-0 transition-opacity duration-[320ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
-                        rowRevealed ? "overflow-visible opacity-100" : "overflow-hidden opacity-0"
-                      )}
-                      inert={rowRevealed ? undefined : true}
-                      aria-hidden={!rowRevealed}
-                    >
-                      {rowInner}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {isSequentialMulti && goal.projects.length > 0 && (
-                <div className="pl-6 pr-4 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-1.5 pb-1 text-[11px] leading-snug border-t border-zinc-800/60">
-                  <span
-                    className="text-zinc-500"
-                    title="Runs in dependency order: finished work, current step, then what is next"
-                  >
-                    Sequential
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSequentialShowAll((v) => !v)}
-                    className="font-medium text-purple-300/90 hover:text-purple-200 underline-offset-2 hover:underline transition-colors"
-                    title={
-                      sequentialShowAll
-                        ? "Show only completed work and the current step (hide later stages)"
-                        : "Show every project in this goal"
-                    }
-                  >
-                    {sequentialShowAll ? "Queue only" : "Show all"}
-                  </button>
-                  {hiddenSequentialCount > 0 && (
-                    <span className="text-zinc-600 tabular-nums">
-                      · {hiddenSequentialCount} later hidden
-                    </span>
-                  )}
+              {goal.projects.map((project) => (
+                <div key={project.id}>
+                  <ProjectRow
+                    goalId={goal.id}
+                    project={project}
+                    people={people}
+                    expandForSearch={expandForSearch}
+                    goalCostOfDelay={goal.costOfDelay}
+                    ownerWorkloadMap={ownerWorkloadMap}
+                    focusProjectNameEditId={newProjectNameFocusId}
+                    allGoals={allGoals}
+                    allCompanies={allCompanies}
+                    mirrorPickerHierarchy={mirrorPickerHierarchy}
+                  />
                 </div>
-              )}
+              ))}
             </div>
           )}
 
           {goal.projects.length === 0 && (
             <div className="pl-6 pr-4 py-1.5">
-              <p
+              <div
                 className={cn(
                   "m-0 w-full min-w-0",
                   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
@@ -886,7 +773,7 @@ export function GoalSection({
                   onCreated={(id) => setNewProjectNameFocusId(id)}
                   inline
                 />
-              </p>
+              </div>
             </div>
           )}
 

@@ -9,6 +9,7 @@ import {
   Flag,
   Ghost,
   Hourglass,
+  Link2,
   Sparkles,
   Tags,
   TrendingDown,
@@ -59,6 +60,12 @@ const OPTIONS: {
     label: "Zombie",
     hint: "In progress, no milestone done, review stale 21+ days",
     Icon: Ghost,
+  },
+  {
+    id: "blocked_by_dep",
+    label: "Blocked (dependency)",
+    hint: "Project marked blocked by another until that project's milestones are done",
+    Icon: Link2,
   },
   {
     id: "high_leverage",

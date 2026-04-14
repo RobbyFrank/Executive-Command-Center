@@ -417,6 +417,7 @@ export function TrackerView({
       need_review: "Need review",
       close_watch: "Close watch",
       zombie: "Zombie",
+      blocked_by_dep: "Blocked (dependency)",
       high_leverage: "High leverage",
       low_leverage: "Low leverage",
       time_sensitive: "Time-sensitive",

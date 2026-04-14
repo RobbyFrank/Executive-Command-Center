@@ -44,6 +44,8 @@ type CellHoverTooltipProps = {
    * even if the visible text is not overflowing (e.g. character-capped preview).
    */
   alwaysHoverReadonly?: boolean;
+  /** Merged into the one-line trigger `span` (e.g. group-hover for subdued previews). */
+  triggerClassName?: string;
 };
 
 /**
@@ -54,7 +56,15 @@ export const CellHoverTooltip = forwardRef<
   CellHoverTooltipHandle,
   CellHoverTooltipProps
 >(function CellHoverTooltip(
-  { label, onSave, children, placeholder, editExtras, alwaysHoverReadonly = false },
+  {
+    label,
+    onSave,
+    children,
+    placeholder,
+    editExtras,
+    alwaysHoverReadonly = false,
+    triggerClassName,
+  },
   ref
 ) {
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -251,6 +261,7 @@ export const CellHoverTooltip = forwardRef<
         ref={triggerRef}
         className={cn(
           "block min-w-0 w-full truncate text-left transition-[opacity,color] duration-150 ease-out",
+          triggerClassName,
           showDimmedTrigger && "text-zinc-500 opacity-40"
         )}
         onMouseEnter={handleTriggerMouseEnter}

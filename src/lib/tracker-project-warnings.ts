@@ -57,7 +57,8 @@ export function getTrackerProjectWarnings(
   if (missingTargetDate)
     list.push({
       label: "No due date",
-      title: "No target date — set one in the Date column",
+      title:
+        "No milestone target dates — set a target date on at least one milestone for this project",
     });
   if (isUnassigned)
     list.push({ label: "Unassigned", title: "No owner assigned" });

@@ -23,6 +23,8 @@ export async function fetchSlackChannelsList() {
   return fetchSlackChannelsLib();
 }
 
+export type { FetchSlackChannelsResult } from "@/lib/slack";
+
 export type SlackImportMemberPayload = {
   id: string;
   realName: string;

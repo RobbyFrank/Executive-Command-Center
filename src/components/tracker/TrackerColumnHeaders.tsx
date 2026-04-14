@@ -1,6 +1,6 @@
 "use client";
 
-/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow (goal title w-[328px], project name w-[312px] in rail). */
+/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow. Goals after Pri: Cost of delay (w-28, above project Complexity), Confidence (w-28), Slack. Projects row omits the Confidence label (uses Goals row above). */
 
 import { SlackLogo } from "./SlackLogo";
 import { RoadmapColumnHeader } from "./RoadmapColumnHeader";
@@ -42,13 +42,13 @@ export function GoalsColumnHeaders({
       <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <RoadmapColumnHeader
-          className="w-[328px] shrink-0"
+          className="w-[360px] shrink-0"
           tooltip="Goal title — what you are trying to achieve for this company."
         >
           Goal
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-36 shrink-0 min-w-0"
+          className="w-[5.85rem] shrink-0 min-w-0"
           tooltip="DRI — single person accountable for the goal's outcome. Project-level owners are tracked separately."
         >
           DRI
@@ -60,54 +60,16 @@ export function GoalsColumnHeaders({
           Pri
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-44 shrink-0"
-          tooltip="Description of the outcome or metric for this goal."
+          className="w-28 shrink-0 min-w-0"
+          tooltip="Cost of delay — how costly it is to wait; higher means more urgency. Aligns above project Complexity."
         >
-          Description
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-44 shrink-0"
-          tooltip="Why this goal matters — what we stand to gain if we achieve it."
-        >
-          Why
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-44 shrink-0"
-          tooltip="Current value or progress vs the description / target."
-        >
-          Current
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-44 shrink-0 flex items-center justify-center text-zinc-600"
-          tooltip="No goal-level field here — aligns with project Complexity so Next milestone and Status line up."
-        >
-          <span aria-hidden>·</span>
-          <span className="sr-only">Column spacer (complexity alignment)</span>
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-28 shrink-0 flex items-center justify-center text-zinc-600"
-          tooltip="No goal-level field here — aligns with the Complexity column on projects below."
-        >
-          <span aria-hidden>·</span>
-          <span className="sr-only">Column spacer (complexity alignment)</span>
+          Cost of delay
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-28 shrink-0"
           tooltip="Confidence (0–100%). Hover or focus a cell: project autonomy vs complexity, then goal cost of delay weights higher-autonomy project owners when delay is costly."
         >
           Confidence
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-32 shrink-0"
-          tooltip="Cost of delay — how costly it is to wait; higher means more urgency."
-        >
-          Cost of delay
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-28 shrink-0"
-          tooltip="Execution mode — Sync means projects run in sequence; Async means they can run in parallel."
-        >
-          Exec
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-44 shrink-0 flex items-center"
@@ -142,46 +104,31 @@ export function ProjectsColumnHeaders({
       <div className="flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 text-xs font-medium text-zinc-500">
         <div className="w-8 shrink-0" aria-hidden />
         <RoadmapColumnHeader
-          className="w-[312px] shrink-0"
+          className="w-[360px] shrink-0"
           tooltip="Project name — a concrete initiative under this goal."
         >
           Project
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-36 shrink-0 min-w-0"
+          className="w-[5.85rem] shrink-0 min-w-0"
           tooltip="Project owner — who is directly responsible for delivery (use goal DRI for outcome accountability)."
         >
           Owner
         </RoadmapColumnHeader>
-        {/* Pri & Description — same labels as Goals row above; spacers keep column alignment */}
         <div className="w-14 shrink-0" aria-hidden />
-        <div className="w-44 shrink-0 min-w-0" aria-hidden />
         <RoadmapColumnHeader
-          className="w-44 shrink-0 min-w-0"
-          tooltip="Definition of done — when this project counts as complete."
-        >
-          Done when
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-28 shrink-0"
-          tooltip="Complexity — higher is harder to deliver."
+          className="w-28 shrink-0 min-w-0"
+          tooltip="Complexity — scope and difficulty of the work (Very high → Minimal)."
         >
           Complexity
         </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-44 shrink-0 min-w-0"
-          tooltip="The first milestone not marked done — your current focus before later milestones."
-        >
-          Next milestone
-        </RoadmapColumnHeader>
+        <div className="w-28 shrink-0" aria-hidden />
         <RoadmapColumnHeader
           className="w-44 shrink-0"
           tooltip="Project workflow: Idea → Pending → In Progress → Stuck → For Review → Done."
         >
           Status
         </RoadmapColumnHeader>
-        {/* Confidence — label on Goals row above; spacer keeps alignment with project cells */}
-        <div className="w-28 shrink-0" aria-hidden />
         <RoadmapColumnHeader
           className="w-32 shrink-0"
           tooltip="Progress — share of milestones marked done."
@@ -190,9 +137,15 @@ export function ProjectsColumnHeaders({
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-28 shrink-0"
-          tooltip="Due date — when you aim to finish this project. Sync goals: each row must be after the previous project’s due date."
+          tooltip="Due date — same date as the last milestone with a target date; shown as a relative label (e.g. in 2 months) like milestone dates. Hover for the full date."
         >
           Due date
+        </RoadmapColumnHeader>
+        <RoadmapColumnHeader
+          className="w-[18rem] shrink-0 min-w-0"
+          tooltip="The first milestone not marked done — horizon (e.g. 5D, 2W) from its target date when set, then name."
+        >
+          Next milestone
         </RoadmapColumnHeader>
         <div className="min-w-2 flex-1 shrink" aria-hidden />
       </div>

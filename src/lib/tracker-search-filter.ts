@@ -39,7 +39,8 @@ export type TrackerStatusTagId =
   | "zombie"
   | "high_leverage"
   | "low_leverage"
-  | "time_sensitive";
+  | "time_sensitive"
+  | "blocked_by_dep";
 
 export function normalizeTrackerSearchQuery(raw: string): string {
   return raw.trim().toLowerCase();
@@ -116,7 +117,6 @@ function goalSearchTextSelf(
     scoreBandSearchTokens(g.costOfDelay),
     personName(peopleById, g.ownerId),
     g.priority,
-    g.executionMode,
     g.slackChannel,
     g.lastReviewed,
     g.status,
@@ -390,6 +390,11 @@ function goalMatchesStatusTags(
   if (tags.has("zombie") && g.projects.some((proj) => isProjectZombie(proj)))
     return true;
   if (
+    tags.has("blocked_by_dep") &&
+    g.projects.some((proj) => proj.isBlocked === true)
+  )
+    return true;
+  if (
     tags.has("high_leverage") &&
     g.projects.some((proj) => isHighLeverageProject(g, proj))
   )
@@ -426,6 +431,7 @@ function projectMatchesStatusTags(
   )
     return true;
   if (tags.has("zombie") && isProjectZombie(p)) return true;
+  if (tags.has("blocked_by_dep") && p.isBlocked === true) return true;
   if (tags.has("high_leverage") && isHighLeverageProject(g, p)) return true;
   if (tags.has("low_leverage") && isLowLeverageProject(g, p)) return true;
   return false;

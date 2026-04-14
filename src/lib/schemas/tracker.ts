@@ -61,8 +61,6 @@ export const StatusEnum = GoalStatusEnum;
 
 export const CostOfDelayEnum = z.enum(["High", "Medium", "Low"]);
 
-export const ExecutionModeEnum = z.enum(["Sync", "Async"]);
-
 export const ProjectTypeEnum = z.enum([
   "Engineering",
   "Product",
@@ -138,7 +136,6 @@ export const GoalSchema = z.object({
     ),
   ownerId: z.string().default(""),
   priority: PriorityEnum.default("P2"),
-  executionMode: ExecutionModeEnum.default("Async"),
   slackChannel: z.string().default(""),
   /** Slack channel ID (e.g. C0G9QF9GW); empty when set manually without the picker. */
   slackChannelId: z.string().default(""),
@@ -162,6 +159,11 @@ export const ProjectSchema = z.object({
    * Primary goal remains `goalId`.
    */
   mirroredGoalIds: z.array(z.string()).default([]),
+  /**
+   * When set, this project is considered blocked until that project's milestones
+   * are all done. Empty string means not blocked.
+   */
+  blockedByProjectId: z.string().default(""),
   name: z.string().min(1),
   /** Outcome or scope (Roadmap **Description** column; aligns under goal Description). */
   description: z.string().default(""),

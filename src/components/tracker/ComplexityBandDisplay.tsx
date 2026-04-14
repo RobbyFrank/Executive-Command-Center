@@ -5,23 +5,23 @@ import { cn } from "@/lib/utils";
 
 function fillClass(n: number): string {
   if (n <= 2) return "bg-zinc-500/45";
-  if (n === 3) return "bg-sky-500/35";
-  if (n === 4) return "bg-amber-500/45";
-  return "bg-amber-400/50";
+  if (n === 3) return "bg-violet-500/40";
+  if (n === 4) return "bg-violet-500/55";
+  return "bg-fuchsia-500/45";
 }
 
 function labelClass(n: number): string {
   if (n <= 2) return "text-zinc-400";
-  if (n === 3) return "text-zinc-200";
-  if (n === 4) return "text-amber-200/90";
-  return "text-amber-100/95";
+  if (n === 3) return "text-violet-200/90";
+  if (n === 4) return "text-violet-100/95";
+  return "text-fuchsia-100/95";
 }
 
 /**
- * Collapsed cost-of-delay readout for goal rows: thin urgency bar + band label.
+ * Collapsed complexity readout for project rows: thin bar + band label (same pattern as cost of delay on goals).
  * Used with `InlineEditCell` `formatDisplay` (invisible native select overlay).
  */
-export function costOfDelayFormatDisplay(value: string) {
+export function complexityFormatDisplay(value: string) {
   const n = parseScoreBand(value);
   const pct = (n / 5) * 100;
   const labelFull = scoreBandLabel(n);

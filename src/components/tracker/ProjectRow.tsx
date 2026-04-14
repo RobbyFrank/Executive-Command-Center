@@ -19,7 +19,12 @@ import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { OwnerPickerCell } from "./OwnerPickerCell";
 import { ProgressBar } from "./ProgressBar";
-import { SCORE_BAND_OPTIONS, parseScoreBand } from "@/lib/tracker-score-bands";
+import {
+  SCORE_BAND_OPTIONS,
+  parseScoreBand,
+  scoreBandLabel,
+} from "@/lib/tracker-score-bands";
+import { complexityFormatDisplay } from "./ComplexityBandDisplay";
 import {
   computeProjectConfidenceFromProject,
   explainProjectConfidence,
@@ -44,6 +49,7 @@ import {
   Trash2,
   Pencil,
   ArrowRightLeft,
+  Ban,
 } from "lucide-react";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
@@ -62,8 +68,15 @@ import {
 import { getTrackerProjectWarnings } from "@/lib/tracker-project-warnings";
 import { WarningsBadge } from "./WarningsBadge";
 import { SharedBadge } from "./SharedBadge";
+import { BlockedBadge } from "./BlockedBadge";
 import { MirrorGoalPickerDialog } from "./MirrorGoalPickerDialog";
-import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
+import { BlockedByPickerDialog } from "./BlockedByPickerDialog";
+import {
+  formatCalendarDateHint,
+  formatRelativeCalendarDate,
+  formatRelativeCalendarDateCompact,
+  parseCalendarDateString,
+} from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
 import {
@@ -87,11 +100,6 @@ interface ProjectRowProps {
   ownerWorkloadMap?: Map<string, { total: number; p0: number; p1: number }>;
   /** When this matches `project.id`, project name opens in edit mode on mount. */
   focusProjectNameEditId?: string | null;
-  /**
-   * Sync goals: minimum due date (`YYYY-MM-DD`, inclusive) so this row stays after
-   * the previous project’s due date. Set by parent from goal order.
-   */
-  syncDueDateMinYmd?: string;
   /** Full goal list for shared/mirror labels (roadmap-wide). */
   allGoals: Goal[];
   allCompanies: Company[];
@@ -107,13 +115,13 @@ export function ProjectRow({
   goalCostOfDelay,
   ownerWorkloadMap,
   focusProjectNameEditId = null,
-  syncDueDateMinYmd,
   allGoals,
   allCompanies,
   mirrorPickerHierarchy,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
+  const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
   const [showMilestones, setShowMilestones] = useState(true);
   /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
@@ -259,6 +267,33 @@ export function ProjectRow({
     [project.milestones]
   );
 
+  const nextMilestoneUi = useMemo(() => {
+    if (!nextPendingMilestone) return null;
+    const td = nextPendingMilestone.targetDate.trim();
+    const compact = td ? formatRelativeCalendarDateCompact(td) : null;
+    const idx = project.milestones.findIndex(
+      (m) => m.id === nextPendingMilestone.id
+    );
+    const pos = idx >= 0 ? idx + 1 : null;
+    const titleParts: string[] = [nextPendingMilestone.name];
+    if (td && compact) {
+      titleParts.push(
+        formatRelativeCalendarDate(td),
+        formatCalendarDateHint(td)
+      );
+    } else {
+      titleParts.push("No target date — set one on this milestone");
+    }
+    if (pos != null) {
+      titleParts.push(`Milestone ${pos}/${project.milestones.length}`);
+    }
+    return {
+      title: titleParts.join(" · "),
+      chipLabel: compact ?? "—",
+      isOverdueHorizon: compact != null && compact.startsWith("-"),
+    };
+  }, [nextPendingMilestone, project.milestones]);
+
   const warnings = useMemo(
     () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
     [project, goalCostOfDelay, people]
@@ -399,6 +434,24 @@ export function ProjectRow({
             },
           ] as ContextMenuEntry[])
         : []),
+      {
+        type: "item",
+        id: "set-blocked-by",
+        label: "Set blocked by…",
+        icon: Ban,
+        onClick: () => setBlockedByPickerOpen(true),
+      },
+      ...((project.blockedByProjectId ?? "").trim()
+        ? ([
+            {
+              type: "item",
+              id: "clear-blocked-by",
+              label: "Clear blocked by",
+              onClick: () =>
+                void updateProject(project.id, { blockedByProjectId: "" }),
+            },
+          ] as ContextMenuEntry[])
+        : []),
       { type: "divider", id: "p-d1" },
       ...execBlock,
       { type: "divider", id: "p-d2" },
@@ -429,6 +482,7 @@ export function ProjectRow({
     project.atRisk,
     project.id,
     project.spotlight,
+    project.blockedByProjectId,
     setProjectRenameNonce,
     showMilestones,
     toggleProjectRow,
@@ -467,12 +521,16 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Name + Shared/Mirror — w-[312px] matches ProjectsColumnHeaders */}
+        {/* Name + Shared/Mirror — w-[360px] matches goal title + ProjectsColumnHeaders */}
         <div
-          className="w-[312px] min-w-0 shrink-0 flex items-center gap-1.5"
+          className="w-[360px] min-w-0 shrink-0 flex items-center gap-1.5"
           onClick={(e) => {
             const t = e.target as HTMLElement;
-            if (t.closest("[data-shared-badge-root]")) e.stopPropagation();
+            if (
+              t.closest("[data-shared-badge-root]") ||
+              t.closest("[data-blocked-badge-root]")
+            )
+              e.stopPropagation();
           }}
         >
           <div className="min-w-0 flex-1">
@@ -485,7 +543,7 @@ export function ProjectRow({
               displayClassName="text-zinc-200"
             />
           </div>
-          <div className="shrink-0" data-shared-badge-root>
+          <div className="shrink-0 flex items-center gap-1" data-shared-badge-root>
             <SharedBadge
               isMirror={isMirror}
               primaryGoalId={project.goalId}
@@ -494,11 +552,19 @@ export function ProjectRow({
               goals={allGoals}
               companies={allCompanies}
             />
+            {project.isBlocked === true &&
+            project.blockedByProjectName !== undefined ? (
+              <div className="shrink-0" data-blocked-badge-root>
+                <BlockedBadge
+                  blockedByProjectName={project.blockedByProjectName}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
 
         {/* Owner */}
-        <div className="w-36 min-w-0 shrink-0">
+        <div className="w-[5.85rem] min-w-0 shrink-0">
           <OwnerPickerCell
             {...GRID_ALIGN}
             people={people}
@@ -524,38 +590,10 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Description — aligns under goal Description */}
-        <div className="w-44 shrink-0 min-w-0" onClick={(e) => e.stopPropagation()}>
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={project.description}
-            onSave={(description) =>
-              updateProject(project.id, { description })
-            }
-            placeholder="Add description"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        {/* Done when — aligns under goal Why */}
-        <div className="w-44 shrink-0 min-w-0" onClick={(e) => e.stopPropagation()}>
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={project.definitionOfDone}
-            onSave={(definitionOfDone) =>
-              updateProject(project.id, { definitionOfDone })
-            }
-            placeholder="Definition of done"
-            displayClassName="text-zinc-100 font-medium"
-            displayTruncateSingleLine
-          />
-        </div>
-
-        {/* Complexity — aligns under goal Current */}
+        {/* Complexity — matches ProjectsColumnHeaders; before Confidence */}
         <div
-          className="w-28 shrink-0"
-          title="Complexity — higher is harder to deliver"
+          className="w-28 shrink-0 min-w-0"
+          onClick={(e) => e.stopPropagation()}
         >
           <InlineEditCell
             {...GRID_ALIGN}
@@ -567,17 +605,75 @@ export function ProjectRow({
             }
             type="select"
             options={SCORE_BAND_OPTIONS}
+            formatDisplay={complexityFormatDisplay}
+            displayTitle={`Complexity — ${scoreBandLabel(project.complexityScore)} (${project.complexityScore}/5)`}
           />
         </div>
 
-        {/* Next milestone — clicks pass through to the row so this expands/collapses like the rest of the project bar */}
+        {/* Confidence — w-28 aligns with goal Confidence column */}
+        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+          <AutoConfidencePercent
+            score={projectConfidenceAuto}
+            explanation={projectConfidenceExplain}
+          />
+        </div>
+
+        {/* Status */}
         <div className="w-44 shrink-0 min-w-0">
+          <InlineEditCell
+            {...GRID_ALIGN}
+            className="group/status"
+            overlaySelectQuiet
+            value={project.status}
+            onSave={(status) =>
+              updateProject(project.id, { status: status as ProjectStatus })
+            }
+            type="select"
+            options={PROJECT_STATUS_SELECT_OPTIONS}
+            formatDisplay={(v) => (
+              <ProjectStatusPill status={v} variant="inline" />
+            )}
+            selectPresentation="always"
+          />
+        </div>
+
+        {/* Progress */}
+        <div className="w-32 shrink-0">
+          <ProgressBar percent={project.progress} />
+        </div>
+
+        {/* Due date — derived from last milestone with a target date (same relative label as milestone dates) */}
+        <div
+          className="w-28 shrink-0"
+          title={
+            project.targetDate.trim()
+              ? `${formatCalendarDateHint(project.targetDate)} — from last milestone with a date`
+              : "Set a target date on at least one milestone"
+          }
+        >
+          <span
+            className={cn(
+              "block truncate px-1 py-0.5 text-xs font-medium leading-tight",
+              projectNeedsDueDate
+                ? "rounded border border-amber-500/45 bg-amber-950/40 text-amber-100/95 ring-1 ring-amber-500/25"
+                : "text-zinc-200"
+            )}
+          >
+            {project.targetDate.trim()
+              ? formatRelativeCalendarDate(project.targetDate)
+              : "—"}
+          </span>
+        </div>
+
+        {/* Next milestone — horizon chip (D/W/M/Y) + name; clicks pass through except interactive controls */}
+        <div className="w-[18rem] shrink-0 min-w-0">
           {project.milestones.length === 0 ? (
             <button
               type="button"
               title="Click to add a milestone"
               className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
-              onClick={async () => {
+              onClick={async (e) => {
+                e.stopPropagation();
                 const ms = await createMilestone({
                   projectId: project.id,
                   name: "New milestone",
@@ -595,13 +691,22 @@ export function ProjectRow({
               />
               <span className="min-w-0 truncate">Create milestone</span>
             </button>
-          ) : nextPendingMilestone ? (
+          ) : nextPendingMilestone && nextMilestoneUi ? (
             <div
               className="flex min-w-0 items-start gap-1.5 rounded-md border border-violet-500/30 bg-violet-950/25 px-1.5 py-1 ring-1 ring-inset ring-violet-500/10"
-              title="Next up — complete this milestone before later ones in the list"
+              title={nextMilestoneUi.title}
             >
-              <span className="mt-0.5 shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide text-violet-200/95 ring-1 ring-violet-500/35 bg-violet-500/15">
-                Next
+              <span
+                className={cn(
+                  "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
+                  nextMilestoneUi.chipLabel === "—"
+                    ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
+                    : nextMilestoneUi.isOverdueHorizon
+                      ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
+                      : "text-violet-200/95 bg-violet-500/15"
+                )}
+              >
+                {nextMilestoneUi.chipLabel}
               </span>
               <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
                 {nextPendingMilestone.name}
@@ -615,54 +720,6 @@ export function ProjectRow({
               All milestones done
             </p>
           )}
-        </div>
-
-        {/* Status */}
-        <div className="w-44 shrink-0 min-w-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={project.status}
-            onSave={(status) =>
-              updateProject(project.id, { status: status as ProjectStatus })
-            }
-            type="select"
-            options={PROJECT_STATUS_SELECT_OPTIONS}
-            formatDisplay={(v) => <ProjectStatusPill status={v} />}
-            selectPresentation="always"
-          />
-        </div>
-
-        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
-          <AutoConfidencePercent
-            score={projectConfidenceAuto}
-            explanation={projectConfidenceExplain}
-          />
-        </div>
-
-        {/* Progress */}
-        <div className="w-32 shrink-0">
-          <ProgressBar percent={project.progress} />
-        </div>
-
-        {/* Due date */}
-        <div className="w-28 shrink-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            value={project.targetDate}
-            onSave={(targetDate) =>
-              void updateProject(project.id, { targetDate }).catch((e) => {
-                alert(
-                  e instanceof Error
-                    ? e.message
-                    : "Could not save due date."
-                );
-              })
-            }
-            type="date"
-            dateMin={syncDueDateMinYmd}
-            emptyLabel="Set due date"
-            emphasizeEmpty={projectNeedsDueDate}
-          />
         </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
@@ -731,6 +788,60 @@ export function ProjectRow({
           />
         </div>
       </div>
+
+      {expanded ? (
+        <div
+          className="border-b border-zinc-900 bg-zinc-950/40"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="pl-6 pr-4 pb-2 pt-1.5">
+            {/* Same horizontal rhythm as project bar: pl-6 + w-8 + gap-2 aligns with Project name column */}
+            <div className="flex gap-2">
+              <div className="w-8 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Description
+                  </p>
+                  <InlineEditCell
+                    {...GRID_ALIGN}
+                    value={project.description}
+                    onSave={(description) =>
+                      updateProject(project.id, { description })
+                    }
+                    placeholder="What this project is delivering"
+                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
+                    type="textarea"
+                    displayTruncateSingleLine
+                    truncateTooltipAlwaysHover
+                    truncateSubduedPreview
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                    Done when
+                  </p>
+                  <InlineEditCell
+                    {...GRID_ALIGN}
+                    value={project.definitionOfDone}
+                    onSave={(definitionOfDone) =>
+                      updateProject(project.id, { definitionOfDone })
+                    }
+                    placeholder="Definition of done — when this project counts as complete"
+                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
+                    type="textarea"
+                    displayTruncateSingleLine
+                    truncateTooltipAlwaysHover
+                    truncateSubduedPreview
+                  />
+                </div>
+                <div className="hidden min-w-0 sm:block" aria-hidden />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <ContextMenu
         open={projectContext.open}
         x={projectContext.x}
@@ -748,10 +859,16 @@ export function ProjectRow({
         primaryGoalId={project.goalId}
         mirroredGoalIds={project.mirroredGoalIds ?? []}
       />
+      <BlockedByPickerDialog
+        open={blockedByPickerOpen}
+        onClose={() => setBlockedByPickerOpen(false)}
+        hierarchy={mirrorPickerHierarchy}
+        currentProjectId={project.id}
+      />
 
-      {/* Milestones */}
+      {/* Milestones — group/milestones so “Add milestone” row shows only when hovering this list */}
       <CollapsePanel open={expanded && showMilestones}>
-        <div className="ml-8">
+        <div className="group/milestones ml-8">
           {lowAutonomyOwnerHint ? (
             <div className="pl-14 pr-4 pt-1 pb-2 border-b border-zinc-800/80 mb-0.5">
               <p className="text-[11px] leading-snug text-zinc-400">
@@ -810,11 +927,11 @@ export function ProjectRow({
               })}
               <div
                 className={cn(
-                  "py-1.5 pl-14 pr-4",
-                  "opacity-0 pointer-events-none transition-opacity duration-150",
-                  "group-hover/project:pointer-events-auto group-hover/project:opacity-100",
-                  "group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100",
-                  "focus-within:pointer-events-auto focus-within:opacity-100"
+                  "overflow-hidden pl-14 pr-4",
+                  "max-h-0 py-0 opacity-0 pointer-events-none",
+                  "transition-[max-height,padding,opacity] duration-150 ease-out",
+                  "group-hover/milestones:max-h-14 group-hover/milestones:py-1.5 group-hover/milestones:opacity-100 group-hover/milestones:pointer-events-auto",
+                  "focus-within:max-h-14 focus-within:py-1.5 focus-within:opacity-100 focus-within:pointer-events-auto"
                 )}
               >
                 <button

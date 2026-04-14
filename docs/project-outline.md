@@ -46,15 +46,14 @@ A strategic objective with multiple workstreams. The test: "Does this have multi
 | Cost of Delay | High / Medium / Low | High = perishable opportunity (market window closes, competitor wins if delayed). Medium = meaningful advantage lost by waiting. Low = evergreen, valuable whenever we get to it. |
 | Owner | Person | Single owner |
 | Priority | P0 / P1 / P2 / P3 | |
-| Execution Mode | Sync / Async | Sync = projects run in sequence (order = dependency chain). Async = projects run in parallel. |
 | Slack Channel | Text | Primary channel for this goal (e.g. `#vd-sales`) |
 | Last Reviewed | Date | Manual check-in date (last time Robby/Nadav confirmed accuracy) |
 | Status | In Progress / Not Started / Planning / Blocked / Ongoing / Demand Testing / Evaluating / Idea | |
 
 **Example Goals:**
-- VD-1: "Grow VoiceDrop to $1M MRR" (Impact: 5, Cost of Delay: High, Owner: Robby, Async)
-- VD-3: "Complete NextJS Migration" (Impact: 5, Cost of Delay: Medium, Owner: Andrés, Sync: migrate dashboard → migrate billing → deprecate Bubble)
-- 1L-7: "Add 10+ data products to 1Lookup" (Impact: 4, Cost of Delay: Low, Owner: Afaq, Async)
+- VD-1: "Grow VoiceDrop to $1M MRR" (Impact: 5, Cost of Delay: High, Owner: Robby)
+- VD-3: "Complete NextJS Migration" (Impact: 5, Cost of Delay: Medium, Owner: Andrés — milestones: migrate dashboard → migrate billing → deprecate Bubble)
+- 1L-7: "Add 10+ data products to 1Lookup" (Impact: 4, Cost of Delay: Low, Owner: Afaq)
 
 ### Project
 
@@ -74,7 +73,7 @@ A single deliverable or workstream with a clear owner and definition of done.
 | Next Critical Step | Text (max ~15 words) | The single immediate bottleneck or action needed right now. Forces clarity on what's actually holding things up. |
 | Definition of Done | Text | Clear completion criteria, e.g., "Leon booking 20+ qualified meetings/month" |
 | Start Date | Date | |
-| Target Date | Date | Deadline / target completion |
+| Target Date | Date | In the app, the Roadmap **Due date** column is **derived** from the chronologically **last milestone** that has a target date (not edited on the project row). The field may still exist in JSON for compatibility. |
 | Slack URL | URL | Link to relevant thread or channel |
 | Last Reviewed | Date | Manual check-in date |
 | Progress | Auto-calculated | Derived from milestones (e.g., 3 of 5 done = 60%) |
@@ -196,15 +195,9 @@ Each row includes a **workload bar**: length is relative to the busiest teammate
 
 ---
 
-## Execution Mode (Sync vs. Async)
+## Project due date vs milestones
 
-Each Goal defines whether its projects run in parallel or in sequence.
-
-- **Async:** All projects can run simultaneously. Order doesn't matter.
-- **Sync:** Projects run in sequence. Order in the list = dependency chain. Project 2 can't start until Project 1 is done.
-- **Mixed (Phase-based):** Some goals may have phases where projects within a phase are async, but phases are sequential.
-
-Visual treatment: Sync goals should visually show the sequential order (numbered steps, arrows, or a pipeline view). Async goals show projects as parallel items.
+Project **due date** on the Roadmap is **read-only** and matches the **last milestone** (by target date) that has a date set. Use **milestone** target dates to plan the timeline; filters and summaries use the derived project date.
 
 ---
 

@@ -42,7 +42,7 @@ import {
 } from "@/lib/tracker-score-bands";
 import { prioritySelectTextClass } from "@/lib/prioritySort";
 import { SlackChannelPicker } from "./SlackChannelPicker";
-import { Layers, ArrowRightLeft, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import {
   computeGoalConfidence,
   computeProjectConfidenceFromProject,
@@ -59,6 +59,7 @@ import {
 import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { costOfDelayFormatDisplay } from "./CostOfDelayDisplay";
+import { complexityFormatDisplay } from "./ComplexityBandDisplay";
 import { ExecFlagMenu } from "./ExecFlagMenu";
 import { MilestoneRow } from "./MilestoneRow";
 import { WarningsBadge } from "./WarningsBadge";
@@ -74,7 +75,11 @@ import {
   isFounderPerson,
 } from "@/lib/autonomyRoster";
 import { cn } from "@/lib/utils";
-import { minDueDateYmdAfterPreviousProject } from "@/lib/syncProjectDueDate";
+import {
+  formatCalendarDateHint,
+  formatRelativeCalendarDate,
+  formatRelativeCalendarDateCompact,
+} from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
 import { TRACKER_INLINE_TEXT_ACTION } from "./tracker-text-actions";
@@ -438,7 +443,7 @@ function GoalFieldsEditor({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+      <div className="grid grid-cols-2 gap-3">
         <div className="min-w-0">
           <p className="text-[11px] text-zinc-500 mb-1">Priority</p>
           <InlineEditCell
@@ -469,30 +474,6 @@ function GoalFieldsEditor({
             options={goalStatusOptions}
           />
         </div>
-        <div className="col-span-2 min-w-0 lg:col-span-1 lg:justify-self-start lg:pb-0.5">
-          <p className="text-[11px] text-zinc-500 mb-1 lg:sr-only">Execution</p>
-          <button
-            type="button"
-            onClick={() =>
-              void updateGoal(goal.id, {
-                executionMode: goal.executionMode === "Sync" ? "Async" : "Sync",
-              }).then(refresh)
-            }
-            className={cn(
-              "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-              goal.executionMode === "Sync"
-                ? "bg-purple-500/20 text-purple-300"
-                : "bg-cyan-500/20 text-cyan-300"
-            )}
-          >
-            {goal.executionMode === "Sync" ? (
-              <Layers className="h-3 w-3" />
-            ) : (
-              <ArrowRightLeft className="h-3 w-3" />
-            )}
-            {goal.executionMode}
-          </button>
-        </div>
       </div>
 
       <div className="min-w-0">
@@ -515,8 +496,10 @@ function GoalFieldsEditor({
               void updateGoal(goal.id, { measurableTarget }).then(refresh)
             }
             placeholder="Add description"
-            displayClassName="text-zinc-100 font-medium"
+            displayClassName="text-left text-xs leading-normal text-zinc-500"
             displayTruncateSingleLine
+            truncateTooltipAlwaysHover
+            truncateSubduedPreview
           />
         </div>
         <div className="min-w-0">
@@ -527,8 +510,10 @@ function GoalFieldsEditor({
               void updateGoal(goal.id, { currentValue }).then(refresh)
             }
             placeholder="Current value"
-            displayClassName="text-zinc-100 font-medium"
+            displayClassName="text-left text-xs leading-normal text-zinc-500"
             displayTruncateSingleLine
+            truncateTooltipAlwaysHover
+            truncateSubduedPreview
           />
         </div>
       </div>
@@ -541,8 +526,10 @@ function GoalFieldsEditor({
             void updateGoal(goal.id, { whyItMatters }).then(refresh)
           }
           placeholder="What we stand to gain if we achieve this"
-          displayClassName="text-zinc-100 font-medium"
+          displayClassName="text-left text-xs leading-normal text-zinc-500"
           displayTruncateSingleLine
+          truncateTooltipAlwaysHover
+          truncateSubduedPreview
         />
       </div>
 
@@ -562,17 +549,6 @@ function GoalFieldsEditor({
         />
       </div>
 
-      <div className="min-w-0">
-        <p className="text-[11px] text-zinc-500 mb-1">Slack channel</p>
-        <SlackChannelPicker
-          channelName={goal.slackChannel}
-          channelId={goal.slackChannelId ?? ""}
-          onSave={({ name, id }) =>
-            void updateGoal(goal.id, { slackChannel: name, slackChannelId: id }).then(refresh)
-          }
-        />
-      </div>
-
       <div className="flex justify-end">
         <AutoConfidencePercent
           score={confidenceScore}
@@ -581,6 +557,17 @@ function GoalFieldsEditor({
             fallbackConfidenceExplanation(
               "Confidence could not be resolved for this item."
             )
+          }
+        />
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[11px] text-zinc-500 mb-1">Slack channel</p>
+        <SlackChannelPicker
+          channelName={goal.slackChannel}
+          channelId={goal.slackChannelId ?? ""}
+          onSave={({ name, id }) =>
+            void updateGoal(goal.id, { slackChannel: name, slackChannelId: id }).then(refresh)
           }
         />
       </div>
@@ -842,22 +829,6 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     return getGoalHeaderWarnings(parentGoalForCurrentProject, people);
   }, [parentGoalForCurrentProject, people]);
 
-  const syncDueDateMinYmdForReviewProject = useMemo(() => {
-    if (!parentGoalForCurrentProject || !currentProjectFromHierarchy) {
-      return undefined;
-    }
-    if (parentGoalForCurrentProject.executionMode !== "Sync") {
-      return undefined;
-    }
-    const ix = parentGoalForCurrentProject.projects.findIndex(
-      (p) => p.id === currentProjectFromHierarchy.id
-    );
-    if (ix <= 0) return undefined;
-    return minDueDateYmdAfterPreviousProject(
-      parentGoalForCurrentProject.projects[ix - 1]?.targetDate ?? ""
-    );
-  }, [parentGoalForCurrentProject, currentProjectFromHierarchy]);
-
   const projectsUnderGoalByPriority = useMemo(() => {
     if (!currentGoalFromHierarchy) return [];
     return [...currentGoalFromHierarchy.projects].sort((a, b) => {
@@ -871,6 +842,12 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
     if (!currentProjectFromHierarchy) return undefined;
     return getNextPendingMilestone(currentProjectFromHierarchy.milestones);
   }, [currentProjectFromHierarchy]);
+
+  const nextPendingMilestoneCompact = useMemo(() => {
+    if (!nextPendingMilestone) return null;
+    const td = nextPendingMilestone.targetDate.trim();
+    return td ? formatRelativeCalendarDateCompact(td) : null;
+  }, [nextPendingMilestone]);
 
   const isCurrentStale = useMemo(
     () => (current ? itemReviewStale(current, peopleById) : false),
@@ -1422,6 +1399,27 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                 />
               </div>
 
+              {(currentProjectFromHierarchy.blockedByProjectId ?? "").trim() ? (
+                <div className="min-w-0 rounded-md border border-orange-500/25 bg-orange-950/20 px-2.5 py-2">
+                  <p className="text-[11px] text-zinc-500 mb-1">Blocked by</p>
+                  <p className="text-sm text-zinc-200">
+                    <span className="font-medium text-zinc-50">
+                      {currentProjectFromHierarchy.blockedByProjectName ??
+                        "Unknown project"}
+                    </span>
+                    {currentProjectFromHierarchy.isBlocked ? (
+                      <span className="ml-2 text-xs text-orange-200/95">
+                        — waiting on that project&apos;s milestones
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-xs text-zinc-500">
+                        — blocking project milestones are complete
+                      </span>
+                    )}
+                  </p>
+                </div>
+              ) : null}
+
               <div className="min-w-0">
                 <p className="text-[11px] text-zinc-500 mb-1">Description</p>
                 <InlineEditCell
@@ -1432,8 +1430,10 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                     }).then(() => router.refresh())
                   }
                   placeholder="Outcome or scope"
-                  displayClassName="text-zinc-100 font-medium"
+                  displayClassName="text-left text-xs leading-normal text-zinc-500"
                   displayTruncateSingleLine
+                  truncateTooltipAlwaysHover
+                  truncateSubduedPreview
                 />
               </div>
 
@@ -1458,6 +1458,8 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                 <div className="min-w-0">
                   <p className="text-[11px] text-zinc-500 mb-1">Status</p>
                   <InlineEditCell
+                    className="group/status"
+                    overlaySelectQuiet
                     value={currentProjectFromHierarchy.status}
                     onSave={(status) =>
                       void updateProject(currentProjectFromHierarchy.id, {
@@ -1466,7 +1468,9 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                     }
                     type="select"
                     options={PROJECT_STATUS_SELECT_OPTIONS}
-                    formatDisplay={(v) => <ProjectStatusPill status={v} />}
+                    formatDisplay={(v) => (
+                      <ProjectStatusPill status={v} variant="inline" />
+                    )}
                     selectPresentation="always"
                   />
                 </div>
@@ -1494,6 +1498,8 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                     }
                     type="select"
                     options={SCORE_BAND_OPTIONS}
+                    formatDisplay={complexityFormatDisplay}
+                    displayTitle={`Complexity — ${scoreBandLabel(currentProjectFromHierarchy.complexityScore)} (${currentProjectFromHierarchy.complexityScore}/5)`}
                   />
                 </div>
               </div>
@@ -1508,8 +1514,10 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                     }).then(() => router.refresh())
                   }
                   placeholder="Definition of done"
-                  displayClassName="text-zinc-100 font-medium"
+                  displayClassName="text-left text-xs leading-normal text-zinc-500"
                   displayTruncateSingleLine
+                  truncateTooltipAlwaysHover
+                  truncateSubduedPreview
                 />
               </div>
 
@@ -1527,26 +1535,33 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                   />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] text-zinc-500 mb-1">Due date</p>
-                  <InlineEditCell
-                    value={currentProjectFromHierarchy.targetDate}
-                    onSave={(targetDate) =>
-                      void updateProject(currentProjectFromHierarchy.id, {
-                        targetDate,
-                      })
-                        .then(() => router.refresh())
-                        .catch((e) => {
-                          alert(
-                            e instanceof Error
-                              ? e.message
-                              : "Could not save due date."
-                          );
-                        })
+                  <p className="text-[11px] text-zinc-500 mb-1">
+                    Due date{" "}
+                    <span className="font-normal text-zinc-600">
+                      (last milestone)
+                    </span>
+                  </p>
+                  <p
+                    className={cn(
+                      "rounded-md border px-2 py-1.5 text-sm font-medium",
+                      currentProjectFromHierarchy.targetDate.trim()
+                        ? "border-zinc-700/80 bg-zinc-950/40 text-zinc-100"
+                        : "border-amber-500/45 bg-amber-950/30 text-amber-100/90"
+                    )}
+                    title={
+                      currentProjectFromHierarchy.targetDate.trim()
+                        ? `${formatCalendarDateHint(
+                            currentProjectFromHierarchy.targetDate
+                          )} — from last milestone with a date`
+                        : "Set a target date on at least one milestone"
                     }
-                    type="date"
-                    dateMin={syncDueDateMinYmdForReviewProject}
-                    emptyLabel="Set due date"
-                  />
+                  >
+                    {currentProjectFromHierarchy.targetDate.trim()
+                      ? formatRelativeCalendarDate(
+                          currentProjectFromHierarchy.targetDate
+                        )
+                      : "—"}
+                  </p>
                 </div>
               </div>
 
@@ -1662,6 +1677,11 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                 {nextPendingMilestone ? (
                   <p className="mt-3 border-t border-zinc-800/80 pt-3 text-sm text-zinc-400">
                     Next milestone:{" "}
+                    {nextPendingMilestoneCompact ? (
+                      <span className="mr-1.5 font-mono text-xs font-semibold tabular-nums text-violet-300/90">
+                        {nextPendingMilestoneCompact}
+                      </span>
+                    ) : null}
                     <span className="font-medium text-zinc-200">
                       {nextPendingMilestone.name}
                     </span>

@@ -228,7 +228,6 @@ export function AiCreateDialog({
           confidenceScore: 0,
           costOfDelay: 3,
           ownerId: "",
-          executionMode: "Async",
           slackChannel: "",
           slackChannelId: "",
           status: "Not Started",

@@ -12,6 +12,17 @@ export function scoreBandLabel(score: number): string {
   return opt?.label ?? String(score);
 }
 
+/** Compact labels for narrow grid cells (Cost of delay / Complexity bar readouts). Dropdowns keep full `scoreBandLabel`. */
+export function scoreBandLabelShort(score: number): string {
+  const n = Math.round(score);
+  if (n === 5) return "V. High";
+  if (n === 4) return "High";
+  if (n === 3) return "Med";
+  if (n === 2) return "Low";
+  if (n === 1) return "Min";
+  return scoreBandLabel(score);
+}
+
 /** Lowercase tokens for search (includes common variants). */
 export function scoreBandSearchTokens(score: number): string {
   const label = scoreBandLabel(score).toLowerCase();

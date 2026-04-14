@@ -29,6 +29,7 @@ import {
   Eye,
   Flame,
   Ghost,
+  Link2,
   Rocket,
   ShieldAlert,
   Target,
@@ -272,6 +273,7 @@ function AttentionBadge({ kind }: { kind: string }) {
     "P0 blocked": { bg: "bg-red-500/15", text: "text-red-400" },
     Zombie: { bg: "bg-amber-500/15", text: "text-amber-400" },
     "At risk": { bg: "bg-orange-500/15", text: "text-orange-400" },
+    "Blocked (dep)": { bg: "bg-orange-500/15", text: "text-orange-300" },
   };
   const c = config[kind] ?? { bg: "bg-zinc-800", text: "text-zinc-400" };
   return (
@@ -314,6 +316,7 @@ export function SummaryDashboard({
     let p0Goals = 0;
     let p0Projects = 0;
     let blocked = 0;
+    let blockedByDependency = 0;
     let zombies = 0;
     let needReviewGoals = 0;
     let needReviewProjects = 0;
@@ -343,6 +346,7 @@ export function SummaryDashboard({
           if (p.isMirror) continue;
           if (p.priority === "P0") p0Projects++;
           if (p.status === "Stuck") blocked++;
+          if (p.isBlocked) blockedByDependency++;
           if (isProjectZombie(p)) zombies++;
           if (!p.ownerId) unassignedProjects++;
           if (p.atRisk) atRisk++;
@@ -367,6 +371,7 @@ export function SummaryDashboard({
     return {
       p0Total: p0Goals + p0Projects,
       blocked,
+      blockedByDependency,
       zombies,
       needReview: needReviewGoals + needReviewProjects,
       closeWatch,
@@ -394,6 +399,7 @@ export function SummaryDashboard({
           if (seen.has(p.id)) continue;
           let kind: string | null = null;
           if (p.priority === "P0" && p.status === "Stuck") kind = "P0 stuck";
+          else if (p.isBlocked) kind = "Blocked (dep)";
           else if (isProjectZombie(p)) kind = "Zombie";
           else if (p.atRisk || g.atRisk) kind = "At risk";
           if (!kind) continue;
@@ -549,6 +555,13 @@ export function SummaryDashboard({
             accentClass="bg-orange-500/15 text-orange-400"
           />
           <StatCard
+            label="Blocked (dep)"
+            value={stats.blockedByDependency}
+            href={buildRoadmapHref({ statusTagFilterIds: ["blocked_by_dep"] })}
+            icon={Link2}
+            accentClass="bg-orange-500/15 text-orange-300"
+          />
+          <StatCard
             label="Zombies"
             value={stats.zombies}
             href={buildRoadmapHref({ statusTagFilterIds: ["zombie"] })}
@@ -610,7 +623,8 @@ export function SummaryDashboard({
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center">
             <Zap className="h-6 w-6 text-emerald-500/60 mx-auto mb-2" />
             <p className="text-sm text-zinc-400">
-              No P0 blocked, zombies, or at-risk projects. Looking good!
+              No P0 stuck, dependency-blocked, zombies, or at-risk projects.
+              Looking good!
             </p>
           </div>
         ) : (

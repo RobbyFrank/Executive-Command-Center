@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Building2, Grid3X3 } from "lucide-react";
 import { SharedBadge } from "./SharedBadge";
+import { BlockedBadge } from "./BlockedBadge";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 
 export interface MatrixProjectCell {
@@ -311,16 +312,29 @@ export function MatrixView({ hierarchy, people }: MatrixViewProps) {
                                     <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">
                                       {item.project.name}
                                     </p>
-                                    <SharedBadge
-                                      isMirror={item.project.isMirror ?? false}
-                                      primaryGoalId={item.project.goalId}
-                                      mirroredGoalIds={
-                                        item.project.mirroredGoalIds ?? []
-                                      }
-                                      currentGoalId={item.goalId}
-                                      goals={allGoals}
-                                      companies={allCompanies}
-                                    />
+                                    <div className="flex shrink-0 items-center gap-1">
+                                      <SharedBadge
+                                        isMirror={
+                                          item.project.isMirror ?? false
+                                        }
+                                        primaryGoalId={item.project.goalId}
+                                        mirroredGoalIds={
+                                          item.project.mirroredGoalIds ?? []
+                                        }
+                                        currentGoalId={item.goalId}
+                                        goals={allGoals}
+                                        companies={allCompanies}
+                                      />
+                                      {item.project.isBlocked === true &&
+                                      item.project.blockedByProjectName !==
+                                        undefined ? (
+                                        <BlockedBadge
+                                          blockedByProjectName={
+                                            item.project.blockedByProjectName
+                                          }
+                                        />
+                                      ) : null}
+                                    </div>
                                   </div>
                                   <p className="truncate text-[10px] text-zinc-500">
                                     {item.goalDescription}

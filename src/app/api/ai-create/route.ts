@@ -31,7 +31,6 @@ function formatGoalDetail(g: Goal, goalOwnerName: string): string {
   if (cv) lines.push(`Current state: ${cv}`);
   lines.push(`Priority: ${g.priority}`);
   lines.push(`Status: ${g.status}`);
-  lines.push(`Execution mode: ${g.executionMode}`);
   if (goalOwnerName) lines.push(`Goal owner: ${goalOwnerName}`);
   return lines.join("\n");
 }

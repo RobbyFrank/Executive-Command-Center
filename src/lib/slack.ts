@@ -496,11 +496,12 @@ function conversationsListErrorMessage(error: string | undefined): string {
 }
 
 /**
- * Paginates `conversations.list` for a single conversation type (public or private).
+ * Paginates `conversations.list` for one or more comma-separated `types` values
+ * (e.g. `public_channel`, `private_channel`, or `public_channel,private_channel`).
  */
-async function fetchConversationsListByType(
+async function fetchConversationsListByTypesParam(
   token: string,
-  types: "public_channel" | "private_channel"
+  typesParam: string
 ): Promise<
   | { ok: true; channels: SlackApiChannel[] }
   | { ok: false; error: string }
@@ -510,7 +511,7 @@ async function fetchConversationsListByType(
 
   for (;;) {
     const params = new URLSearchParams();
-    params.set("types", types);
+    params.set("types", typesParam);
     params.set("exclude_archived", "true");
     params.set("limit", "200");
     params.set("include_num_members", "true");
@@ -548,15 +549,30 @@ async function fetchConversationsListByType(
   return { ok: true, channels: collected };
 }
 
+function mergeMappedSlackChannels(raws: SlackApiChannel[]): SlackChannel[] {
+  const byId = new Map<string, SlackChannel>();
+  for (const raw of raws) {
+    const ch = mapChannel(raw);
+    if (ch) byId.set(ch.id, ch);
+  }
+  const collected = [...byId.values()];
+  collected.sort((a, b) => a.name.localeCompare(b.name));
+  return collected;
+}
+
+export type FetchSlackChannelsResult =
+  | { ok: true; channels: SlackChannel[]; notice?: string }
+  | { ok: false; error: string };
+
 /**
  * Fetches public and private channels the bot can access via `conversations.list`.
- * Requests each type in its own paginated run, then merges by channel id (Roadmap goal picker).
- * Requires scopes: channels:read, groups:read on the bot token.
+ * Prefer a single paginated run with `types=public_channel,private_channel`; falls back
+ * to separate runs, then merges by channel id. If the private list cannot be loaded
+ * (e.g. missing `groups:read`), still returns public channels with an optional `notice`.
+ * The bot must be **in** a private channel for Slack to return it.
+ * Requires scopes: `channels:read`, `groups:read` (for private) on the bot token.
  */
-export async function fetchSlackChannels(): Promise<
-  | { ok: true; channels: SlackChannel[] }
-  | { ok: false; error: string }
-> {
+export async function fetchSlackChannels(): Promise<FetchSlackChannelsResult> {
   const token = slackToken();
   if (!token) {
     return {
@@ -566,27 +582,49 @@ export async function fetchSlackChannels(): Promise<
     };
   }
 
-  const publicResult = await fetchConversationsListByType(
+  const combined = await fetchConversationsListByTypesParam(
+    token,
+    "public_channel,private_channel"
+  );
+  if (combined.ok) {
+    return {
+      ok: true,
+      channels: mergeMappedSlackChannels(combined.channels),
+    };
+  }
+
+  const publicResult = await fetchConversationsListByTypesParam(
     token,
     "public_channel"
   );
   if (!publicResult.ok) return publicResult;
 
-  const privateResult = await fetchConversationsListByType(
+  const privateResult = await fetchConversationsListByTypesParam(
     token,
     "private_channel"
   );
-  if (!privateResult.ok) return privateResult;
 
-  const byId = new Map<string, SlackChannel>();
-  for (const raw of [...publicResult.channels, ...privateResult.channels]) {
-    const ch = mapChannel(raw);
-    if (ch) byId.set(ch.id, ch);
+  if (privateResult.ok) {
+    return {
+      ok: true,
+      channels: mergeMappedSlackChannels([
+        ...publicResult.channels,
+        ...privateResult.channels,
+      ]),
+    };
   }
 
-  const collected = [...byId.values()];
-  collected.sort((a, b) => a.name.localeCompare(b.name));
-  return { ok: true, channels: collected };
+  const notice =
+    privateResult.error.includes("missing_scope") ||
+    privateResult.error.includes("groups:read")
+      ? "Private channels are not listed: add the groups:read scope to the Slack app and reinstall it to the workspace."
+      : `Private channels could not be listed (${privateResult.error}). Public channels are shown below.`;
+
+  return {
+    ok: true,
+    channels: mergeMappedSlackChannels(publicResult.channels),
+    notice,
+  };
 }
 
 /**

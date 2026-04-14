@@ -40,6 +40,7 @@ export function SlackChannelPicker({
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [scopeNotice, setScopeNotice] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const anchorRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -52,6 +53,7 @@ export function SlackChannelPicker({
     let cancelled = false;
     setLoading(true);
     setFetchError(null);
+    setScopeNotice(null);
     setSearch("");
 
     void (async () => {
@@ -60,6 +62,7 @@ export function SlackChannelPicker({
       setLoading(false);
       if (r.ok) {
         setChannels(r.channels);
+        setScopeNotice(r.notice ?? null);
       } else {
         setFetchError(r.error);
       }
@@ -154,11 +157,8 @@ export function SlackChannelPicker({
         title={hasChannel ? `Slack channel: ${displayHash}` : "Click to set Slack channel"}
       >
         {hasChannel ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5">
-            <SlackLogo className="h-3.5 w-3.5 shrink-0 opacity-75" />
-            <span className="min-w-0 truncate font-medium text-zinc-300">
-              {displayHash}
-            </span>
+          <span className="min-w-0 truncate font-medium text-zinc-300">
+            {displayHash}
           </span>
         ) : (
           <span className="italic text-zinc-600">Add channel</span>
@@ -205,7 +205,7 @@ export function SlackChannelPicker({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search channels…"
+                placeholder="Search public and private channels…"
                 className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
                 disabled={loading || !!fetchError}
               />
@@ -220,6 +220,15 @@ export function SlackChannelPicker({
                 </button>
               )}
             </div>
+
+            {scopeNotice && !fetchError && (
+              <p
+                className="border-b border-amber-900/40 bg-amber-950/35 px-3 py-2 text-[11px] leading-snug text-amber-200/95"
+                role="status"
+              >
+                {scopeNotice}
+              </p>
+            )}
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {loading ? (

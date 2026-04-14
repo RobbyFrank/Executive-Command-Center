@@ -104,6 +104,40 @@ export function formatRelativeCalendarDate(
       : `${years} years ago`;
 }
 
+/**
+ * Ultra-compact horizon for tight grid cells (e.g. Next milestone badge).
+ * Signed calendar offset: `-3D` = 3 days ago, `5D` = in 5 days, `2W`, `-1M`, `1Y`.
+ * Invalid / empty input: returns `null`.
+ */
+export function formatRelativeCalendarDateCompact(
+  ymd: string,
+  now = new Date()
+): string | null {
+  const target = parseCalendarDateString(ymd);
+  if (!target) return null;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = calendarDaysBetween(target, today);
+  const abs = Math.abs(diff);
+
+  if (abs < 14) {
+    return `${diff}D`;
+  }
+  if (abs < 60) {
+    const w = Math.max(1, Math.round(abs / 7));
+    const sign = diff >= 0 ? 1 : -1;
+    return `${sign * w}W`;
+  }
+  if (abs < 365) {
+    const mo = Math.max(1, Math.round(abs / 30));
+    const sign = diff >= 0 ? 1 : -1;
+    return `${sign * mo}M`;
+  }
+  const y = Math.max(1, Math.round(abs / 365));
+  const sign = diff >= 0 ? 1 : -1;
+  return `${sign * y}Y`;
+}
+
 /** Absolute date for tooltips (locale-aware). */
 export function formatCalendarDateHint(ymd: string): string {
   const d = parseCalendarDateString(ymd);
