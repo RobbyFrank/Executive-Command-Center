@@ -753,7 +753,7 @@ export function ProjectRow({
             </button>
           ) : nextPendingMilestone && nextMilestoneUi ? (
             <div
-              className="flex min-w-0 items-start gap-1.5 rounded-md border border-violet-500/30 bg-violet-950/25 px-1.5 py-1 ring-1 ring-inset ring-violet-500/10"
+              className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
               title={nextMilestoneUi.title}
             >
               <span

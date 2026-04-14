@@ -72,7 +72,7 @@ export function GoalsColumnHeaders({
           Confidence
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-44 shrink-0 flex items-center"
+          className="w-52 shrink-0 flex items-center"
           tooltip="Slack channel for this goal (name or link)."
         >
           <SlackLogo className="h-3.5 w-3.5 opacity-80" />

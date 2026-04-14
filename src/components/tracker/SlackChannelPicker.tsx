@@ -211,7 +211,7 @@ export function SlackChannelPicker({
   const linkUrl = channelId.trim() ? slackChannelUrl(channelId) : "";
 
   const collapsed = (
-    <div className="flex min-w-0 items-center gap-1">
+    <div className="group/channel flex min-w-0 items-center gap-1">
       <button
         ref={anchorRef}
         type="button"
@@ -244,7 +244,7 @@ export function SlackChannelPicker({
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="flex shrink-0 items-center rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+          className="flex shrink-0 items-center rounded p-1 text-zinc-500 opacity-0 transition-[opacity,colors] group-hover/channel:opacity-100 hover:bg-zinc-800 hover:text-zinc-300"
           title="Open in Slack"
         >
           <ExternalLink className="h-3 w-3" />

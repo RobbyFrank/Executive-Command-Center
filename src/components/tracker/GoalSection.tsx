@@ -598,7 +598,7 @@ export function GoalSection({
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) */}
-        <div className="w-44 shrink-0 min-w-0">
+        <div className="w-52 shrink-0 min-w-0">
           <SlackChannelPicker
             channelName={goal.slackChannel}
             channelId={goal.slackChannelId ?? ""}

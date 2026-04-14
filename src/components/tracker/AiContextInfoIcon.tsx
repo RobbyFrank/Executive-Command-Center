@@ -137,7 +137,7 @@ export function AiContextInfoIcon({
         className={cn(
           "shrink-0 text-zinc-500 transition-colors hover:text-zinc-300",
           inline
-            ? "inline-flex items-center justify-center rounded p-0.5 hover:bg-zinc-800/50"
+            ? "relative -top-px inline-flex items-center justify-center rounded p-0.5 hover:bg-zinc-800/50"
             : "rounded p-0.5 hover:bg-zinc-800/80",
           filledCount === 0 && "opacity-50"
         )}
