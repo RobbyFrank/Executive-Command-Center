@@ -4,6 +4,7 @@
  *   Add Bot scope **users.profile:read** so join dates resolve: `users.list` often omits
  *   `profile.start_date`; `users.profile.get` returns the full profile (incl. Slack Atlas).
  * - SLACK_BILLING_USER_TOKEN: team.billableInfo only — must be a user token (xoxp-), not the bot; see billableInfoUserTokenHelp().
+ * - SLACK_CHANNEL_LIST_USER_TOKEN (optional): user token (xoxp-) for `conversations.list` only. When set, the Roadmap channel picker lists channels **this user** can access (including private channels they’re in). If unset, `SLACK_BILLING_USER_TOKEN` is used for listing when present, else the bot token (private channels only if the bot was invited).
  * @see https://api.slack.com/methods/users.list
  * @see https://api.slack.com/methods/users.profile.get
  * @see https://api.slack.com/methods/team.billableInfo
@@ -227,6 +228,19 @@ type TeamBillableInfoResponse = {
 function slackToken(): string | undefined {
   const t = process.env.SLACK_BOT_USER_OAUTH_TOKEN?.trim();
   return t || undefined;
+}
+
+/**
+ * Token for `conversations.list` (channel picker). User tokens list channels **that user**
+ * can see; the bot token only lists private channels the **bot** has joined.
+ * Precedence: dedicated var → billing user token (same xoxp- often works) → bot.
+ */
+function slackTokenForConversationsList(): string | undefined {
+  const dedicated = process.env.SLACK_CHANNEL_LIST_USER_TOKEN?.trim();
+  if (dedicated) return dedicated;
+  const billing = process.env.SLACK_BILLING_USER_TOKEN?.trim();
+  if (billing) return billing;
+  return slackToken();
 }
 
 /** Explains why team.billableInfo needs a separate user token; bot + team.billing:read are not enough. */
@@ -569,16 +583,18 @@ export type FetchSlackChannelsResult =
  * Prefer a single paginated run with `types=public_channel,private_channel`; falls back
  * to separate runs, then merges by channel id. If the private list cannot be loaded
  * (e.g. missing `groups:read`), still returns public channels with an optional `notice`.
- * The bot must be **in** a private channel for Slack to return it.
- * Requires scopes: `channels:read`, `groups:read` (for private) on the bot token.
+ * With a **bot** token, the bot must be **in** a private channel for Slack to return it.
+ * With a **user** token (`SLACK_CHANNEL_LIST_USER_TOKEN` or `SLACK_BILLING_USER_TOKEN`),
+ * Slack returns channels that **user** can access (typical for an admin workspace token).
+ * Requires `channels:read` and `groups:read` on whichever token is used (bot or user scopes).
  */
 export async function fetchSlackChannels(): Promise<FetchSlackChannelsResult> {
-  const token = slackToken();
+  const token = slackTokenForConversationsList();
   if (!token) {
     return {
       ok: false,
       error:
-        "Slack is not configured. Set SLACK_BOT_USER_OAUTH_TOKEN in the server environment.",
+        "Slack is not configured. Set SLACK_BOT_USER_OAUTH_TOKEN, or a user token (SLACK_CHANNEL_LIST_USER_TOKEN or SLACK_BILLING_USER_TOKEN) for channel listing.",
     };
   }
 

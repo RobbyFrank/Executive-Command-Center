@@ -85,6 +85,7 @@ import {
 } from "./tracker-text-actions";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
+import { AiContextInfoIcon } from "./AiContextInfoIcon";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -120,6 +121,8 @@ export function ProjectRow({
   mirrorPickerHierarchy,
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
+  /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
+  const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
   const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
   const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
@@ -509,7 +512,7 @@ export function ProjectRow({
         }
         onClick={onProjectRowClick}
         onContextMenuCapture={projectContext.onContextMenuCapture}
-        className="group flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
+        className="group/project-row flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
           <ChevronRight
@@ -521,7 +524,7 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Name + Shared/Mirror — w-[360px] matches goal title + ProjectsColumnHeaders */}
+        {/* Project name — AI info icon inline at end of name; Shared/Mirror — w-[360px] matches goal + headers */}
         <div
           className="w-[360px] min-w-0 shrink-0 flex items-center gap-1.5"
           onClick={(e) => {
@@ -541,6 +544,26 @@ export function ProjectRow({
               startInEditMode={project.id === focusProjectNameEditId}
               openEditNonce={projectRenameNonce}
               displayClassName="text-zinc-200"
+              collapsedSuffix={
+                <span
+                  className={cn(
+                    "inline-flex items-center align-middle transition-opacity duration-150",
+                    "opacity-0 group-hover/project-row:opacity-100",
+                    aiContextUiOpen && "opacity-100",
+                    "pointer-events-none group-hover/project-row:pointer-events-auto",
+                    aiContextUiOpen && "pointer-events-auto"
+                  )}
+                >
+                  <AiContextInfoIcon
+                    inline
+                    variant="project"
+                    projectId={project.id}
+                    description={project.description}
+                    definitionOfDone={project.definitionOfDone}
+                    onUiOpenChange={setAiContextUiOpen}
+                  />
+                </span>
+              }
             />
           </div>
           <div className="shrink-0 flex items-center gap-1" data-shared-badge-root>
@@ -788,59 +811,6 @@ export function ProjectRow({
           />
         </div>
       </div>
-
-      {expanded ? (
-        <div
-          className="border-b border-zinc-900 bg-zinc-950/40"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="pl-6 pr-4 pb-2 pt-1.5">
-            {/* Same horizontal rhythm as project bar: pl-6 + w-8 + gap-2 aligns with Project name column */}
-            <div className="flex gap-2">
-              <div className="w-8 shrink-0" aria-hidden />
-              <div className="min-w-0 flex-1 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    Description
-                  </p>
-                  <InlineEditCell
-                    {...GRID_ALIGN}
-                    value={project.description}
-                    onSave={(description) =>
-                      updateProject(project.id, { description })
-                    }
-                    placeholder="What this project is delivering"
-                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
-                    type="textarea"
-                    displayTruncateSingleLine
-                    truncateTooltipAlwaysHover
-                    truncateSubduedPreview
-                  />
-                </div>
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    Done when
-                  </p>
-                  <InlineEditCell
-                    {...GRID_ALIGN}
-                    value={project.definitionOfDone}
-                    onSave={(definitionOfDone) =>
-                      updateProject(project.id, { definitionOfDone })
-                    }
-                    placeholder="Definition of done — when this project counts as complete"
-                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
-                    type="textarea"
-                    displayTruncateSingleLine
-                    truncateTooltipAlwaysHover
-                    truncateSubduedPreview
-                  />
-                </div>
-                <div className="hidden min-w-0 sm:block" aria-hidden />
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <ContextMenu
         open={projectContext.open}

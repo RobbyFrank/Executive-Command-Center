@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ExternalLink, Hash, Loader2, Lock, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Hash, Loader2, X } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
 import { fetchSlackChannelsList } from "@/server/actions/slack";
 import { formatSlackChannelHash, slackChannelUrl } from "@/lib/slackDisplay";
@@ -20,18 +20,57 @@ interface SlackChannelPickerProps {
   channelName: string;
   channelId: string;
   onSave: (channel: { name: string; id: string }) => void;
+  /** Company display name — used with `companyShortName` for optional “relevant only” pre-filter. */
+  companyName?: string;
+  /** Company short label (e.g. VD) — case-insensitive match in channel name/topic/purpose. */
+  companyShortName?: string;
   /** Roadmap grid alignment. */
   trackerGridAlign?: boolean;
   /** "plain" variant omits pill background on the resting label. */
   variant?: "default" | "plain";
 }
 
+/** Lowercase substrings to match in channel name, topic, or purpose (non-empty only). */
+function companyFilterTerms(
+  companyName: string | undefined,
+  companyShortName: string | undefined
+): string[] {
+  const out: string[] = [];
+  const n = companyName?.trim();
+  const s = companyShortName?.trim();
+  if (n) out.push(n.toLowerCase());
+  if (s) out.push(s.toLowerCase());
+  return out;
+}
+
+function channelMatchesCompanyTerms(
+  ch: SlackChannel,
+  termsLower: string[]
+): boolean {
+  if (termsLower.length === 0) return true;
+  const hay = `${ch.name}\n${ch.topic}\n${ch.purpose}`.toLowerCase();
+  return termsLower.some((t) => hay.includes(t));
+}
+
 const PANEL_W = 380;
+
+/** Reuse the last successful `fetchSlackChannelsList` across picker opens (~1.5 min). */
+const SLACK_CHANNELS_CACHE_TTL_MS = 90_000;
+
+type SlackChannelsCacheEntry = {
+  fetchedAt: number;
+  channels: SlackChannel[];
+  notice: string | null;
+};
+
+let slackChannelsListCache: SlackChannelsCacheEntry | null = null;
 
 export function SlackChannelPicker({
   channelName,
   channelId,
   onSave,
+  companyName,
+  companyShortName,
   trackerGridAlign = false,
   variant = "default",
 }: SlackChannelPickerProps) {
@@ -42,6 +81,8 @@ export function SlackChannelPicker({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [scopeNotice, setScopeNotice] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  /** When true, narrow the list to channels matching company name / short name (default each open). */
+  const [relevantOnly, setRelevantOnly] = useState(true);
   const anchorRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -50,19 +91,37 @@ export function SlackChannelPicker({
 
   useEffect(() => {
     if (!open) return;
+    setSearch("");
+    setRelevantOnly(true);
+    setFetchError(null);
+
+    const cached = slackChannelsListCache;
+    const cacheFresh =
+      cached && Date.now() - cached.fetchedAt < SLACK_CHANNELS_CACHE_TTL_MS;
+    if (cacheFresh && cached) {
+      setChannels(cached.channels);
+      setScopeNotice(cached.notice);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
-    setFetchError(null);
     setScopeNotice(null);
-    setSearch("");
 
     void (async () => {
       const r = await fetchSlackChannelsList();
       if (cancelled) return;
       setLoading(false);
       if (r.ok) {
+        const notice = r.notice ?? null;
         setChannels(r.channels);
-        setScopeNotice(r.notice ?? null);
+        setScopeNotice(notice);
+        slackChannelsListCache = {
+          fetchedAt: Date.now(),
+          channels: r.channels,
+          notice,
+        };
       } else {
         setFetchError(r.error);
       }
@@ -112,6 +171,12 @@ export function SlackChannelPicker({
     setSearch("");
   }, []);
 
+  const companyTerms = useMemo(
+    () => companyFilterTerms(companyName, companyShortName),
+    [companyName, companyShortName]
+  );
+  const hasCompanyFilter = companyTerms.length > 0;
+
   const select = useCallback(
     (ch: SlackChannel) => {
       onSave({ name: ch.name, id: ch.id });
@@ -125,16 +190,21 @@ export function SlackChannelPicker({
     close();
   }, [onSave, close]);
 
+  const companyScoped = useMemo(() => {
+    if (!relevantOnly || !hasCompanyFilter) return channels;
+    return channels.filter((ch) => channelMatchesCompanyTerms(ch, companyTerms));
+  }, [channels, relevantOnly, hasCompanyFilter, companyTerms]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return channels;
-    return channels.filter(
+    if (!q) return companyScoped;
+    return companyScoped.filter(
       (ch) =>
         ch.name.toLowerCase().includes(q) ||
         ch.topic.toLowerCase().includes(q) ||
         ch.purpose.toLowerCase().includes(q),
     );
-  }, [channels, search]);
+  }, [companyScoped, search]);
 
   const hasChannel = channelName.trim() || channelId.trim();
   const displayHash = hasChannel ? formatSlackChannelHash(channelName || channelId) : "";
@@ -221,6 +291,24 @@ export function SlackChannelPicker({
               )}
             </div>
 
+            {hasCompanyFilter ? (
+              <label className="flex cursor-pointer items-center gap-2 border-b border-zinc-800/90 px-3 py-2 text-[11px] text-zinc-400 hover:bg-zinc-800/30">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-950 text-violet-500 focus:ring-violet-500/40"
+                  checked={relevantOnly}
+                  onChange={(e) => setRelevantOnly(e.target.checked)}
+                  disabled={loading || !!fetchError}
+                />
+                <span className="min-w-0 leading-snug">
+                  Relevant only
+                  <span className="block text-[10px] text-zinc-600">
+                    Match company name or short name in channel name, topic, or purpose
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
             {scopeNotice && !fetchError && (
               <p
                 className="border-b border-amber-900/40 bg-amber-950/35 px-3 py-2 text-[11px] leading-snug text-amber-200/95"
@@ -244,7 +332,11 @@ export function SlackChannelPicker({
                 <p className="px-3 py-6 text-center text-sm text-zinc-500">
                   {channels.length === 0
                     ? "No channels returned from Slack."
-                    : "No channels match your search."}
+                    : relevantOnly &&
+                        hasCompanyFilter &&
+                        companyScoped.length === 0
+                      ? "No channels match this company. Turn off “Relevant only” to see the full list."
+                      : "No channels match your search."}
                 </p>
               ) : (
                 filtered.map((ch) => {
@@ -262,22 +354,13 @@ export function SlackChannelPicker({
                       aria-selected={selected}
                     >
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400 ring-1 ring-zinc-700">
-                        {ch.isPrivate ? (
-                          <Lock className="h-3.5 w-3.5" />
-                        ) : (
-                          <Hash className="h-3.5 w-3.5" />
-                        )}
+                        <Hash className="h-3.5 w-3.5" aria-hidden />
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="truncate font-medium text-zinc-100">
                             {ch.name}
                           </span>
-                          {ch.isPrivate && (
-                            <span className="shrink-0 rounded bg-zinc-800 px-1 py-px text-[10px] font-medium text-zinc-500">
-                              Private
-                            </span>
-                          )}
                         </div>
                         {(ch.purpose || ch.topic) && (
                           <p className="truncate text-[11px] leading-tight text-zinc-500">

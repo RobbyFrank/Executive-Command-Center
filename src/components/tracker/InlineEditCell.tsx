@@ -6,6 +6,8 @@ import {
   useEffect,
   useCallback,
   useId,
+  type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { ChevronDown, Pencil } from "lucide-react";
@@ -20,6 +22,15 @@ import {
   type CellHoverTooltipEditExtrasContext,
   type CellHoverTooltipHandle,
 } from "./CellHoverTooltip";
+
+/** Split after the last space so the final word can stay on one line with a trailing inline control. */
+function splitHeadAndLastWord(text: string): { head: string; last: string } {
+  const t = text.trimEnd();
+  if (t.length === 0) return { head: "", last: "" };
+  const i = t.lastIndexOf(" ");
+  if (i === -1) return { head: "", last: t };
+  return { head: t.slice(0, i + 1), last: t.slice(i + 1) };
+}
 
 interface InlineEditCellProps {
   value: string;
@@ -101,6 +112,12 @@ interface InlineEditCellProps {
    * so text-only cells (e.g. project Status) stay borderless until `group-hover` on the wrapper.
    */
   overlaySelectQuiet?: boolean;
+  /**
+   * Rendered inline immediately after the collapsed value (same line as the text when it fits).
+   * Use for a trailing control (e.g. roadmap goal/project name + info icon). Incompatible with
+   * `displayTruncateSingleLine` (suffix is ignored when the truncate tooltip path is used).
+   */
+  collapsedSuffix?: ReactNode;
 }
 
 export function InlineEditCell({
@@ -134,6 +151,7 @@ export function InlineEditCell({
   emphasizeEmpty = false,
   dateMin,
   overlaySelectQuiet = false,
+  collapsedSuffix,
 }: InlineEditCellProps) {
   const [editing, setEditing] = useState(() => Boolean(startInEditMode));
   const [draft, setDraft] = useState(value);
@@ -550,6 +568,94 @@ export function InlineEditCell({
           >
             {collapsedInner}
           </CellHoverTooltip>
+        </div>
+      );
+    }
+
+    /** Inline trailing control (e.g. info icon) — last word + icon wrapped in nowrap so they never orphan apart. */
+    if (collapsedSuffix != null && !useTruncateTooltip) {
+      const titleGroupClass = cn(
+        variant === "plain"
+          ? cn(
+              "inline-block max-w-full min-w-0 break-words rounded-sm border-0 bg-transparent p-0 m-0 shadow-none ring-0",
+              "cursor-pointer text-left text-sm leading-normal transition-colors outline-none",
+              "hover:bg-zinc-800/50 hover:px-1.5 hover:py-0.5 hover:-mx-1.5",
+              "focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:ring-1 focus-visible:ring-zinc-500/35"
+            )
+          : cn(
+              "inline-block max-w-full min-w-0 break-words rounded py-0.5 text-left text-sm cursor-pointer transition-colors outline-none",
+              cellPadX,
+              "hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-blue-600"
+            ),
+        !value &&
+          (variant === "plain"
+            ? "text-zinc-500 italic"
+            : "text-zinc-600 italic"),
+        displayClassName,
+        collapsedButtonClassName
+      );
+
+      const openEditFromGroup = (
+        e: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>
+      ) => {
+        if ((e.target as HTMLElement).closest("[data-ai-context-trigger]")) return;
+        if ("key" in e && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+        }
+        e.stopPropagation();
+        setEditing(true);
+      };
+
+      const canSplitLastWord = !formatDisplay && value.trim().length > 0;
+      const { head, last } = canSplitLastWord
+        ? splitHeadAndLastWord(value)
+        : { head: "", last: "" };
+
+      return (
+        <div
+          className={cn(
+            "w-full min-w-0 min-h-[28px] py-0.5 text-sm leading-normal",
+            className
+          )}
+        >
+          <div
+            tabIndex={0}
+            role="group"
+            title={typeof displayTitle === "string" ? displayTitle : undefined}
+            aria-label={collapsedTitle}
+            className={titleGroupClass}
+            onClick={(e) => openEditFromGroup(e)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") openEditFromGroup(e);
+            }}
+          >
+            {canSplitLastWord ? (
+              <>
+                {head}
+                <span className="whitespace-nowrap">
+                  {last}
+                  {"\u00A0"}
+                  <span
+                    data-ai-context-trigger
+                    className="inline-flex items-baseline align-middle"
+                  >
+                    {collapsedSuffix}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span className="whitespace-nowrap">
+                {collapsedInner}
+                {"\u00A0"}
+                <span
+                  data-ai-context-trigger
+                  className="inline-flex items-baseline align-middle"
+                >
+                  {collapsedSuffix}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
       );
     }

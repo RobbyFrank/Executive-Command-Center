@@ -68,6 +68,7 @@ import {
 import { AiCreateButton } from "./AiCreateButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
+import { AiContextInfoIcon } from "./AiContextInfoIcon";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -110,6 +111,8 @@ export function GoalSection({
   mirrorPickerHierarchy,
 }: GoalSectionProps) {
   const [expanded, setExpanded] = useState(() => initialExpanded ?? true);
+  /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
+  const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
   /** After adding a project, name cell opens in edit mode so the user can type immediately. */
   const [newProjectNameFocusId, setNewProjectNameFocusId] = useState<
     string | null
@@ -155,6 +158,11 @@ export function GoalSection({
   const collapsedSummary = useMemo(
     () => ({ projectCount: goal.projects.length }),
     [goal.projects.length]
+  );
+
+  const companyForSlackPicker = useMemo(
+    () => allCompanies.find((c) => c.id === goal.companyId),
+    [allCompanies, goal.companyId]
   );
 
   const goalHeaderWarnings = useMemo(
@@ -409,9 +417,6 @@ export function GoalSection({
     return () => ro.disconnect();
   }, [
     goal.description,
-    goal.measurableTarget,
-    goal.whyItMatters,
-    goal.currentValue,
     goal.atRisk,
     goal.spotlight,
     expanded,
@@ -442,7 +447,7 @@ export function GoalSection({
           "border-l-4 border-emerald-400/85 bg-emerald-950/40 shadow-[inset_6px_0_0_0_rgba(52,211,153,0.28)] ring-1 ring-emerald-500/25 hover:bg-emerald-950/48"
       )}
     >
-      {/* Goal header — click row (not inline controls) to expand/collapse; description strip below when expanded */}
+      {/* Goal header — click row (not inline controls) to expand/collapse; AI context via info icon */}
       <div
         ref={goalHeaderRef}
         style={{ top: goalStickyTopPx }}
@@ -460,7 +465,7 @@ export function GoalSection({
         <div
           onClick={onGoalHeaderClick}
           className={cn(
-            "flex w-full min-w-max cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
+            "group/goal-header flex w-full min-w-max cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
           )}
         >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -473,7 +478,7 @@ export function GoalSection({
           />
         </div>
 
-        {/* Goal title */}
+        {/* Goal title — AI info icon inline after name text (row hover to show) */}
         <div className="w-[360px] min-w-0 shrink-0">
           <InlineEditCell
             {...GRID_ALIGN}
@@ -482,6 +487,27 @@ export function GoalSection({
             displayClassName="font-semibold text-zinc-100"
             startInEditMode={goal.id === focusGoalTitleEditId}
             openEditNonce={goalRenameNonce}
+            collapsedSuffix={
+              <span
+                className={cn(
+                  "inline-flex items-center align-middle transition-opacity duration-150",
+                  "opacity-0 group-hover/goal-header:opacity-100",
+                  aiContextUiOpen && "opacity-100",
+                  "pointer-events-none group-hover/goal-header:pointer-events-auto",
+                  aiContextUiOpen && "pointer-events-auto"
+                )}
+              >
+                <AiContextInfoIcon
+                  inline
+                  variant="goal"
+                  goalId={goal.id}
+                  measurableTarget={goal.measurableTarget}
+                  whyItMatters={goal.whyItMatters}
+                  currentValue={goal.currentValue}
+                  onUiOpenChange={setAiContextUiOpen}
+                />
+              </span>
+            }
           />
         </div>
 
@@ -542,6 +568,8 @@ export function GoalSection({
             onSave={({ name, id }) =>
               updateGoal(goal.id, { slackChannel: name, slackChannelId: id })
             }
+            companyName={companyForSlackPicker?.name}
+            companyShortName={companyForSlackPicker?.shortName}
             trackerGridAlign
             variant="plain"
           />
@@ -633,74 +661,6 @@ export function GoalSection({
           />
         </div>
         </div>
-
-        {expanded ? (
-          <div
-            className="border-t border-zinc-800/65 pl-6 pr-4 pb-2 pt-1.5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Same horizontal rhythm as goal header: pl-6 + w-8 + gap-2 aligns with Goal title column */}
-            <div className="flex gap-2">
-              <div className="w-8 shrink-0" aria-hidden />
-              <div className="min-w-0 flex-1 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    Description
-                  </p>
-                  <InlineEditCell
-                    {...GRID_ALIGN}
-                    value={goal.measurableTarget}
-                    onSave={(measurableTarget) =>
-                      updateGoal(goal.id, { measurableTarget })
-                    }
-                    placeholder="Outcome or metric for this goal"
-                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
-                    type="textarea"
-                    displayTruncateSingleLine
-                    truncateTooltipAlwaysHover
-                    truncateSubduedPreview
-                  />
-                </div>
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    Why
-                  </p>
-                  <InlineEditCell
-                    {...GRID_ALIGN}
-                    value={goal.whyItMatters}
-                    onSave={(whyItMatters) =>
-                      updateGoal(goal.id, { whyItMatters })
-                    }
-                    placeholder="Why this goal matters — what we stand to gain"
-                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
-                    type="textarea"
-                    displayTruncateSingleLine
-                    truncateTooltipAlwaysHover
-                    truncateSubduedPreview
-                  />
-                </div>
-                <div className="min-w-0">
-                  <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                    Current value
-                  </p>
-                  <InlineEditCell
-                    {...GRID_ALIGN}
-                    value={goal.currentValue}
-                    onSave={(currentValue) =>
-                      updateGoal(goal.id, { currentValue })
-                    }
-                    placeholder="Progress or value vs the description / target"
-                    displayClassName="block w-full min-w-0 text-left text-xs leading-normal text-zinc-500"
-                    type="textarea"
-                    displayTruncateSingleLine
-                    truncateTooltipAlwaysHover
-                    truncateSubduedPreview
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
       <ContextMenu
         open={goalContext.open}

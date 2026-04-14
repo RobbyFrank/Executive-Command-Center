@@ -416,6 +416,8 @@ function GoalFieldsEditor({
   confidenceExplanation,
   projectNamesSummary,
   refresh,
+  companyName,
+  companyShortName,
 }: {
   goal: GoalWithProjects;
   people: Person[];
@@ -426,6 +428,8 @@ function GoalFieldsEditor({
   confidenceExplanation: ConfidenceExplanation | null;
   projectNamesSummary: string | null;
   refresh: () => void;
+  companyName?: string;
+  companyShortName?: string;
 }) {
   return (
     <>
@@ -569,6 +573,8 @@ function GoalFieldsEditor({
           onSave={({ name, id }) =>
             void updateGoal(goal.id, { slackChannel: name, slackChannelId: id }).then(refresh)
           }
+          companyName={companyName}
+          companyShortName={companyShortName}
         />
       </div>
 
@@ -1280,6 +1286,8 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                         : null
                     }
                     refresh={() => router.refresh()}
+                    companyName={currentCompany?.name}
+                    companyShortName={currentCompany?.shortName}
                   />
                 </ReviewEntityColumn>
 
@@ -1367,6 +1375,8 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                         : null
                     }
                     refresh={() => router.refresh()}
+                    companyName={currentCompany?.name}
+                    companyShortName={currentCompany?.shortName}
                   />
                 </ReviewEntityColumn>
 
