@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicModel } from "@/lib/anthropicModel";
+import { buildEntityFocusBlock } from "@/lib/assistantEntityFocus";
 import { getRepository } from "@/server/repository";
 
 export async function POST(req: Request) {
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
   const raw = body as {
     question?: unknown;
     history?: unknown;
+    entityContext?: unknown;
   };
 
   const question =
@@ -49,7 +51,37 @@ export async function POST(req: Request) {
   const repo = getRepository();
   const data = await repo.load();
 
-  const systemPrompt = `You are an executive analyst assistant for the MLabs portfolio strategic tracker. Answer questions using ONLY the JSON data below. Be concise, direct, and actionable. If something is not in the data, say you do not have that information.
+  let entityBlock = "";
+  const ec = raw.entityContext;
+  if (
+    ec &&
+    typeof ec === "object" &&
+    ec !== null &&
+    typeof (ec as { type?: unknown }).type === "string" &&
+    typeof (ec as { id?: unknown }).id === "string" &&
+    typeof (ec as { label?: unknown }).label === "string"
+  ) {
+    const type = (ec as { type: string }).type;
+    if (
+      type === "goal" ||
+      type === "project" ||
+      type === "milestone"
+    ) {
+      entityBlock = `The user opened the assistant while focusing on this item — prioritize it when relevant, but they may ask about anything in the workspace.
+
+${buildEntityFocusBlock(data, {
+        type,
+        id: (ec as { id: string }).id,
+        label: (ec as { label: string }).label,
+      })}
+
+---
+
+`;
+    }
+  }
+
+  const systemPrompt = `${entityBlock}You are an executive analyst assistant for the MLabs portfolio strategic tracker. Answer questions using ONLY the JSON data below. Be concise, direct, and actionable. If something is not in the data, say you do not have that information.
 
 Hierarchy: Company → Goal → Project → Milestone. People can own goals/projects and appear on the team roster.
 

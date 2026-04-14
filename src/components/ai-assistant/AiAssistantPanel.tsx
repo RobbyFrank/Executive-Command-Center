@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, Minus, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { AssistantEntityTag } from "@/contexts/AssistantContext";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 
 export type ChatTurn = {
@@ -24,10 +25,25 @@ function readStoredFontStep(): number {
   return n;
 }
 
+function entityTypeLabel(t: AssistantEntityTag["type"]): string {
+  switch (t) {
+    case "goal":
+      return "Goal";
+    case "project":
+      return "Project";
+    case "milestone":
+      return "Milestone";
+    default:
+      return t;
+  }
+}
+
 export function AiAssistantPanel({
   onClose,
+  entityTag,
 }: {
   onClose: () => void;
+  entityTag: AssistantEntityTag | null;
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -93,7 +109,19 @@ export function AiAssistantPanel({
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, history: historyMessages }),
+        body: JSON.stringify({
+          question: q,
+          history: historyMessages,
+          ...(entityTag
+            ? {
+                entityContext: {
+                  type: entityTag.type,
+                  id: entityTag.id,
+                  label: entityTag.label,
+                },
+              }
+            : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -136,7 +164,7 @@ export function AiAssistantPanel({
         setTimeout(() => inputRef.current?.focus(), 0);
       }
     }
-  }, [input, loading, turns]);
+  }, [input, loading, turns, entityTag]);
 
   const chatFontClass = FONT_STEPS[fontStep];
   const canDecreaseFont = fontStep > 0;
@@ -242,6 +270,19 @@ export function AiAssistantPanel({
           chatFontClass
         )}
       >
+        {entityTag && (
+          <div className="rounded-md border border-emerald-800/40 bg-emerald-950/25 px-2 py-1.5 text-xs text-emerald-100/90">
+            <span className="font-semibold text-emerald-400/95">
+              {entityTypeLabel(entityTag.type)}:{" "}
+            </span>
+            <span className="text-zinc-200">{entityTag.label}</span>
+            <span className="mt-0.5 block text-[11px] font-normal text-zinc-500">
+              Workspace data is still available — ask anything, or focus on this
+              item.
+            </span>
+          </div>
+        )}
+
         {turns.length === 0 && !pendingQuestion && (
           <p className="text-zinc-500">
             Ask about goals, projects, milestones, companies, or team members.
@@ -297,7 +338,11 @@ export function AiAssistantPanel({
                 void send();
               }
             }}
-            placeholder="Ask a question…"
+            placeholder={
+              entityTag
+                ? `Ask about "${entityTag.label}" or the rest of the workspace…`
+                : "Ask a question…"
+            }
             rows={2}
             disabled={loading}
             className="min-h-[44px] flex-1 resize-none rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"

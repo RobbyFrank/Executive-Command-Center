@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -26,6 +27,13 @@ interface ReviewNotesPopoverProps {
   pulseAttention?: boolean;
   /** Roadmap: `group/goal` vs `group/project` for row hover. Default: goal rows. */
   rowGroup?: "goal" | "project";
+  /**
+   * When set, the popover positions from this element and no inline trigger is rendered
+   * (open via `openNonce` or keep using this for placement only — e.g. row “…” button).
+   */
+  anchorRef?: RefObject<HTMLElement | null>;
+  /** Increment (e.g. from context menu “Review notes…”) to open the popover. */
+  openNonce?: number;
 }
 
 export function ReviewNotesPopover({
@@ -33,6 +41,8 @@ export function ReviewNotesPopover({
   onAppendNote,
   pulseAttention = false,
   rowGroup = "goal",
+  anchorRef,
+  openNonce,
 }: ReviewNotesPopoverProps) {
   const router = useRouter();
   const list = entries ?? [];
@@ -51,6 +61,7 @@ export function ReviewNotesPopover({
   const [pending, setPending] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastOpenNonceRef = useRef(0);
   const popoverId = useId();
   const [placement, setPlacement] = useState<{
     top: number;
@@ -58,14 +69,14 @@ export function ReviewNotesPopover({
   } | null>(null);
 
   const updatePlacement = useCallback(() => {
-    const el = triggerRef.current;
+    const el = anchorRef?.current ?? triggerRef.current;
     if (!el || typeof window === "undefined") return;
     const rect = el.getBoundingClientRect();
     setPlacement({
       top: rect.bottom + 4,
       right: Math.max(4, window.innerWidth - rect.right),
     });
-  }, []);
+  }, [anchorRef]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -91,6 +102,14 @@ export function ReviewNotesPopover({
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
   }, [open]);
+
+  useEffect(() => {
+    if (openNonce === undefined) return;
+    if (openNonce > lastOpenNonceRef.current) {
+      lastOpenNonceRef.current = openNonce;
+      setOpen(true);
+    }
+  }, [openNonce]);
 
   const submit = useCallback(async () => {
     const trimmed = draft.trim();
@@ -174,6 +193,10 @@ export function ReviewNotesPopover({
       </>,
       document.body
     );
+
+  if (anchorRef) {
+    return <>{portal}</>;
+  }
 
   return (
     <div

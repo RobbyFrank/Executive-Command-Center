@@ -3,14 +3,22 @@
 import { useMemo, useState } from "react";
 import type { Milestone } from "@/lib/types/tracker";
 import { InlineEditCell } from "./InlineEditCell";
-import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import { updateMilestone, deleteMilestone } from "@/server/actions/tracker";
-import { Check, Circle, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import {
+  Check,
+  Circle,
+  ExternalLink,
+  MessageSquare,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { SlackLogo } from "./SlackLogo";
 import { cn } from "@/lib/utils";
 import { isValidHttpUrl } from "@/lib/httpUrl";
+import { useAssistant } from "@/contexts/AssistantContext";
 
 interface MilestoneRowProps {
   milestone: Milestone;
@@ -33,6 +41,7 @@ export function MilestoneRow({
   isQueuedPendingMilestone = false,
 }: MilestoneRowProps) {
   const isDone = milestone.status === "Done";
+  const { openAssistant } = useAssistant();
   const milestoneContext = useContextMenu();
   const [slackUrlEditing, setSlackUrlEditing] = useState(false);
   const [slackEditNonce, setSlackEditNonce] = useState(0);
@@ -80,6 +89,18 @@ export function MilestoneRow({
             status: isDone ? "Not Done" : "Done",
           }),
       },
+      {
+        type: "item",
+        id: "discuss-in-chat",
+        label: "Discuss in chat",
+        icon: MessageSquare,
+        onClick: () =>
+          openAssistant({
+            type: "milestone",
+            id: milestone.id,
+            label: milestone.name,
+          }),
+      },
       { type: "divider", id: "ms-slack" },
       ...slackBlock,
       { type: "divider", id: "ms-d1" },
@@ -98,6 +119,7 @@ export function MilestoneRow({
     hasSlackThreadUrl,
     milestone.id,
     milestone.name,
+    openAssistant,
     slackUrlTrimmed,
   ]);
 
@@ -217,11 +239,17 @@ export function MilestoneRow({
         />
       </div>
 
-      <ConfirmDeletePopover
-        entityName="this milestone"
-        rowGroup="project"
-        onConfirm={() => deleteMilestone(milestone.id)}
-      />
+      <button
+        type="button"
+        title="Milestone actions"
+        aria-label={`More actions for milestone ${milestone.name}`}
+        aria-haspopup="menu"
+        aria-expanded={milestoneContext.open}
+        onClick={milestoneContext.openFromTrigger}
+        className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+      </button>
       <ContextMenu
         open={milestoneContext.open}
         x={milestoneContext.x}

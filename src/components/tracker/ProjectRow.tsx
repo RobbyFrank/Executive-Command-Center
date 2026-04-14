@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type {
@@ -31,7 +32,6 @@ import {
 } from "@/lib/confidenceScore";
 import { prioritySelectTextClass } from "@/lib/prioritySort";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
-import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import { MilestoneRow } from "./MilestoneRow";
 import {
   updateProject,
@@ -50,9 +50,11 @@ import {
   Pencil,
   ArrowRightLeft,
   Ban,
+  Wand2,
+  MessageSquare,
+  MessageSquareText,
+  MoreHorizontal,
 } from "lucide-react";
-import { ExecFlagMenu } from "./ExecFlagMenu";
-import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { isReviewStale } from "@/lib/reviewStaleness";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +88,10 @@ import {
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { AiContextInfoIcon } from "./AiContextInfoIcon";
+import { AiUpdateDialog } from "./AiUpdateDialog";
+import { ReviewNotesPopover } from "./ReviewNotesPopover";
+import { RowActionIcons } from "./RowActionIcons";
+import { useAssistant } from "@/contexts/AssistantContext";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -133,6 +139,8 @@ export function ProjectRow({
   >(null);
   /** Increment to focus the project name field (context menu Rename). */
   const [projectRenameNonce, setProjectRenameNonce] = useState(0);
+  const { openAssistant } = useAssistant();
+  const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
   const {
     bulkTick,
     expandPreset,
@@ -143,6 +151,8 @@ export function ProjectRow({
     focusEnforceTick,
   } = useTrackerExpandBulk();
   const projectContext = useContextMenu();
+  const projectActionsRef = useRef<HTMLButtonElement>(null);
+  const [projectReviewNotesNonce, setProjectReviewNotesNonce] = useState(0);
 
   useEffect(() => {
     if (!focusProjectMode || focusEnforceTick === 0) return;
@@ -415,6 +425,32 @@ export function ProjectRow({
       },
       {
         type: "item",
+        id: "p-ai-update-fields",
+        label: "Update with AI…",
+        icon: Wand2,
+        onClick: () => setAiUpdateOpen(true),
+      },
+      {
+        type: "item",
+        id: "p-discuss-in-chat",
+        label: "Discuss in chat",
+        icon: MessageSquare,
+        onClick: () =>
+          openAssistant({
+            type: "project",
+            id: project.id,
+            label: project.name,
+          }),
+      },
+      {
+        type: "item",
+        id: "p-review-notes",
+        label: "Review notes…",
+        icon: MessageSquareText,
+        onClick: () => setProjectReviewNotesNonce((n) => n + 1),
+      },
+      {
+        type: "item",
         id: "mirror-to-goal",
         label: "Mirror to goal…",
         icon: ArrowRightLeft,
@@ -489,6 +525,7 @@ export function ProjectRow({
     setProjectRenameNonce,
     showMilestones,
     toggleProjectRow,
+    openAssistant,
   ]);
 
   return (
@@ -786,30 +823,24 @@ export function ProjectRow({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <ReviewNotesPopover
-            entries={project.reviewLog}
-            onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
-            pulseAttention={projectInReviewQueue}
-            rowGroup="project"
-          />
-          <ExecFlagMenu
-            atRisk={project.atRisk}
-            spotlight={project.spotlight}
-            entityLabel="Project"
-            rowGroup="project"
-            onCommit={(flags) => updateProject(project.id, flags)}
-          />
-          <ConfirmDeletePopover
-            entityName={
-              isMirror
-                ? "this project from every goal it is linked to"
-                : "this project"
-            }
-            rowGroup="project"
-            onConfirm={() => deleteProject(project.id)}
-          />
-        </div>
+        <RowActionIcons rowGroup="project" forceVisible={project.atRisk || project.spotlight || projectInReviewQueue}>
+          <button
+            ref={projectActionsRef}
+            type="button"
+            title="Project actions"
+            aria-label={`More actions for project ${project.name}`}
+            aria-haspopup="menu"
+            aria-expanded={projectContext.open}
+            onClick={projectContext.openFromTrigger}
+            className={cn(
+              "rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45",
+              projectInReviewQueue &&
+                "text-amber-400/95 ring-2 ring-amber-500/50 motion-safe:animate-pulse hover:text-amber-300"
+            )}
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </RowActionIcons>
       </div>
 
       <ContextMenu
@@ -819,6 +850,12 @@ export function ProjectRow({
         onClose={projectContext.close}
         ariaLabel={`Actions for project ${project.name}`}
         entries={projectMenuEntries}
+      />
+      <ReviewNotesPopover
+        anchorRef={projectActionsRef}
+        openNonce={projectReviewNotesNonce}
+        entries={project.reviewLog}
+        onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
       />
 
       <MirrorGoalPickerDialog
@@ -925,6 +962,16 @@ export function ProjectRow({
           )}
         </div>
       </CollapsePanel>
+
+      {aiUpdateOpen && (
+        <AiUpdateDialog
+          type="project"
+          projectId={project.id}
+          description={project.description}
+          definitionOfDone={project.definitionOfDone}
+          onClose={() => setAiUpdateOpen(false)}
+        />
+      )}
     </div>
   );
 }

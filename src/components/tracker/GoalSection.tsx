@@ -19,7 +19,6 @@ import type { Priority } from "@/lib/types/tracker";
 import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { OwnerPickerCell } from "./OwnerPickerCell";
-import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
 import {
   SCORE_BAND_OPTIONS,
   parseScoreBand,
@@ -45,6 +44,10 @@ import {
   Plus,
   Trash2,
   Pencil,
+  Wand2,
+  MessageSquare,
+  MessageSquareText,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
@@ -53,8 +56,6 @@ import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
 import { SlackChannelPicker } from "./SlackChannelPicker";
 
-import { ExecFlagMenu } from "./ExecFlagMenu";
-import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { CollapsePanel } from "./CollapsePanel";
 import {
   ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
@@ -69,6 +70,10 @@ import { AiCreateButton } from "./AiCreateButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { AiContextInfoIcon } from "./AiContextInfoIcon";
+import { AiUpdateDialog } from "./AiUpdateDialog";
+import { ReviewNotesPopover } from "./ReviewNotesPopover";
+import { RowActionIcons } from "./RowActionIcons";
+import { useAssistant } from "@/contexts/AssistantContext";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -117,6 +122,9 @@ export function GoalSection({
   const [newProjectNameFocusId, setNewProjectNameFocusId] = useState<
     string | null
   >(null);
+  const { openAssistant } = useAssistant();
+  const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
+
   /** Increment to focus the goal title field (context menu Rename). */
   const [goalRenameNonce, setGoalRenameNonce] = useState(0);
   const {
@@ -129,6 +137,8 @@ export function GoalSection({
     focusEnforceTick,
   } = useTrackerExpandBulk();
   const goalContext = useContextMenu();
+  const goalActionsRef = useRef<HTMLButtonElement>(null);
+  const [goalReviewNotesNonce, setGoalReviewNotesNonce] = useState(0);
 
   useEffect(() => {
     onExpandedChange?.(goal.id, expanded);
@@ -364,6 +374,32 @@ export function GoalSection({
         icon: Pencil,
         onClick: () => setGoalRenameNonce((n) => n + 1),
       },
+      {
+        type: "item",
+        id: "ai-update-fields",
+        label: "Update with AI…",
+        icon: Wand2,
+        onClick: () => setAiUpdateOpen(true),
+      },
+      {
+        type: "item",
+        id: "discuss-in-chat",
+        label: "Discuss in chat",
+        icon: MessageSquare,
+        onClick: () =>
+          openAssistant({
+            type: "goal",
+            id: goal.id,
+            label: goal.description,
+          }),
+      },
+      {
+        type: "item",
+        id: "review-notes",
+        label: "Review notes…",
+        icon: MessageSquareText,
+        onClick: () => setGoalReviewNotesNonce((n) => n + 1),
+      },
       { type: "divider", id: "goal-d1" },
       ...execBlock,
       { type: "divider", id: "goal-d2" },
@@ -394,6 +430,7 @@ export function GoalSection({
     goal.companyId,
     goal.description,
     goal.id,
+    openAssistant,
     goal.projects.length,
     goal.spotlight,
     onGoalCreated,
@@ -642,24 +679,20 @@ export function GoalSection({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <ReviewNotesPopover
-            entries={goal.reviewLog}
-            onAppendNote={(t) => appendGoalReviewNote(goal.id, t)}
-          />
-          <ExecFlagMenu
-            atRisk={goal.atRisk}
-            spotlight={goal.spotlight}
-            entityLabel="Goal"
-            onCommit={(flags) => updateGoal(goal.id, flags)}
-          />
-          <ConfirmDeletePopover
-            entityName="this goal"
-            disabled={goal.projects.length > 0}
-            disabledReason="Delete all projects under this goal first."
-            onConfirm={() => deleteGoal(goal.id)}
-          />
-        </div>
+        <RowActionIcons rowGroup="goal" forceVisible={goal.atRisk || goal.spotlight}>
+          <button
+            ref={goalActionsRef}
+            type="button"
+            title="Goal actions"
+            aria-label={`More actions for goal ${goal.description}`}
+            aria-haspopup="menu"
+            aria-expanded={goalContext.open}
+            onClick={goalContext.openFromTrigger}
+            className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </RowActionIcons>
         </div>
       </div>
       <ContextMenu
@@ -669,6 +702,12 @@ export function GoalSection({
         onClose={goalContext.close}
         ariaLabel={`Actions for goal ${goal.description}`}
         entries={goalMenuEntries}
+      />
+      <ReviewNotesPopover
+        anchorRef={goalActionsRef}
+        openNonce={goalReviewNotesNonce}
+        entries={goal.reviewLog}
+        onAppendNote={(t) => appendGoalReviewNote(goal.id, t)}
       />
 
       {/* Projects */}
@@ -765,6 +804,17 @@ export function GoalSection({
           )}
         </div>
       </CollapsePanel>
+
+      {aiUpdateOpen && (
+        <AiUpdateDialog
+          type="goal"
+          goalId={goal.id}
+          measurableTarget={goal.measurableTarget}
+          whyItMatters={goal.whyItMatters}
+          currentValue={goal.currentValue}
+          onClose={() => setAiUpdateOpen(false)}
+        />
+      )}
     </div>
   );
 }
