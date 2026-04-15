@@ -6,7 +6,6 @@ import type {
   Person,
   ProjectWithMilestones,
 } from "@/lib/types/tracker";
-import { isReviewStale } from "@/lib/reviewStaleness";
 import { scoreBandSearchTokens } from "@/lib/tracker-score-bands";
 import { resolveOwnerFilterTokensToOwnerIds } from "@/lib/owner-filter";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
@@ -34,7 +33,6 @@ export type TrackerStatusTagId =
   | "at_risk"
   | "spotlight"
   | "unassigned"
-  | "need_review"
   | "close_watch"
   | "zombie"
   | "high_leverage"
@@ -56,15 +54,6 @@ function joinAssigneeNames(
   ids: string[]
 ): string {
   return ids.map((id) => personName(peopleById, id)).filter(Boolean).join(" ");
-}
-
-function ownerAutonomy(
-  ownerId: string | undefined,
-  peopleById: Map<string, Person>
-): number | null {
-  if (!ownerId) return null;
-  const v = peopleById.get(ownerId)?.autonomyScore;
-  return v === undefined ? null : v;
 }
 
 /** Text for matching a milestone row (names, dates, status, id). */
@@ -91,7 +80,6 @@ function projectSearchTextSelf(
     p.definitionOfDone,
     p.startDate,
     p.targetDate,
-    p.lastReviewed,
     p.milestones.map((m) => m.slackUrl).join(" "),
     p.atRisk ? "at risk" : "",
     p.spotlight ? "spotlight momentum win" : "",
@@ -118,7 +106,6 @@ function goalSearchTextSelf(
     personName(peopleById, g.ownerId),
     g.priority,
     g.slackChannel,
-    g.lastReviewed,
     g.status,
     g.atRisk ? "at risk" : "",
     g.spotlight ? "spotlight momentum win" : "",
@@ -373,15 +360,6 @@ function goalMatchesStatusTags(
   if (tags.has("spotlight") && g.spotlight) return true;
   if (tags.has("unassigned") && !g.ownerId) return true;
   if (
-    tags.has("need_review") &&
-    isReviewStale(
-      g.lastReviewed,
-      "goal",
-      ownerAutonomy(g.ownerId, peopleById)
-    )
-  )
-    return true;
-  if (
     tags.has("close_watch") &&
     g.projects.some((proj) =>
       projectMatchesCloseWatchByOwnerMap(proj, peopleById)
@@ -423,15 +401,6 @@ function projectMatchesStatusTags(
   if (tags.has("at_risk") && p.atRisk) return true;
   if (tags.has("spotlight") && p.spotlight) return true;
   if (tags.has("unassigned") && !p.ownerId) return true;
-  if (
-    tags.has("need_review") &&
-    isReviewStale(
-      p.lastReviewed,
-      "project",
-      ownerAutonomy(p.ownerId, peopleById)
-    )
-  )
-    return true;
   if (
     tags.has("close_watch") &&
     projectMatchesCloseWatchByOwnerMap(p, peopleById)

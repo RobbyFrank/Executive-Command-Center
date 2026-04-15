@@ -2,17 +2,14 @@
 
 import { useCallback, useId, useMemo, useState } from "react";
 import type { Priority } from "@/lib/types/tracker";
-import { ChevronDown, ListOrdered } from "lucide-react";
+import { Check, ChevronDown, Flag, ListOrdered } from "lucide-react";
+import {
+  PRIORITY_MENU_LABEL,
+  priorityFlagIconClass,
+} from "@/lib/prioritySort";
 import { cn } from "@/lib/utils";
 
 const PRIORITIES: Priority[] = ["P0", "P1", "P2", "P3"];
-
-const PRIORITY_SWATCH: Record<Priority, string> = {
-  P0: "bg-red-500/35 ring-red-500/40",
-  P1: "bg-orange-500/35 ring-orange-500/40",
-  P2: "bg-blue-500/35 ring-blue-500/40",
-  P3: "bg-zinc-500/30 ring-zinc-500/40",
-};
 
 interface PriorityFilterMultiSelectProps {
   selectedIds: string[];
@@ -47,14 +44,17 @@ export function PriorityFilterMultiSelect({
       </>
     ) : selectedIds.length === 1 ? (
       <>
-        <span
+        <Flag
           className={cn(
-            "h-2 w-2 shrink-0 rounded-full ring-1",
-            PRIORITY_SWATCH[selectedIds[0] as Priority] ?? "bg-zinc-600"
+            "h-3.5 w-3.5 shrink-0",
+            priorityFlagIconClass(selectedIds[0])
           )}
+          strokeWidth={2}
           aria-hidden
         />
-        <span className="truncate min-w-0">{selectedIds[0]}</span>
+        <span className="truncate min-w-0">
+          {PRIORITY_MENU_LABEL[selectedIds[0] as Priority] ?? selectedIds[0]}
+        </span>
       </>
     ) : (
       <>
@@ -66,7 +66,7 @@ export function PriorityFilterMultiSelect({
   return (
     <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
-        Filter by goal or project priority P0 through P3
+        Filter by goal or project priority (Urgent through Low)
       </span>
       <button
         type="button"
@@ -117,14 +117,21 @@ export function PriorityFilterMultiSelect({
                         : "text-zinc-200 hover:bg-zinc-800/60"
                     )}
                   >
-                    <span
-                      className={cn(
-                        "h-2 w-2 shrink-0 rounded-full ring-1",
-                        PRIORITY_SWATCH[p]
-                      )}
+                    <Flag
+                      className={cn("h-3.5 w-3.5 shrink-0", priorityFlagIconClass(p))}
+                      strokeWidth={2}
                       aria-hidden
                     />
-                    <span>{p}</span>
+                    <span className="min-w-0 flex-1">{PRIORITY_MENU_LABEL[p]}</span>
+                    {selected ? (
+                      <Check
+                        className="h-3.5 w-3.5 shrink-0 text-violet-400"
+                        strokeWidth={2.5}
+                        aria-hidden
+                      />
+                    ) : (
+                      <span className="inline-block h-3.5 w-3.5 shrink-0" aria-hidden />
+                    )}
                   </button>
                 );
               })}

@@ -9,6 +9,20 @@ import {
   Play,
   Hourglass,
 } from "lucide-react";
+
+/** Classic “stop” control (filled square); Lucide 1.x has no dedicated stop glyph. */
+function StopIcon() {
+  return (
+    <svg
+      className="h-3 w-3 shrink-0 opacity-95"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+    >
+      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+    </svg>
+  );
+}
 import { cn } from "@/lib/utils";
 import type { ProjectStatus } from "@/lib/types/tracker";
 import { isProjectStatus } from "@/lib/projectStatus";
@@ -41,6 +55,16 @@ const PILL: Record<
     inlineClass: "text-orange-100/95",
     icon: (
       <AlertTriangle className="h-3 w-3 shrink-0 text-orange-300" aria-hidden />
+    ),
+  },
+  Blocked: {
+    pillClass:
+      "border-red-500/60 bg-red-950/55 text-red-100 ring-red-500/40 shadow-[inset_0_0_0_1px_rgba(248,113,113,0.12)]",
+    inlineClass: "text-red-100",
+    icon: (
+      <span className="shrink-0 text-red-400" aria-hidden>
+        <StopIcon />
+      </span>
     ),
   },
   "For Review": {

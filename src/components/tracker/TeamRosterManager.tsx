@@ -139,6 +139,12 @@ interface TeamRosterManagerProps {
   workloads: PersonWorkload[];
 }
 
+/** Same shell as Roadmap’s sticky toolbar (border, blur, shadow, padding). */
+const TEAM_PAGE_STICKY_TOOLBAR_CLASS =
+  "sticky top-0 z-30 min-w-0 max-w-full border-b border-zinc-800/70 " +
+  "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-6 " +
+  "shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)]";
+
 /** Shared chrome for **Import from Slack** and **Refresh all from Slack** (toolbar). */
 const TEAM_SLACK_ACTION_BUTTON_CLASS =
   "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-600 bg-zinc-900/85 px-3 py-1.5 text-xs font-medium text-zinc-200 shadow-sm " +
@@ -471,13 +477,21 @@ export function TeamRosterManager({
 
   if (initialPeople.length === 0) {
     return (
-      <div className="pt-6">
+      <div className="min-w-0 min-h-0 max-w-full">
         <SlackImportDialog
           open={slackImportOpen}
           onClose={() => setSlackImportOpen(false)}
           existingSlackIds={existingSlackIds}
         />
-        <h1 className="text-xl font-bold text-zinc-100 mb-6">Team</h1>
+        <div className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
+          <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h1 className="text-xl font-bold text-zinc-100">Team</h1>
+            <span className="text-sm font-normal text-zinc-500">
+              Roster, roles, workloads, and Slack IDs.
+            </span>
+          </div>
+        </div>
+        <div className="min-w-0 max-w-full px-6 pb-6">
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
           <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
             <Users className="h-7 w-7 text-zinc-500" />
@@ -522,6 +536,7 @@ export function TeamRosterManager({
             </button>
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -533,18 +548,21 @@ export function TeamRosterManager({
         onClose={() => setSlackImportOpen(false)}
         existingSlackIds={existingSlackIds}
       />
-      <div className="space-y-4 min-w-max">
-      <div
-        ref={teamStickyToolbarRef}
-        className="sticky top-0 z-30 -mx-6 px-6 pt-6 pb-3 border-b border-zinc-800/90 bg-zinc-950/95 shadow-[0_1px_0_0_rgba(39,39,42,0.75)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/75"
-      >
-        <h1 className="text-xl font-bold text-zinc-100 mb-4">Team</h1>
-      <div className="flex flex-wrap items-center gap-3 min-h-[2.25rem]">
+      <div className="min-w-0 min-h-0 max-w-full">
+      <div ref={teamStickyToolbarRef} className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
+        <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <h1 className="text-xl font-bold text-zinc-100">Team</h1>
+          <span className="text-sm font-normal text-zinc-500">
+            Roster, roles, workloads, and Slack IDs.
+          </span>
+        </div>
+      <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
         <div
           className={cn(
-            "relative flex-1 min-w-[10rem] max-w-[19rem] transition-[max-width] duration-200 ease-out",
-            filterState.searchQuery.trim() === "" &&
-              "max-w-[11rem] focus-within:max-w-[19rem]"
+            "relative flex-1 min-w-0 transition-[max-width] duration-200 ease-out",
+            filterState.searchQuery.trim() !== ""
+              ? "max-w-[19.2rem]"
+              : "max-w-[10rem] focus-within:max-w-[19.2rem]"
           )}
         >
           <Search
@@ -712,9 +730,11 @@ export function TeamRosterManager({
           </select>
         </div>
       </div>
+      </div>
 
+      <div className="min-w-0 max-w-full space-y-4 px-6 pb-6">
       {filterActive ? (
-        <p className="text-xs text-zinc-500 pt-1">
+        <p className="text-xs text-zinc-500">
           Showing{" "}
           <span className="tabular-nums text-zinc-400">{filteredPeople.length}</span>
           {" of "}
@@ -730,7 +750,6 @@ export function TeamRosterManager({
           ) : null}
         </p>
       ) : null}
-      </div>
 
       <div
         className="bg-zinc-900/40 rounded-lg border border-zinc-800 w-max min-w-full"
@@ -1143,7 +1162,7 @@ export function TeamRosterManager({
         ) : null}
       </div>
 
-      <div className="px-4 py-3">
+      <div className="pt-1">
         <button
           type="button"
           onClick={async () => {
@@ -1168,7 +1187,8 @@ export function TeamRosterManager({
           Add team member
         </button>
       </div>
-    </div>
+      </div>
+      </div>
     </>
   );
 }

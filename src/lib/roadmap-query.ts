@@ -13,7 +13,6 @@ const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [
   "at_risk",
   "spotlight",
   "unassigned",
-  "need_review",
   "close_watch",
   "zombie",
   "high_leverage",

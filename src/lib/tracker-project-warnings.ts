@@ -4,7 +4,6 @@ import type {
   ProjectWithMilestones,
 } from "@/lib/types/tracker";
 import { clampAutonomy, isFounderPerson } from "@/lib/autonomyRoster";
-import { isValidHttpUrl } from "@/lib/httpUrl";
 import { getNextPendingMilestone } from "@/lib/next-milestone";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 
@@ -19,7 +18,6 @@ export function getTrackerProjectWarnings(
   const list: TrackerWarning[] = [];
   const cod = goalCostOfDelay ?? 0;
   const ownerPerson = people.find((p) => p.id === project.ownerId);
-  const isUnassigned = !project.ownerId;
 
   const raw = project.targetDate?.trim() ?? "";
   const missingTargetDate =
@@ -28,8 +26,6 @@ export function getTrackerProjectWarnings(
   const nextOpen = getNextPendingMilestone(project.milestones);
   const nextMilestoneMissingDate =
     nextOpen !== undefined && !nextOpen.targetDate?.trim();
-  const nextMilestoneMissingSlack =
-    nextOpen !== undefined && !isValidHttpUrl(nextOpen.slackUrl ?? "");
 
   const highCodLowAutonomy =
     cod >= 4 &&
@@ -48,20 +44,12 @@ export function getTrackerProjectWarnings(
       title:
         "The next open milestone (first not done) has no target date — set it on that row",
     });
-  if (nextMilestoneMissingSlack)
-    list.push({
-      label: "Milestone: no Slack thread",
-      title:
-        "The next open milestone has no Slack thread URL — paste a message or thread link for that discussion",
-    });
   if (missingTargetDate)
     list.push({
       label: "No due date",
       title:
         "No milestone target dates — set a target date on at least one milestone for this project",
     });
-  if (isUnassigned)
-    list.push({ label: "Unassigned", title: "No owner assigned" });
   if (highCodLowAutonomy)
     list.push({
       label: "Low autonomy / high CoD",
@@ -73,18 +61,17 @@ export function getTrackerProjectWarnings(
 
 export type GetGoalHeaderWarningsOptions = {
   /**
-   * When false, only goal-level chips are returned (unassigned, no projects).
-   * Per-project issues are omitted — use on an expanded Roadmap goal row where
-   * project rows show their own warnings.
+   * When false, only goal-level chips are returned (e.g. no goal DRI).
+   * Per-project issues stay on each `ProjectRow` — Roadmap `GoalSection` passes false.
+   * When true, project warnings are rolled onto the goal (multi-project goals prefix with project name).
    * @default true
    */
   includeProjectWarnings?: boolean;
 };
 
 /**
- * Goal header warning chips — same rules as Roadmap `GoalSection` (per-project
- * issues rolled up; multi-project goals prefix with project name) when
- * `includeProjectWarnings` is true.
+ * Goal header warning chips. Roadmap uses `includeProjectWarnings: false` so project
+ * warnings appear only on project rows; set true to roll up project issues onto the goal.
  */
 export function getGoalHeaderWarnings(
   goal: GoalWithProjects,
@@ -101,21 +88,8 @@ export function getGoalHeaderWarnings(
     : null;
 
   if (goal.projects.length === 0) {
-    if (!goalUnassigned) {
-      return [
-        {
-          label: "No projects",
-          title: "No projects yet — add a project to deliver this goal",
-        },
-      ];
-    }
-    return [
-      {
-        label: "No projects",
-        title: "No projects yet — add a project to deliver this goal",
-      },
-      goalUnassigned,
-    ];
+    /** No “no projects” chip — Roadmap shows Add project + AI on the goal row instead. */
+    return goalUnassigned ? [goalUnassigned] : [];
   }
 
   if (!includeProjectWarnings) {
@@ -128,7 +102,6 @@ export function getGoalHeaderWarnings(
   for (const p of goal.projects) {
     const pw = getTrackerProjectWarnings(p, goal.costOfDelay, people);
     for (const w of pw) {
-      if (goalUnassigned && w.label === "Unassigned") continue;
       list.push({
         label: multi ? `${p.name}: ${w.label}` : w.label,
         title: w.title,

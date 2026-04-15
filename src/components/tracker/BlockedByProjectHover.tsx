@@ -6,17 +6,22 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 const HOVER_CLOSE_MS = 120;
 
-export function BlockedBadge({
+/** Hover/focus panel showing which project blocks this row (used for dependency-blocked status). */
+export function BlockedByProjectHover({
   blockedByProjectName,
+  children,
+  className,
 }: {
-  /** Name of the project this row is blocked by (shown in hover panel). */
   blockedByProjectName: string;
+  children: ReactNode;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -105,16 +110,19 @@ export function BlockedBadge({
         ref={anchorRef}
         type="button"
         aria-expanded={open}
+        aria-label={`Blocked by ${blockedByProjectName}`}
+        title={`Blocked by ${blockedByProjectName}`}
         onClick={(e) => e.stopPropagation()}
         onMouseEnter={handlePointerEnter}
         onMouseLeave={scheduleClose}
         onFocus={handlePointerEnter}
         onBlur={scheduleClose}
         className={cn(
-          "whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-200/95 cursor-help"
+          "inline-flex min-w-0 max-w-full cursor-help border-0 bg-transparent p-0 text-left",
+          className
         )}
       >
-        Blocked
+        {children}
       </button>
       {mounted && overlay ? createPortal(overlay, document.body) : null}
     </>

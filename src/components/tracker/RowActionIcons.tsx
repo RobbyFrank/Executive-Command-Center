@@ -5,12 +5,11 @@ import { cn } from "@/lib/utils";
 
 interface RowActionIconsProps {
   children: ReactNode;
-  rowGroup?: "goal" | "project";
+  rowGroup?: "goal" | "project" | "milestone";
   /**
    * When true the container stays fully visible regardless of hover state.
-   * Pass `true` when a child needs to be permanently shown (active exec flags,
-   * pulsing review-notes icon, etc.) — this avoids the parent opacity cascade
-   * hiding it.
+   * Pass `true` when a child needs to be permanently shown (e.g. active exec
+   * flags) — this avoids the parent opacity cascade hiding it.
    */
   forceVisible?: boolean;
 }
@@ -19,7 +18,7 @@ interface RowActionIconsProps {
  * Container for the row “…” control that opens the context menu.
  *
  * Fades in/out with an opacity + pointer-events transition keyed to the parent
- * row's Tailwind group hover (`group/goal` or `group/project`).
+ * row's Tailwind group hover (`group/goal`, `group/project`, or `group/milestone`).
  *
  * Pass `forceVisible` when the row should always show the control (e.g. at risk
  * or spotlight) without requiring hover.
@@ -39,7 +38,9 @@ export function RowActionIcons({
               "opacity-0 pointer-events-none",
               rowGroup === "project"
                 ? "group-hover/project:opacity-100 group-hover/project:pointer-events-auto"
-                : "group-hover/goal:opacity-100 group-hover/goal:pointer-events-auto",
+                : rowGroup === "milestone"
+                  ? "group-hover/milestone:opacity-100 group-hover/milestone:pointer-events-auto"
+                  : "group-hover/goal:opacity-100 group-hover/goal:pointer-events-auto",
               "focus-within:opacity-100 focus-within:pointer-events-auto",
             ),
       )}

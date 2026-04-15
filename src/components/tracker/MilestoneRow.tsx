@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -30,10 +31,77 @@ import {
   type SlackPingMode,
 } from "./SlackMilestoneThreadPopovers";
 import { SlackCreateThreadDialog } from "./SlackCreateThreadDialog";
+import { StartSlackThreadChip } from "./StartSlackThreadChip";
+import { RowActionIcons } from "./RowActionIcons";
 import { cn } from "@/lib/utils";
 import { TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW } from "@/lib/tracker-roadmap-columns";
 import { isValidHttpUrl } from "@/lib/httpUrl";
 import { useAssistantOptional } from "@/contexts/AssistantContext";
+import {
+  getMilestoneDueHorizon,
+  type MilestoneDueHorizon,
+} from "@/lib/relativeCalendarDate";
+
+/** Horizontal heatmap + inset accent for milestone target dates (open milestones). */
+const DUE_ROW_BY_HORIZON: Partial<Record<MilestoneDueHorizon, string>> = {
+  overdue:
+    "bg-gradient-to-r from-rose-950/55 via-rose-950/28 to-transparent shadow-[inset_4px_0_0_0_rgba(244,63,94,0.78)] hover:from-rose-950/68 hover:via-rose-950/34",
+  today:
+    "bg-gradient-to-r from-orange-950/55 via-orange-950/24 to-transparent shadow-[inset_4px_0_0_0_rgba(249,115,22,0.78)] hover:from-orange-950/68 hover:via-orange-950/30",
+  soon:
+    "bg-gradient-to-r from-yellow-950/50 via-amber-950/18 to-transparent shadow-[inset_4px_0_0_0_rgba(234,179,8,0.72)] hover:from-yellow-950/62 hover:via-amber-950/24",
+  this_week:
+    "bg-gradient-to-r from-amber-950/42 via-amber-950/12 to-transparent shadow-[inset_4px_0_0_0_rgba(245,158,11,0.55)] hover:from-amber-950/52 hover:via-amber-950/18",
+};
+
+function milestoneDateDisplayClass(
+  horizon: MilestoneDueHorizon
+): string | undefined {
+  switch (horizon) {
+    case "overdue":
+      return "font-semibold text-rose-200";
+    case "today":
+      return "font-semibold text-orange-200";
+    case "soon":
+      return "font-semibold text-yellow-200";
+    case "this_week":
+      return "font-medium text-amber-200/95";
+    default:
+      return undefined;
+  }
+}
+
+function milestoneTitleDisplayClass(
+  horizon: MilestoneDueHorizon
+): string | undefined {
+  switch (horizon) {
+    case "overdue":
+      return "font-medium text-rose-50";
+    case "today":
+      return "font-medium text-orange-50";
+    case "soon":
+      return "font-medium text-yellow-50";
+    case "this_week":
+      return "font-medium text-amber-50";
+    default:
+      return undefined;
+  }
+}
+
+function nextMilestoneChipClass(horizon: MilestoneDueHorizon): string {
+  switch (horizon) {
+    case "overdue":
+      return "text-rose-50 ring-rose-400/55 bg-rose-600/30";
+    case "today":
+      return "text-orange-50 ring-orange-400/60 bg-orange-600/25";
+    case "soon":
+      return "text-yellow-50 ring-yellow-400/50 bg-yellow-600/20";
+    case "this_week":
+      return "text-amber-50 ring-amber-400/50 bg-amber-600/22";
+    default:
+      return "text-violet-200/95 ring-violet-500/35 bg-violet-500/15";
+  }
+}
 
 interface MilestoneRowProps {
   milestone: Milestone;
@@ -66,6 +134,11 @@ interface MilestoneRowProps {
    * Review mode keeps the default (preview beside the title in flow layout).
    */
   alignSlackPreviewToNextMilestoneColumn?: boolean;
+  /**
+   * Increment from the parent (e.g. project row “Attach existing Slack thread URL…”) to open the URL
+   * editor for this milestone — only honored when this row is the next pending milestone.
+   */
+  slackUrlEditSignal?: number;
 }
 
 export function MilestoneRow({
@@ -82,8 +155,23 @@ export function MilestoneRow({
   projectComplexity = 3,
   milestonesSummary,
   alignSlackPreviewToNextMilestoneColumn = false,
+  slackUrlEditSignal = 0,
 }: MilestoneRowProps) {
   const isDone = milestone.status === "Done";
+  const dueHorizon = useMemo((): MilestoneDueHorizon => {
+    if (isDone) return "none";
+    return getMilestoneDueHorizon(milestone.targetDate);
+  }, [isDone, milestone.targetDate]);
+
+  /** Due-date gradient + accents only on the next open milestone — not on queued/future rows. */
+  const showNextDueHeatmap =
+    isNextPendingMilestone &&
+    !isDone &&
+    (dueHorizon === "overdue" ||
+      dueHorizon === "today" ||
+      dueHorizon === "soon" ||
+      dueHorizon === "this_week");
+
   const assistant = useAssistantOptional();
   const milestoneContext = useContextMenu();
   const slackQuickContext = useContextMenu();
@@ -94,6 +182,16 @@ export function MilestoneRow({
   const [threadPingOpen, setThreadPingOpen] = useState(false);
   const [slackPingMode, setSlackPingMode] = useState<SlackPingMode>("ping");
   const threadAnchorRef = useRef<HTMLButtonElement>(null);
+  const slackThreadSpotlightRef = useRef<HTMLDivElement>(null);
+  const lastSlackUrlEditSignal = useRef(0);
+
+  useEffect(() => {
+    if (!isNextPendingMilestone || isDone || !slackUrlEditSignal) return;
+    if (slackUrlEditSignal <= lastSlackUrlEditSignal.current) return;
+    lastSlackUrlEditSignal.current = slackUrlEditSignal;
+    setSlackEditNonce((n) => n + 1);
+    setSlackUrlEditing(true);
+  }, [slackUrlEditSignal, isNextPendingMilestone, isDone]);
 
   const goalChannelIdTrimmed = goalSlackChannelId.trim();
   const canCreateSlackThread = Boolean(goalChannelIdTrimmed);
@@ -174,29 +272,48 @@ export function MilestoneRow({
   const slackAmberNoChannel =
     slackNeedsAttention && !canCreateSlackThread && !hasSlackThreadUrl;
 
+  /** Roadmap expanded: same column as `MilestoneSlackThreadInline` when the next milestone has no thread yet. */
+  const showSlackStartAlignedInRow =
+    alignSlackPreviewToNextMilestoneColumn &&
+    slackNeedsAttention &&
+    canCreateSlackThread &&
+    !slackUrlEditing;
+
+  const showSlackQuickMenu =
+    !hasSlackThreadUrl && !slackUrlEditing && !slackAmberNoChannel;
+
   const slackIconCellClass =
     "inline-flex !h-7 !w-7 !min-w-[1.75rem] !max-w-[1.75rem] shrink-0 items-center justify-center !border-0 !px-0 !py-0 !shadow-none !ring-0 bg-transparent hover:bg-zinc-800/80 rounded-sm";
 
   const milestoneMenuEntries = useMemo((): ContextMenuEntry[] => {
     const slackBlock: ContextMenuEntry[] = [
-      {
-        type: "item",
-        id: "slack-create-thread",
-        label: "Draft Slack thread with AI…",
-        icon: Sparkles,
-        disabled: !canCreateSlackThread,
-        disabledReason:
-          "Set a Slack channel on the goal first (Roadmap goal row)",
-        onClick: () => setCreateThreadOpen(true),
-      },
+      ...(hasSlackThreadUrl
+        ? []
+        : [
+            {
+              type: "item" as const,
+              id: "slack-create-thread",
+              label: "Draft a new Slack thread with AI…",
+              icon: Sparkles,
+              disabled: !canCreateSlackThread,
+              disabledReason:
+                "Set a Slack channel on the goal first (Roadmap goal row)",
+              onClick: () => setCreateThreadOpen(true),
+            },
+          ]),
       {
         type: "item",
         id: "slack-add-edit",
         label: slackUrlTrimmed
           ? "Edit Slack thread URL…"
-          : "Add Slack thread URL…",
+          : "Attach existing Slack thread URL…",
         icon: Pencil,
-        onClick: () => setSlackEditNonce((n) => n + 1),
+        onClick: () => {
+          setSlackEditNonce((n) => n + 1);
+          // Without a linked URL the Slack column is only a 7×7 menu button — no InlineEditCell
+          // mounted yet — so bumping openEditNonce alone does nothing. Expand the paste field.
+          if (!hasSlackThreadUrl) setSlackUrlEditing(true);
+        },
       },
       {
         type: "item",
@@ -267,7 +384,7 @@ export function MilestoneRow({
       {
         type: "item",
         id: "slack-q-create",
-        label: "Draft Slack thread with AI…",
+        label: "Draft a new Slack thread with AI…",
         icon: Sparkles,
         disabled: !canCreateSlackThread,
         disabledReason:
@@ -277,7 +394,7 @@ export function MilestoneRow({
       {
         type: "item",
         id: "slack-q-paste",
-        label: "Add Slack thread URL…",
+        label: "Attach existing Slack thread URL…",
         icon: Pencil,
         onClick: () => {
           setSlackEditNonce((n) => n + 1);
@@ -289,12 +406,16 @@ export function MilestoneRow({
 
   return (
     <div
+      ref={slackThreadSpotlightRef}
       className={cn(
-        "group relative flex min-w-0 items-center gap-3 pl-14 pr-4 py-1.5 transition-colors",
+        "group/milestone relative flex min-w-0 items-center gap-3 pl-14 pr-4 py-1.5 transition-colors",
+        showNextDueHeatmap && DUE_ROW_BY_HORIZON[dueHorizon],
         isNextPendingMilestone &&
           !isDone &&
+          (dueHorizon === "none" || dueHorizon === "later") &&
           "bg-violet-950/20 hover:bg-violet-950/30",
         (!isNextPendingMilestone || isDone) &&
+          !showNextDueHeatmap &&
           "hover:bg-zinc-900/50",
         isQueuedPendingMilestone && !isDone && "opacity-[0.78]"
       )}
@@ -328,31 +449,45 @@ export function MilestoneRow({
             updateMilestone(milestone.id, { targetDate })
           }
           type="date"
+          displayClassName={
+            isNextPendingMilestone && !isDone
+              ? milestoneDateDisplayClass(dueHorizon)
+              : undefined
+          }
         />
       </div>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {isNextPendingMilestone && !isDone ? (
           <span
-            className="inline shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide text-violet-200/95 ring-1 ring-violet-500/35 bg-violet-500/15"
+            className={cn(
+              "inline shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ring-1",
+              nextMilestoneChipClass(dueHorizon)
+            )}
             title="This is the next milestone to complete — link Slack here first"
           >
             Next
           </span>
         ) : null}
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-          {/* Title truncates; roadmap-aligned Slack is absolutely positioned (same row). */}
+        <div className="flex min-w-0 flex-1 items-center gap-6 overflow-hidden">
+          {/* Roadmap-aligned Slack is absolute — cap title width so the cell doesn’t span under it (avoids huge padding gaps). */}
           <div
             className={cn(
-              "min-h-[1.75rem] min-w-0 flex-1 overflow-hidden",
-              showSlackPreviewAlignedInRow &&
-                "max-w-[calc(360px+38.625rem)]"
+              "min-h-[1.75rem] min-w-0 flex-1 shrink overflow-hidden",
+              showSlackPreviewAlignedInRow || showSlackStartAlignedInRow
+                ? "max-w-[min(36rem,52%)]"
+                : null
             )}
           >
             <InlineEditCell
               value={milestone.name}
               onSave={(name) => updateMilestone(milestone.id, { name })}
-              displayClassName={isDone ? "line-through text-zinc-500" : ""}
+              displayClassName={cn(
+                isDone && "line-through text-zinc-500",
+                !isDone &&
+                  isNextPendingMilestone &&
+                  milestoneTitleDisplayClass(dueHorizon)
+              )}
               displayTruncateSingleLine
               startInEditMode={startNameInEditMode}
             />
@@ -384,6 +519,7 @@ export function MilestoneRow({
               placeholder="Paste Slack thread URL"
               linkBehavior
               linkBehaviorHideTrailingEdit
+              startInEditMode
               openEditNonce={slackEditNonce}
               onEditingChange={setSlackUrlEditing}
               displayClassName="not-italic"
@@ -497,82 +633,110 @@ export function MilestoneRow({
               />
             </div>
           </div>
+        ) : showSlackStartAlignedInRow ? (
+          <div
+            className="flex w-7 shrink-0 justify-center"
+            aria-hidden
+          />
         ) : (
-          <>
-            {/* Empty URL: left-click opens the same 2-item menu as right-click */}
-            <div className="flex w-7 shrink-0 justify-center">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-sm">
-                <button
-                  type="button"
-                  title={
-                    slackNeedsAttention && !isDone
-                      ? "Next milestone — add a Slack thread (click for options)"
-                      : "No Slack thread linked — click for draft or add URL"
-                  }
-                  aria-label={`Slack thread actions for ${milestone.name}`}
-                  aria-haspopup="menu"
-                  aria-expanded={slackQuickContext.open}
-                  onClick={slackQuickContext.openFromTrigger}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    slackQuickContext.openFromTrigger(
-                      e as ReactMouseEvent<HTMLElement>
-                    );
-                  }}
+          <div className="flex w-7 shrink-0 justify-center">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-sm">
+              <button
+                type="button"
+                title={
+                  slackNeedsAttention && !isDone
+                    ? "Next milestone — add a Slack thread (click for options)"
+                    : "No Slack thread linked — click for draft or add URL"
+                }
+                aria-label={`Slack thread actions for ${milestone.name}`}
+                aria-haspopup="menu"
+                aria-expanded={slackQuickContext.open}
+                onClick={slackQuickContext.openFromTrigger}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  slackQuickContext.openFromTrigger(
+                    e as ReactMouseEvent<HTMLElement>
+                  );
+                }}
+                className={cn(
+                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm",
+                  slackNeedsAttention && !isDone
+                    ? "text-zinc-200"
+                    : "text-zinc-500",
+                  "transition-colors hover:bg-zinc-800/80 hover:text-zinc-100",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+                )}
+              >
+                <SlackLogo
                   className={cn(
-                    "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm",
+                    "h-3.5 w-3.5",
                     slackNeedsAttention && !isDone
-                      ? "text-zinc-200"
-                      : "text-zinc-500",
-                    "transition-colors hover:bg-zinc-800/80 hover:text-zinc-100",
-                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+                      ? "opacity-95 saturate-100"
+                      : "opacity-[0.28] grayscale contrast-75"
                   )}
-                >
-                  <SlackLogo
-                    className={cn(
-                      "h-3.5 w-3.5",
-                      slackNeedsAttention && !isDone
-                        ? "opacity-95 saturate-100"
-                        : "opacity-[0.28] grayscale contrast-75"
-                    )}
-                  />
-                </button>
-              </div>
+                />
+              </button>
             </div>
-            <ContextMenu
-              open={slackQuickContext.open}
-              x={slackQuickContext.x}
-              y={slackQuickContext.y}
-              onClose={slackQuickContext.close}
-              ariaLabel={`Slack thread for ${milestone.name}`}
-              entries={slackQuickMenuEntries}
-            />
-          </>
+          </div>
         )}
       </div>
 
-      <button
-        type="button"
-        title="Milestone actions"
-        aria-label={`More actions for milestone ${milestone.name}`}
-        aria-haspopup="menu"
-        aria-expanded={milestoneContext.open}
-        onClick={milestoneContext.openFromTrigger}
-        className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
-      </button>
+      {showSlackQuickMenu ? (
+        <ContextMenu
+          open={slackQuickContext.open}
+          x={slackQuickContext.x}
+          y={slackQuickContext.y}
+          onClose={slackQuickContext.close}
+          ariaLabel={`Slack thread for ${milestone.name}`}
+          entries={slackQuickMenuEntries}
+        />
+      ) : null}
+
+      <RowActionIcons rowGroup="milestone">
+        <button
+          type="button"
+          title="Milestone actions"
+          aria-label={`More actions for milestone ${milestone.name}`}
+          aria-haspopup="menu"
+          aria-expanded={milestoneContext.open}
+          onClick={milestoneContext.openFromTrigger}
+          className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      </RowActionIcons>
 
       {showSlackPreviewAlignedInRow ? (
         <div
-          className="pointer-events-none absolute top-1/2 z-10 min-w-0 max-w-[36rem] -translate-y-1/2 overflow-hidden"
+          className="pointer-events-none absolute top-1/2 z-10 min-w-0 w-max max-w-[min(36rem,calc(100%-max(4.5rem,3vw)))] -translate-y-1/2 overflow-hidden"
           style={{
             left: TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW,
-            right: "1rem",
           }}
         >
-          <div className="pointer-events-auto min-w-0">{slackThreadPreview}</div>
+          <div className="pointer-events-auto min-w-0 w-max max-w-full">
+            {slackThreadPreview}
+          </div>
+        </div>
+      ) : null}
+
+      {showSlackStartAlignedInRow ? (
+        <div
+          className="pointer-events-none absolute top-1/2 z-10 w-max max-w-[min(36rem,calc(100vw-4rem))] -translate-y-1/2"
+          style={{
+            left: TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW,
+          }}
+        >
+          <div
+            className="pointer-events-auto w-fit"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <StartSlackThreadChip
+              menuOpen={slackQuickContext.open}
+              onMenuTrigger={slackQuickContext.openFromTrigger}
+              ariaLabel={`Start Slack thread for ${milestone.name}`}
+            />
+          </div>
         </div>
       ) : null}
 
@@ -588,6 +752,7 @@ export function MilestoneRow({
       {hasSlackThreadUrl ? (
         <SlackMilestoneThreadPopovers
           anchorRef={threadAnchorRef}
+          spotlightRef={slackThreadSpotlightRef}
           slackUrl={slackUrlTrimmed}
           milestoneName={milestone.name}
           status={slackThread.status}
@@ -620,6 +785,7 @@ export function MilestoneRow({
         channelId={goalChannelIdTrimmed}
         channelName={goalSlackChannelName}
         people={people}
+        spotlightRef={slackThreadSpotlightRef}
       />
     </div>
   );

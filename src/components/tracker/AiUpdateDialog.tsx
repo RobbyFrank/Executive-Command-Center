@@ -498,37 +498,37 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
               </button>
             </div>
           ) : (
-            <div className="flex items-end gap-2">
-              <div className="relative min-w-0 flex-1">
-                <label htmlFor="ai-update-answer" className="sr-only">
-                  Your answer (Shift+Enter for a new line)
-                </label>
-                <textarea
-                  id="ai-update-answer"
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  rows={4}
-                  placeholder="Your answer… (Shift+Enter for a new line)"
-                  disabled={loading}
-                  spellCheck
-                  className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
-                />
+            <div className="flex min-w-0 flex-col gap-2">
+              <label htmlFor="ai-update-answer" className="sr-only">
+                Your answer (Shift+Enter for a new line)
+              </label>
+              <textarea
+                id="ai-update-answer"
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                rows={4}
+                placeholder="Your answer… (Shift+Enter for a new line)"
+                disabled={loading}
+                spellCheck
+                className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={loading || !input.trim()}
+                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Send
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={loading || !input.trim()}
-                className="shrink-0 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Send
-              </button>
             </div>
           )}
         </div>

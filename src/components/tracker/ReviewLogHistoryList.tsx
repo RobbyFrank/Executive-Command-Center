@@ -1,5 +1,5 @@
 import type { ReviewLogEntry } from "@/lib/types/tracker";
-import { formatLastReviewedHint } from "@/lib/reviewStaleness";
+import { formatIsoTimestampHint } from "@/lib/formatIsoTimestampHint";
 import { cn } from "@/lib/utils";
 
 interface ReviewLogHistoryListProps {
@@ -41,7 +41,7 @@ export function ReviewLogHistoryList({
               compact ? "text-[10px] leading-none" : "text-[11px]"
             )}
           >
-            {formatLastReviewedHint(e.at)}
+            {formatIsoTimestampHint(e.at)}
           </div>
           <p
             className={cn(

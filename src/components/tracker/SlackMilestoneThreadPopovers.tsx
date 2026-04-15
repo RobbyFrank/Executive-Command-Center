@@ -13,6 +13,8 @@ export type SlackPingMode = "ping" | "nudge";
 
 interface SlackMilestoneThreadPopoversProps {
   anchorRef: RefObject<HTMLButtonElement | null>;
+  /** Row/card to keep clear of the dimmed overlay (defaults to Slack control only). */
+  spotlightRef?: RefObject<HTMLElement | null>;
   slackUrl: string;
   milestoneName: string;
   status: SlackThreadStatusOk | null;
@@ -45,6 +47,7 @@ interface SlackMilestoneThreadPopoversProps {
 /** Popover + ping/nudge dialog wired to an external anchor (e.g. inline thread summary). */
 export function SlackMilestoneThreadPopovers({
   anchorRef,
+  spotlightRef,
   slackUrl,
   milestoneName,
   status,
@@ -71,6 +74,7 @@ export function SlackMilestoneThreadPopovers({
         open={popoverOpen}
         onClose={() => onPopoverOpenChange(false)}
         anchorRef={anchorRef}
+        spotlightRef={spotlightRef}
         slackUrl={slackUrl}
         milestoneName={milestoneName}
         status={status}

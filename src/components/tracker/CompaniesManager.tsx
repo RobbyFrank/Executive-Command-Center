@@ -14,7 +14,7 @@ import {
   momentumTierFromScore,
 } from "@/lib/companyMomentum";
 import { InlineEditCell } from "./InlineEditCell";
-import { ConfirmDeletePopover } from "./ConfirmDeletePopover";
+import { CompanyRowMenu } from "./CompanyRowMenu";
 import { LocalImageField } from "./LocalImageField";
 import { MomentumBar } from "./MomentumBar";
 import {
@@ -23,7 +23,9 @@ import {
   deleteCompany,
 } from "@/server/actions/tracker";
 import { CompanyDescriptionGenerateExtras } from "./CompanyDescriptionGenerateExtras";
-import { Building2, Pin, Plus, Rocket } from "lucide-react";
+import { RoadmapViewProvider } from "./roadmap-view-context";
+import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
+import { Building2, Plus, Rocket } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatWebsiteFaviconDisplay } from "@/lib/formatWebsiteDisplay";
 
@@ -39,14 +41,13 @@ const EMPTY_STATS: CompanyDirectoryStats = {
   projectsWithAtRisk: 0,
   milestonesDone: 0,
   milestonesTotal: 0,
-  recentlyReviewed: 0,
   momentumScore: 0,
 };
 
 const MOMENTUM_SECTION = {
   title: "By momentum",
   mrrRange:
-    "Highest composite score first (active work, spotlight, milestones, recent reviews; at-risk reduces score)",
+    "Highest composite score first (active work, spotlight, milestones; at-risk reduces score)",
 } as const;
 
 type CompaniesViewMode = "mrr_tier" | "momentum";
@@ -160,47 +161,73 @@ export function CompaniesManager({
 
   if (companies.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
-        <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
-          <Building2 className="h-7 w-7 text-zinc-500" />
+      <RoadmapViewProvider>
+        <RoadmapStickyToolbar>
+          <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h1 className="text-xl font-bold text-zinc-100">Companies</h1>
+            <span className="text-sm font-normal text-zinc-500">
+              Directory · names, sites, logos, dates, and momentum.
+            </span>
+          </div>
+        </RoadmapStickyToolbar>
+        <div className="min-w-0 max-w-full px-6 pb-6">
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
+            <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
+              <Building2 className="h-7 w-7 text-zinc-500" />
+            </div>
+            <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No companies yet</h2>
+            <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
+              Companies are the building blocks of your portfolio. Add your first company to start tracking revenue, goals, and momentum.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleAddCompany()}
+              className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              <Rocket className="h-4 w-4" />
+              Add your first company
+            </button>
+          </div>
         </div>
-        <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No companies yet</h2>
-        <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
-          Companies are the building blocks of your portfolio. Add your first company to start tracking revenue, goals, and momentum.
-        </p>
-        <button
-          type="button"
-          onClick={() => void handleAddCompany()}
-          className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
-        >
-          <Rocket className="h-4 w-4" />
-          Add your first company
-        </button>
-      </div>
+      </RoadmapViewProvider>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <select
-          id="companies-view-mode"
-          value={viewMode}
-          onChange={(e) =>
-            setViewMode(e.target.value as CompaniesViewMode)
-          }
-          aria-label="Group companies by MRR tier or momentum"
-          className={cn(
-            "cursor-pointer rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-1.5 text-xs font-medium text-zinc-200",
-            "transition-colors hover:border-zinc-600 hover:text-zinc-100",
-            "focus:outline-none focus:ring-2 focus:ring-zinc-500/50"
-          )}
-        >
-          <option value="mrr_tier">Group by MRR tier</option>
-          <option value="momentum">Sort by momentum</option>
-        </select>
-      </div>
+    <RoadmapViewProvider>
+      <RoadmapStickyToolbar>
+        <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <h1 className="text-xl font-bold text-zinc-100">Companies</h1>
+          <span className="text-sm font-normal text-zinc-500">
+            Directory · names, sites, logos, dates, and momentum.
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+          <div className="min-w-0">
+            <label htmlFor="companies-view-mode" className="sr-only">
+              Group companies by MRR tier or momentum
+            </label>
+            <select
+              id="companies-view-mode"
+              value={viewMode}
+              onChange={(e) =>
+                setViewMode(e.target.value as CompaniesViewMode)
+              }
+              aria-label="Group companies by MRR tier or momentum"
+              className={cn(
+                "min-h-[2.25rem] w-full min-w-[12rem] cursor-pointer rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-sm font-medium text-zinc-200",
+                "transition-colors hover:border-zinc-600 hover:text-zinc-100",
+                "focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              )}
+            >
+              <option value="mrr_tier">Group by MRR tier</option>
+              <option value="momentum">Sort by momentum</option>
+            </select>
+          </div>
+        </div>
+      </RoadmapStickyToolbar>
 
+      <div className="min-w-0 max-w-full px-6 pb-6">
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 max-w-full overflow-x-auto">
         <div
           className={`${companyRowGridClass} border-b border-zinc-800 bg-zinc-900/80 text-xs font-medium text-zinc-500 border-l-zinc-800`}
@@ -397,33 +424,18 @@ export function CompaniesManager({
                       />
                     </div>
 
-                    <div className="justify-self-end flex items-center gap-0.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => void handleTogglePin(company)}
-                        className={cn(
-                          "rounded p-1.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-500/50",
-                          company.pinned
-                            ? "text-amber-400 hover:bg-zinc-800"
-                            : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80"
-                        )}
-                        aria-label={
-                          company.pinned ? "Unpin company" : "Pin company"
-                        }
-                        aria-pressed={company.pinned}
-                        title={company.pinned ? "Unpin from top" : "Pin to top"}
-                      >
-                        <Pin className="h-4 w-4" />
-                      </button>
-                      <ConfirmDeletePopover
-                        entityName={company.name}
-                        disabled={hasGoals}
-                        disabledReason={
+                    <div className="justify-self-end flex items-center shrink-0">
+                      <CompanyRowMenu
+                        companyName={company.name}
+                        pinned={company.pinned}
+                        deleteDisabled={hasGoals}
+                        deleteDisabledReason={
                           hasGoals
                             ? `This company has ${st.goals} goal${st.goals === 1 ? "" : "s"}. Delete or move those goals first.`
                             : undefined
                         }
-                        onConfirm={() => deleteCompany(company.id)}
+                        onTogglePin={() => handleTogglePin(company)}
+                        onDelete={() => deleteCompany(company.id)}
                       />
                     </div>
                   </div>
@@ -434,7 +446,7 @@ export function CompaniesManager({
         ))}
       </div>
 
-      <div className="px-4 py-3">
+      <div className="pt-3">
         <button
           type="button"
           onClick={() => void handleAddCompany()}
@@ -444,6 +456,7 @@ export function CompaniesManager({
           Add company
         </button>
       </div>
-    </div>
+      </div>
+    </RoadmapViewProvider>
   );
 }

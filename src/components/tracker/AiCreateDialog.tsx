@@ -3,12 +3,19 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { X, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
+import {
+  SlackThreadSpotlightBackdrop,
+  readSpotlightHole,
+  type SlackThreadSpotlightHole,
+} from "./SlackThreadSpotlightBackdrop";
 
 type MessageRole = "user" | "assistant";
 interface Message {
@@ -76,6 +83,8 @@ interface AiCreateDialogProps {
   goalId?: string;
   onCreated?: (id: string) => void;
   onClose: () => void;
+  /** Company header (new goal) or goal header (new project) — left clear while the dialog is open. */
+  spotlightRef?: RefObject<HTMLElement | null>;
 }
 
 export function AiCreateDialog({
@@ -84,6 +93,7 @@ export function AiCreateDialog({
   goalId,
   onCreated,
   onClose,
+  spotlightRef,
 }: AiCreateDialogProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -92,6 +102,11 @@ export function AiCreateDialog({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [spotlightGeo, setSpotlightGeo] = useState<{
+    hole: SlackThreadSpotlightHole;
+    vw: number;
+    vh: number;
+  } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -101,6 +116,41 @@ export function AiCreateDialog({
     const id = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(id);
   }, []);
+
+  useLayoutEffect(() => {
+    const el = spotlightRef?.current ?? null;
+    if (!el || typeof window === "undefined") {
+      setSpotlightGeo(null);
+      return;
+    }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const hole = readSpotlightHole(el, el);
+    if (!hole) {
+      setSpotlightGeo(null);
+      return;
+    }
+    setSpotlightGeo({ hole, vw, vh });
+  }, [spotlightRef]);
+
+  useEffect(() => {
+    const el = spotlightRef?.current ?? null;
+    if (!el) return;
+    const onScrollOrResize = () => {
+      if (typeof window === "undefined") return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const hole = readSpotlightHole(el, el);
+      if (!hole) return;
+      setSpotlightGeo({ hole, vw, vh });
+    };
+    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [spotlightRef]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -287,11 +337,21 @@ export function AiCreateDialog({
 
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      {spotlightGeo ? (
+        <SlackThreadSpotlightBackdrop
+          hole={spotlightGeo.hole}
+          winW={spotlightGeo.vw}
+          winH={spotlightGeo.vh}
+          backdropZIndex={40}
+          onDismiss={onClose}
+        />
+      ) : (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm motion-reduce:backdrop-blur-none"
+          aria-hidden
+          onClick={onClose}
+        />
+      )}
 
       {/* Dialog */}
       <div
@@ -462,37 +522,37 @@ export function AiCreateDialog({
               </button>
             </div>
           ) : (
-            <div className="flex items-end gap-2">
-              <div className="relative min-w-0 flex-1">
-                <label htmlFor="ai-create-answer" className="sr-only">
-                  Your answer (Shift+Enter for a new line)
-                </label>
-                <textarea
-                  id="ai-create-answer"
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  rows={4}
-                  placeholder="Your answer… (Shift+Enter for a new line)"
-                  disabled={loading}
-                  spellCheck
-                  className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
-                />
+            <div className="flex min-w-0 flex-col gap-2">
+              <label htmlFor="ai-create-answer" className="sr-only">
+                Your answer (Shift+Enter for a new line)
+              </label>
+              <textarea
+                id="ai-create-answer"
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                rows={4}
+                placeholder="Your answer… (Shift+Enter for a new line)"
+                disabled={loading}
+                spellCheck
+                className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={loading || !input.trim()}
+                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Send
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={loading || !input.trim()}
-                className="shrink-0 rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Send
-              </button>
             </div>
           )}
         </div>

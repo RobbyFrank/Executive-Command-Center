@@ -67,8 +67,6 @@ export interface CompanyDirectoryStats {
   projectsWithAtRisk: number;
   milestonesDone: number;
   milestonesTotal: number;
-  /** Goals + projects with lastReviewed within the momentum window. */
-  recentlyReviewed: number;
   /** Composite 0–100 from @/lib/companyMomentum.computeMomentumScore */
   momentumScore: number;
 }

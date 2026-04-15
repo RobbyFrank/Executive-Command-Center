@@ -25,11 +25,16 @@ interface AutoConfidencePercentProps {
 }
 
 function barFillClass(pct: number): string {
-  if (pct <= 0) return "bg-red-700";
+  if (pct <= 0) return "bg-red-600";
   if (pct >= 80) return "bg-emerald-500";
   if (pct >= 60) return "bg-sky-500";
   if (pct >= 40) return "bg-amber-500";
   return "bg-zinc-500";
+}
+
+/** At 0% the bar has no width, so the track + label must carry the critical affordance. */
+function isZeroConfidenceDisplay(pct: number): boolean {
+  return pct <= 0;
 }
 
 /**
@@ -43,6 +48,7 @@ export function AutoConfidencePercent({
   const panelId = useId();
   const pct = confidenceScoreToPercent(score);
   const fillClass = barFillClass(pct);
+  const zeroDisplay = isZeroConfidenceDisplay(pct);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,7 +142,9 @@ export function AutoConfidencePercent({
         type="button"
         className={cn(
           "w-full min-w-0 rounded-md border-0 bg-transparent px-0.5 py-0.5 text-left font-inherit outline-none transition-colors",
-          "hover:bg-zinc-800/50 focus-visible:ring-2 focus-visible:ring-sky-600/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+          zeroDisplay
+            ? "hover:bg-red-950/40 focus-visible:ring-2 focus-visible:ring-red-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+            : "hover:bg-zinc-800/50 focus-visible:ring-2 focus-visible:ring-sky-600/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
           className
         )}
         aria-label={explanation.ariaLabel}
@@ -148,7 +156,12 @@ export function AutoConfidencePercent({
         onBlur={scheduleClose}
       >
         <div
-          className="relative h-4 w-full min-w-0 overflow-hidden rounded-full bg-zinc-800/90"
+          className={cn(
+            "relative h-4 w-full min-w-0 overflow-hidden rounded-full",
+            zeroDisplay
+              ? "bg-red-950/70 ring-1 ring-inset ring-red-500/45 shadow-[inset_0_1px_8px_rgba(127,29,29,0.35)]"
+              : "bg-zinc-800/90"
+          )}
           aria-hidden
         >
           <div
@@ -158,7 +171,12 @@ export function AutoConfidencePercent({
             )}
             style={{ width: `${pct}%` }}
           />
-          <span className="relative z-10 flex h-full w-full items-center justify-center text-[9px] font-semibold tabular-nums text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none">
+          <span
+            className={cn(
+              "relative z-10 flex h-full w-full items-center justify-center text-[9px] font-semibold tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none",
+              zeroDisplay ? "text-red-100" : "text-zinc-100"
+            )}
+          >
             {pct}%
           </span>
         </div>

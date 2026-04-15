@@ -6,7 +6,8 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { Company, CompanyWithGoals, Person } from "@/lib/types/tracker";
+import type { Company, CompanyWithGoals, Person, Priority } from "@/lib/types/tracker";
+import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
 import { CompanySection } from "./CompanySection";
 import { CompanyFilterMultiSelect } from "./CompanyFilterMultiSelect";
 import { DueDateFilterSelect } from "./DueDateFilterSelect";
@@ -19,6 +20,7 @@ import {
   type TrackerExpandPreset,
 } from "./tracker-expand-context";
 import { RoadmapViewProvider } from "./roadmap-view-context";
+import { RoadmapStickyBelowToolbarGap } from "./RoadmapStickyBelowToolbarGap";
 import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
 import { RoadmapExpandModeSelect } from "./RoadmapExpandModeSelect";
 import {
@@ -409,7 +411,6 @@ export function TrackerView({
       at_risk: "At risk",
       spotlight: "Spotlight",
       unassigned: "Unassigned",
-      need_review: "Need review",
       close_watch: "Close watch",
       zombie: "Zombie",
       blocked_by_dep: "Blocked (dependency)",
@@ -421,7 +422,12 @@ export function TrackerView({
   }, [statusTagFilterIds]);
 
   const priorityFilterLabel = useMemo(
-    () => (priorityFilterIds.length === 0 ? "" : priorityFilterIds.join(", ")),
+    () =>
+      priorityFilterIds.length === 0
+        ? ""
+        : priorityFilterIds
+            .map((id) => PRIORITY_MENU_LABEL[id as Priority] ?? id)
+            .join(", "),
     [priorityFilterIds]
   );
 
@@ -650,10 +656,8 @@ export function TrackerView({
         </div>
       </RoadmapStickyToolbar>
 
-      {/* `overflow-x-auto` alone makes `overflow-y` compute to `auto`, which creates a scroll
-          container and breaks nested `position: sticky` vs `main` (Roadmap column headers).
-          `overflow-y-clip` keeps horizontal scroll without a vertical scrollport. */}
-      <div className="min-w-0 max-w-full overflow-x-auto overflow-y-clip overscroll-x-contain px-6 pb-6">
+      <div className="min-w-0 max-w-full px-6 pb-6">
+        <RoadmapStickyBelowToolbarGap />
         {hierarchy.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
             <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">

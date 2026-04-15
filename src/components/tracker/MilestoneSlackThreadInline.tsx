@@ -105,7 +105,7 @@ export const MilestoneSlackThreadInline = forwardRef<
       type="button"
       onClick={onOpen}
       className={cn(
-        "group/inline flex min-w-0 w-full max-w-full items-center justify-start rounded-md py-0.5 pl-0 pr-1 text-left transition-colors",
+        "group/inline flex min-w-0 w-max max-w-full items-center justify-start rounded-md py-0.5 pl-0 pr-1 text-left transition-colors",
         compact ? "min-h-6 gap-1" : "min-h-7 gap-1.5",
         "hover:bg-zinc-800/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
       )}

@@ -13,10 +13,12 @@ export default async function TeamPage() {
   ]);
 
   return (
-    <TeamRosterManager
-      initialPeople={people}
-      companies={companies}
-      workloads={workloads}
-    />
+    <div className="-mx-6 -mb-6 min-h-0 min-w-0">
+      <TeamRosterManager
+        initialPeople={people}
+        companies={companies}
+        workloads={workloads}
+      />
+    </div>
   );
 }

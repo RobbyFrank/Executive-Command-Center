@@ -4,12 +4,13 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import {
   type SlackMemberRosterHint,
   type MilestoneLikelihoodRiskLevel,
@@ -19,11 +20,22 @@ import { displayInitials } from "@/lib/displayInitials";
 import { formatRelativeCalendarDate } from "@/lib/relativeCalendarDate";
 import { cn } from "@/lib/utils";
 import { SlackLogo } from "./SlackLogo";
+import {
+  SlackThreadSpotlightBackdrop,
+  readSpotlightHole,
+  type SlackThreadSpotlightHole,
+} from "./SlackThreadSpotlightBackdrop";
+
+export type { SlackThreadSpotlightHole } from "./SlackThreadSpotlightBackdrop";
 
 interface SlackThreadPopoverProps {
   open: boolean;
   onClose: () => void;
   anchorRef: RefObject<HTMLElement | null>;
+  /**
+   * Row/container to leave undimmed (spotlight). Omit to use the Slack control (`anchorRef`) only.
+   */
+  spotlightRef?: RefObject<HTMLElement | null>;
   slackUrl: string;
   milestoneName: string;
   status: SlackThreadStatusOk | null;
@@ -71,11 +83,16 @@ function nudgeButtonAccent(level: MilestoneLikelihoodRiskLevel | null): string {
   return "border-red-600/55 bg-red-950/45 text-red-100 hover:bg-red-900/55";
 }
 
+/** Matches Tailwind `max-h-[min(84vh,44rem)]` on the popover panel. */
+function popoverCssMaxHeightPx(winH: number): number {
+  return Math.min(winH * 0.84, 44 * 16);
+}
+
 function computePlacement(
   el: HTMLElement,
   winW: number,
   winH: number
-): { top: number; right: number } {
+): { top: number; right: number; maxHeightPx: number } {
   const rect = el.getBoundingClientRect();
   const panelW = Math.min(880, winW - 24);
   const rightEdge = winW - rect.right;
@@ -86,21 +103,55 @@ function computePlacement(
 
   const gap = 6;
   const margin = 8;
-  // Upper bound for “would this overflow?” — matches max-h ~ min(84vh, 44rem)
-  const maxPanelH = Math.min(winH * 0.84, 44 * 16);
+  const cssMaxH = popoverCssMaxHeightPx(winH);
+  /** Tallest panel we can draw without crossing top/bottom viewport margins. */
+  const maxFitH = Math.min(cssMaxH, winH - 2 * margin);
 
-  let top = rect.bottom + gap;
-  // Prefer below the anchor; if the panel would extend past the viewport, try above.
-  if (top + maxPanelH > winH - margin) {
-    const above = rect.top - gap - maxPanelH;
-    if (above >= margin) {
-      top = above;
+  const idealBelow = rect.bottom + gap;
+
+  let top: number;
+  // Prefer below the anchor; if the full panel would clip at the bottom, try above.
+  if (idealBelow + maxFitH <= winH - margin) {
+    top = idealBelow;
+  } else {
+    const idealAbove = rect.top - gap - maxFitH;
+    if (idealAbove >= margin) {
+      top = idealAbove;
+    } else {
+      // Neither side fits the ideal height: pin the panel so its bottom stays in view.
+      top = Math.max(margin, winH - margin - maxFitH);
     }
   }
+
+  // Never extend past the bottom safe inset (handles short viewports and rounding).
+  const maxHeightPx = Math.min(cssMaxH, Math.max(0, winH - top - margin));
 
   return {
     top,
     right: clampedRight,
+    maxHeightPx,
+  };
+}
+
+type SlackThreadPopoverGeometry = {
+  placement: { top: number; right: number; maxHeightPx: number };
+  spotlight: { hole: SlackThreadSpotlightHole; vw: number; vh: number };
+};
+
+function measurePopoverGeometry(
+  anchorEl: HTMLElement,
+  spotlightEl: HTMLElement | null,
+  winW: number,
+  winH: number
+): SlackThreadPopoverGeometry {
+  const hole = readSpotlightHole(spotlightEl, anchorEl);
+  return {
+    placement: computePlacement(anchorEl, winW, winH),
+    spotlight: {
+      hole: hole!,
+      vw: winW,
+      vh: winH,
+    },
   };
 }
 
@@ -187,6 +238,7 @@ export function SlackThreadPopover({
   open,
   onClose,
   anchorRef,
+  spotlightRef,
   slackUrl,
   milestoneName,
   status,
@@ -203,35 +255,45 @@ export function SlackThreadPopover({
   likelihoodError,
 }: SlackThreadPopoverProps) {
   const popoverId = useId();
-  const [placement, setPlacement] = useState<{
-    top: number;
-    right: number;
-  } | null>(null);
+  const [geometry, setGeometry] = useState<SlackThreadPopoverGeometry | null>(
+    null
+  );
   const targetTrim = targetDate.trim();
   const showDeadlineBlock = Boolean(targetTrim);
 
+  /** Parents often pass inline `() => refresh()`; must not be an effect dep or every re-render re-fetches. */
+  const onRefreshStatusRef = useRef(onRefreshStatus);
+  onRefreshStatusRef.current = onRefreshStatus;
+
   useLayoutEffect(() => {
     if (!open) {
-      setPlacement(null);
+      setGeometry(null);
       return;
     }
     const el = anchorRef.current;
     if (!el || typeof window === "undefined") return;
-    setPlacement(computePlacement(el, window.innerWidth, window.innerHeight));
-  }, [open, anchorRef]);
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    setGeometry(
+      measurePopoverGeometry(el, spotlightRef?.current ?? null, winW, winH)
+    );
+  }, [open, anchorRef, spotlightRef]);
 
+  /** Refresh once when the dialog opens — not on every parent render while it stays open. */
   useEffect(() => {
     if (!open) return;
-    onRefreshStatus();
-  }, [open, onRefreshStatus]);
+    onRefreshStatusRef.current();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onScrollOrResize = () => {
       const el = anchorRef.current;
       if (!el || typeof window === "undefined") return;
-      setPlacement(
-        computePlacement(el, window.innerWidth, window.innerHeight)
+      const winW = window.innerWidth;
+      const winH = window.innerHeight;
+      setGeometry(
+        measurePopoverGeometry(el, spotlightRef?.current ?? null, winW, winH)
       );
     };
     window.addEventListener("resize", onScrollOrResize);
@@ -240,45 +302,41 @@ export function SlackThreadPopover({
       window.removeEventListener("resize", onScrollOrResize);
       document.removeEventListener("scroll", onScrollOrResize, true);
     };
-  }, [open, anchorRef]);
+  }, [open, anchorRef, spotlightRef]);
 
   const portal =
     open &&
-    placement &&
+    geometry &&
     typeof document !== "undefined" &&
     createPortal(
       <>
-        <div
-          className="fixed inset-0 z-[200]"
-          aria-hidden
-          onClick={() => onClose()}
+        <SlackThreadSpotlightBackdrop
+          hole={geometry.spotlight.hole}
+          winW={geometry.spotlight.vw}
+          winH={geometry.spotlight.vh}
+          onDismiss={onClose}
         />
         <div
           id={popoverId}
           role="dialog"
           aria-label="Slack thread"
-          className="fixed z-[210] flex max-h-[min(84vh,44rem)] w-[min(55rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/40"
-          style={{ top: placement.top, right: placement.right }}
+          className="fixed z-[210] flex w-[min(55rem,calc(100vw-1.5rem))] min-h-0 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/40"
+          style={{
+            top: geometry.placement.top,
+            right: geometry.placement.right,
+            maxHeight: geometry.placement.maxHeightPx,
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="shrink-0 px-4 pt-3.5 pb-2.5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <SlackLogo className="h-3.5 w-3.5 opacity-95" />
                 <p className="text-[13px] font-semibold tracking-tight text-zinc-100">
                   Slack thread
                 </p>
               </div>
-              <a
-                href={slackUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-zinc-500 hover:text-zinc-300"
-                title="Open in Slack"
-              >
-                Open <ExternalLink className="h-2.5 w-2.5" aria-hidden />
-              </a>
             </div>
             <p className="mt-0.5 text-[11px] text-zinc-500">
               {milestoneName}
@@ -440,6 +498,28 @@ export function SlackThreadPopover({
 
             {/* Right: Slack messages */}
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto border-t border-zinc-800/90 px-4 py-3 lg:border-t-0 lg:pl-4">
+              <div className="mb-2.5 flex items-center justify-between gap-3">
+                <p className="min-w-0 flex-1 text-[11px] leading-snug text-zinc-500">
+                  {status && status.recentMessages.length > 0
+                    ? `Last ${status.recentMessages.length} ${
+                        status.recentMessages.length === 1 ? "reply" : "replies"
+                      }`
+                    : "\u00a0"}
+                </p>
+                <a
+                  href={slackUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-zinc-400 transition-colors hover:text-zinc-200"
+                  title="Open this thread in Slack"
+                >
+                  View in Slack
+                  <ArrowUpRight
+                    className="h-3 w-3 opacity-90"
+                    aria-hidden
+                  />
+                </a>
+              </div>
               {status && status.recentMessages.length > 0 ? (
                 <div className="space-y-2">
                   {status.recentMessages.map((m, i) => (

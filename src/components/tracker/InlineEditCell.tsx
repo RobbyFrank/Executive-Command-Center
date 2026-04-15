@@ -24,6 +24,7 @@ import {
   type CellHoverTooltipEditExtrasContext,
   type CellHoverTooltipHandle,
 } from "./CellHoverTooltip";
+import type { OverlaySelectFormatContext } from "./overlaySelectTypes";
 
 /** Split after the last space so the final word can stay on one line with a trailing inline control. */
 function splitHeadAndLastWord(text: string): { head: string; last: string } {
@@ -47,7 +48,10 @@ interface InlineEditCellProps {
   displayClassName?: string;
   emptyLabel?: ReactNode;
   /** When set, used for the collapsed (non-editing) display instead of raw `value`. */
-  formatDisplay?: (value: string) => ReactNode;
+  formatDisplay?: (
+    value: string,
+    ctx?: OverlaySelectFormatContext
+  ) => ReactNode;
   /** Extra classes for the collapsed control (e.g. compact icon trigger). */
   collapsedButtonClassName?: string;
   /** Optional title on the collapsed control (e.g. owner name when showing only a photo). */
@@ -390,7 +394,10 @@ export function InlineEditCell({
                       if (opt.value !== value) onSave(opt.value);
                     }}
                   >
-                    {formatDisplay!(opt.value)}
+                    {formatDisplay!(opt.value, {
+                      role: "option",
+                      isSelected: opt.value === value,
+                    })}
                   </button>
                 );
               })}
@@ -430,7 +437,12 @@ export function InlineEditCell({
             overlaySelectOpen && "ring-1 ring-blue-600"
           )}
         >
-          {value.trim() ? formatDisplay!(value) : resolvedEmptyLabel}
+          {value.trim()
+            ? formatDisplay!(value, {
+                role: "trigger",
+                isSelected: true,
+              })
+            : resolvedEmptyLabel}
         </button>
         {overlayListbox}
         <ChevronDown

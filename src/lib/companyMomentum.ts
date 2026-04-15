@@ -1,8 +1,3 @@
-import { parseLastReviewed } from "@/lib/reviewStaleness";
-
-/** Days within which a goal/project review counts toward “recent” momentum. */
-export const MOMENTUM_RECENT_REVIEW_DAYS = 14;
-
 const IN_PROGRESS = "In Progress" as const;
 
 export type MomentumTier = "high" | "moderate" | "low" | "dormant";
@@ -18,17 +13,6 @@ export interface MomentumScoreInput {
   projectsWithAtRisk: number;
   milestonesDone: number;
   milestonesTotal: number;
-  recentlyReviewed: number;
-}
-
-export function isReviewedWithinDays(
-  lastReviewed: string,
-  days: number
-): boolean {
-  const d = parseLastReviewed(lastReviewed);
-  if (!d) return false;
-  const ms = days * 24 * 60 * 60 * 1000;
-  return Date.now() - d.getTime() < ms;
 }
 
 /** Goal or project counts as active for momentum when status is In Progress. */
@@ -37,7 +21,7 @@ export function isActiveStatus(status: string): boolean {
 }
 
 /**
- * Composite 0–100 score from activity, spotlight, milestones, reviews, and at-risk penalty.
+ * Composite 0–100 score from activity, spotlight, milestones, and at-risk penalty.
  */
 export function computeMomentumScore(input: MomentumScoreInput): number {
   const gTotal = input.goals;
@@ -57,9 +41,6 @@ export function computeMomentumScore(input: MomentumScoreInput): number {
       ? input.milestonesDone / input.milestonesTotal
       : 0;
 
-  const recentRatio =
-    totalItems > 0 ? input.recentlyReviewed / totalItems : 0;
-
   const riskTotal = input.goalsWithAtRisk + input.projectsWithAtRisk;
   const riskPenalty = Math.min(30, riskTotal * 8);
 
@@ -67,8 +48,7 @@ export function computeMomentumScore(input: MomentumScoreInput): number {
     30 * activeGoalRatio +
     25 * activeProjectRatio +
     20 * spotlightNorm +
-    15 * milestoneRatio +
-    10 * recentRatio;
+    25 * milestoneRatio;
 
   score -= riskPenalty;
 
@@ -102,7 +82,6 @@ export function buildMomentumTooltip(input: MomentumScoreInput): string {
     `Active: ${input.activeGoals}/${input.goals} goals, ${input.activeProjects}/${input.projects} projects`,
     `Spotlight: ${input.goalsWithSpotlight + input.projectsWithSpotlight} · At risk: ${input.goalsWithAtRisk + input.projectsWithAtRisk}`,
     `Milestones: ${input.milestonesDone}/${input.milestonesTotal} done`,
-    `Reviewed (last ${MOMENTUM_RECENT_REVIEW_DAYS}d): ${input.recentlyReviewed} of ${input.goals + input.projects} items`,
   ];
   return lines.join("\n");
 }

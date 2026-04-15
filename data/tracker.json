@@ -103,7 +103,6 @@
       "priority": "P0",
       "executionMode": "Async",
       "slackChannel": "vd-sales",
-      "lastReviewed": "2026-04-10T07:10:02.824Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -121,7 +120,6 @@
       "priority": "P0",
       "executionMode": "Sync",
       "slackChannel": "",
-      "lastReviewed": "2026-04-09T22:52:54.693Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -139,7 +137,6 @@
       "priority": "P1",
       "executionMode": "Async",
       "slackChannel": "",
-      "lastReviewed": "2026-04-09T21:38:52.276Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -157,7 +154,6 @@
       "priority": "P1",
       "executionMode": "Async",
       "slackChannel": "",
-      "lastReviewed": "2026-04-10T07:10:11.892Z",
       "status": "In Progress",
       "atRisk": false,
       "spotlight": false
@@ -175,7 +171,6 @@
       "priority": "P0",
       "executionMode": "Async",
       "slackChannel": "",
-      "lastReviewed": "",
       "status": "Not Started",
       "atRisk": false,
       "spotlight": false
@@ -196,7 +191,6 @@
       "startDate": "2026-03-01",
       "targetDate": "",
       "slackUrl": "https://voicedrop-ai.slack.com/archives/C06BLQ2ML2V/p1775775929385229",
-      "lastReviewed": "2026-04-09T21:38:37.418Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -214,7 +208,6 @@
       "startDate": "2026-02-01",
       "targetDate": "",
       "slackUrl": "",
-      "lastReviewed": "2026-04-09T21:38:38.029Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -232,7 +225,6 @@
       "startDate": "2026-01-15",
       "targetDate": "2026-04-15",
       "slackUrl": "",
-      "lastReviewed": "2026-04-09T21:59:09.002Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -250,7 +242,6 @@
       "startDate": "",
       "targetDate": "2026-05-01",
       "slackUrl": "",
-      "lastReviewed": "2026-04-09T21:38:40.603Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -268,7 +259,6 @@
       "startDate": "2026-03-01",
       "targetDate": "2026-05-01",
       "slackUrl": "",
-      "lastReviewed": "2026-04-09T21:38:47.239Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -286,7 +276,6 @@
       "startDate": "",
       "targetDate": "",
       "slackUrl": "",
-      "lastReviewed": "",
       "atRisk": false,
       "spotlight": false
     },
@@ -304,7 +293,6 @@
       "startDate": "",
       "targetDate": "",
       "slackUrl": "",
-      "lastReviewed": "2026-04-10T00:38:08.273Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -322,7 +310,6 @@
       "startDate": "",
       "targetDate": "",
       "slackUrl": "",
-      "lastReviewed": "2026-04-10T00:38:09.367Z",
       "atRisk": false,
       "spotlight": false
     },
@@ -340,7 +327,6 @@
       "startDate": "",
       "targetDate": "",
       "slackUrl": "",
-      "lastReviewed": "",
       "atRisk": false,
       "spotlight": false
     }

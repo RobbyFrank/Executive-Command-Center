@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  forwardRef,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,6 +29,7 @@ import {
 import { GoalsColumnHeaders } from "./TrackerColumnHeaders";
 import { useRoadmapView } from "./roadmap-view-context";
 import {
+  ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX,
   ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
   TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
 } from "@/lib/tracker-sticky-layout";
@@ -82,7 +84,6 @@ export function CompanySection({
   const [newGoalTitleFocusId, setNewGoalTitleFocusId] = useState<
     string | null
   >(null);
-
   const handleGoalExpandedChange = useCallback(
     (goalId: string, isExpanded: boolean) => {
       setGoalExpandedById((prev) => {
@@ -111,6 +112,8 @@ export function CompanySection({
   const { stickyTopPx } = useRoadmapView();
   const toolbarPx =
     stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
+  /** Top offset for the company row and everything stacked below it (gap is above company, not inside toolbar). */
+  const stickyStackBasePx = toolbarPx + ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX;
   const companyContext = useContextMenu();
   const assistant = useAssistantOptional();
   const companyHeaderRef = useRef<HTMLDivElement>(null);
@@ -127,7 +130,7 @@ export function CompanySection({
     return () => ro.disconnect();
   }, []);
 
-  const goalsColumnStackTopPx = toolbarPx + companyHeaderPx;
+  const goalsColumnStackTopPx = stickyStackBasePx + companyHeaderPx;
   const roadmapGoalRowStickyTopPx =
     goalsColumnStackTopPx + TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX;
 
@@ -218,7 +221,7 @@ export function CompanySection({
       <div
         ref={companyHeaderRef}
         className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"
-        style={{ top: toolbarPx }}
+        style={{ top: stickyStackBasePx }}
       >
         <button
           type="button"
@@ -306,7 +309,9 @@ export function CompanySection({
       >
         <div className="mt-1">
           {company.goals.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8">
+            <div
+              className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8"
+            >
               <div
                 className={cn(
                   "w-full min-w-0",
@@ -347,6 +352,7 @@ export function CompanySection({
                   companyId={company.id}
                   onCreated={(id) => handleNewGoalRegistered(id)}
                   inline
+                  spotlightRef={companyHeaderRef}
                 />
               </div>
             </div>
@@ -366,7 +372,6 @@ export function CompanySection({
                     ownerWorkloadMap={ownerWorkloadMap}
                     roadmapGoalRowStickyTopPx={roadmapGoalRowStickyTopPx}
                     focusGoalTitleEditId={newGoalTitleFocusId}
-                    onGoalCreated={handleNewGoalRegistered}
                     initialExpanded={newGoalInitialExpandedById[goal.id]}
                     onExpandedChange={handleGoalExpandedChange}
                     stackPosition={
@@ -421,6 +426,7 @@ export function CompanySection({
                   type="goal"
                   companyId={company.id}
                   onCreated={(id) => handleNewGoalRegistered(id)}
+                  spotlightRef={companyHeaderRef}
                 />
               </CompanyAddGoalFooterRow>
             </>
@@ -433,17 +439,15 @@ export function CompanySection({
 }
 
 /** Keeps footer legible while portaled cell preview panels are open (pointer leaves `group/company`). */
-function CompanyAddGoalFooterRow({
-  className,
-  children,
-}: {
-  className?: string;
-  children: ReactNode;
-}) {
+const CompanyAddGoalFooterRow = forwardRef<
+  HTMLDivElement,
+  { className?: string; children: ReactNode }
+>(function CompanyAddGoalFooterRow({ className, children }, ref) {
   const overlay = useCompanySectionOverlayOptional();
   const portaledActive = (overlay?.overlayCount ?? 0) > 0;
   return (
     <div
+      ref={ref}
       className={cn(
         className,
         TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS,
@@ -453,4 +457,4 @@ function CompanyAddGoalFooterRow({
       {children}
     </div>
   );
-}
+});

@@ -1,6 +1,6 @@
 "use client";
 
-/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow. Goals after Pri: Cost of delay (w-28, above project Complexity), Confidence (w-28), Slack. Projects row omits the Confidence label (uses Goals row above). */
+/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow. Priority is w-28. Goals after Priority: Cost of delay (w-28, above project Complexity), Confidence (w-28), Slack. Projects row omits the Confidence label (uses Goals row above). */
 
 import { SlackLogo } from "./SlackLogo";
 import { RoadmapColumnHeader } from "./RoadmapColumnHeader";
@@ -49,15 +49,15 @@ export function GoalsColumnHeaders({
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-[5.85rem] shrink-0 min-w-0"
-          tooltip="DRI — single person accountable for the goal's outcome. Project-level owners are tracked separately."
+          tooltip="Owner — single person accountable for the goal's outcome. Project-level owners are tracked separately."
         >
-          DRI
+          Owner
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-14 shrink-0"
-          tooltip="Priority — P0 is most urgent; higher numbers are lower priority."
+          className="w-28 shrink-0 flex items-center justify-center pr-7"
+          tooltip="Priority — Urgent (P0) through Low (P3); stored as P0–P3."
         >
-          Pri
+          Priority
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-28 shrink-0 min-w-0"
@@ -109,13 +109,8 @@ export function ProjectsColumnHeaders({
         >
           Project
         </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-[5.85rem] shrink-0 min-w-0"
-          tooltip="Project owner — who is directly responsible for delivery (use goal DRI for outcome accountability)."
-        >
-          Owner
-        </RoadmapColumnHeader>
-        <div className="w-14 shrink-0" aria-hidden />
+        <div className="w-[5.85rem] shrink-0" aria-hidden />
+        <div className="w-28 shrink-0" aria-hidden />
         <RoadmapColumnHeader
           className="w-28 shrink-0 min-w-0"
           tooltip="Complexity — scope and difficulty of the work (Very high → Minimal)."
@@ -130,13 +125,13 @@ export function ProjectsColumnHeaders({
           Status
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-32 shrink-0"
+          className="w-32 shrink-0 -ml-1"
           tooltip="Progress — share of milestones marked done."
         >
           Progress
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-28 shrink-0"
+          className="w-28 shrink-0 ml-3"
           tooltip="Due date — same date as the last milestone with a target date; shown as a relative label (e.g. in 2 months) like milestone dates. Hover for the full date."
         >
           Due date

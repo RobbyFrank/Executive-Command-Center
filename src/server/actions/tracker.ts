@@ -12,17 +12,23 @@ import type {
   Milestone,
   Person,
 } from "@/lib/types/tracker";
-import {
-  computeMomentumScore,
-  isActiveStatus,
-  isReviewedWithinDays,
-  MOMENTUM_RECENT_REVIEW_DAYS,
-} from "@/lib/companyMomentum";
+import { computeMomentumScore, isActiveStatus } from "@/lib/companyMomentum";
 import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import { isValidHttpUrl } from "@/lib/httpUrl";
+import { isBlockingProjectIncomplete } from "@/lib/blocked-status";
 
 const repo = getRepository();
+
+/** True when this project has a blocking dependency whose milestones are not all done. */
+async function projectIsDependencyBlocked(projectId: string): Promise<boolean> {
+  const project = await repo.getProject(projectId);
+  if (!project) return false;
+  const blockerId = (project.blockedByProjectId ?? "").trim();
+  if (!blockerId) return false;
+  const blockerMilestones = await repo.getMilestonesByProject(blockerId);
+  return isBlockingProjectIncomplete(blockerMilestones);
+}
 
 /** When a milestone gets a real Slack thread URL, treat the project as started. */
 async function maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
@@ -92,20 +98,14 @@ export async function deleteCompany(
 // --- Goals ---
 
 export async function createGoal(
-  data: Omit<Goal, "id" | "lastReviewed" | "reviewLog" | "createdAt"> &
-    Partial<Pick<Goal, "lastReviewed" | "reviewLog">>
+  data: Omit<Goal, "id" | "reviewLog" | "createdAt"> &
+    Partial<Pick<Goal, "reviewLog">>
 ): Promise<Goal> {
   const id = uuid();
-  const trimmedReviewed = data.lastReviewed?.trim() ?? "";
-  const lastReviewed =
-    trimmedReviewed !== ""
-      ? trimmedReviewed
-      : new Date().toISOString();
   const createdAt = calendarDateTodayLocal();
   const goal = {
     id,
     ...data,
-    lastReviewed,
     reviewLog: data.reviewLog ?? [],
     createdAt,
   };
@@ -159,20 +159,14 @@ export async function createProject(
   data: Omit<
     Project,
     | "id"
-    | "lastReviewed"
     | "reviewLog"
     | "createdAt"
     | "slackUrl"
     | "blockedByProjectId"
   > &
-    Partial<Pick<Project, "lastReviewed" | "reviewLog" | "slackUrl">>
+    Partial<Pick<Project, "reviewLog" | "slackUrl">>
 ): Promise<Project> {
   const id = uuid();
-  const trimmedReviewed = data.lastReviewed?.trim() ?? "";
-  const lastReviewed =
-    trimmedReviewed !== ""
-      ? trimmedReviewed
-      : new Date().toISOString();
   const createdAt = calendarDateTodayLocal();
   const project = {
     id,
@@ -180,7 +174,6 @@ export async function createProject(
     blockedByProjectId: "",
     ...data,
     mirroredGoalIds: data.mirroredGoalIds ?? [],
-    lastReviewed,
     reviewLog: data.reviewLog ?? [],
     createdAt,
   };
@@ -200,7 +193,19 @@ export async function updateProject(
     }
   }
   const { createdAt: _omitCreatedAt, ...projectUpdates } = updates;
-  const result = await repo.updateProject(id, projectUpdates);
+
+  let next: Partial<Project> = { ...projectUpdates };
+  // `Blocked` is shown when a dependency blocks; it is not stored or set from the client.
+  if (next.status === "Blocked") {
+    const { status: _dropBlocked, ...rest } = next;
+    next = rest;
+  }
+  if (next.status !== undefined && (await projectIsDependencyBlocked(id))) {
+    const { status: _dropWhileBlocked, ...rest } = next;
+    next = rest;
+  }
+
+  const result = await repo.updateProject(id, next);
   revalidate();
   return result;
 }
@@ -335,53 +340,6 @@ export async function deletePerson(
   return { error: null };
 }
 
-// --- Mark as Reviewed ---
-
-/**
- * Records `lastReviewed` and optionally appends one dated note to `reviewLog`
- * (same timestamp as the review).
- */
-export async function markGoalReviewed(
-  id: string,
-  note?: string
-): Promise<Goal> {
-  const existing = await repo.getGoal(id);
-  if (!existing) {
-    throw new Error(`Goal ${id} not found`);
-  }
-  const ts = new Date().toISOString();
-  const trimmed = note?.trim();
-  const updates: Partial<Goal> = { lastReviewed: ts };
-  if (trimmed) {
-    updates.reviewLog = [
-      ...(existing.reviewLog ?? []),
-      { id: uuid(), at: ts, text: trimmed },
-    ];
-  }
-  return updateGoal(id, updates);
-}
-
-export async function markProjectReviewed(
-  id: string,
-  note?: string
-): Promise<Project> {
-  const existing = await repo.getProject(id);
-  if (!existing) {
-    throw new Error(`Project ${id} not found`);
-  }
-  const ts = new Date().toISOString();
-  const trimmed = note?.trim();
-  const updates: Partial<Project> = { lastReviewed: ts };
-  if (trimmed) {
-    updates.reviewLog = [
-      ...(existing.reviewLog ?? []),
-      { id: uuid(), at: ts, text: trimmed },
-    ];
-  }
-  return updateProject(id, updates);
-}
-
-/** Append a note without updating `lastReviewed`. */
 export async function appendGoalReviewNote(
   id: string,
   text: string
@@ -441,7 +399,6 @@ function emptyCompanyDirectoryStats(): CompanyDirectoryStats {
     projectsWithAtRisk: 0,
     milestonesDone: 0,
     milestonesTotal: 0,
-    recentlyReviewed: 0,
     momentumScore: 0,
   };
 }
@@ -481,9 +438,6 @@ export async function getCompanyStatsByCompanyId(): Promise<
     if (isActiveStatus(g.status)) row.activeGoals += 1;
     if (g.spotlight) row.goalsWithSpotlight += 1;
     if (g.atRisk) row.goalsWithAtRisk += 1;
-    if (isReviewedWithinDays(g.lastReviewed, MOMENTUM_RECENT_REVIEW_DAYS)) {
-      row.recentlyReviewed += 1;
-    }
     if (g.ownerId) ensureCompanySet(g.companyId).add(g.ownerId);
   }
 
@@ -496,9 +450,6 @@ export async function getCompanyStatsByCompanyId(): Promise<
     if (isActiveStatus(p.status)) row.activeProjects += 1;
     if (p.spotlight) row.projectsWithSpotlight += 1;
     if (p.atRisk) row.projectsWithAtRisk += 1;
-    if (isReviewedWithinDays(p.lastReviewed, MOMENTUM_RECENT_REVIEW_DAYS)) {
-      row.recentlyReviewed += 1;
-    }
     if (p.ownerId) ensureCompanySet(goal.companyId).add(p.ownerId);
   }
 

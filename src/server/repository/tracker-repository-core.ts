@@ -19,6 +19,7 @@ import { TrackerConcurrentModificationError } from "./errors";
 import { compareMilestonesByTargetDate } from "@/lib/milestoneSort";
 import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
 import { comparePriority } from "@/lib/prioritySort";
+import { sortProjectsBlockedUnderBlocker } from "@/lib/projectBlockedOrder";
 import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
 
 const MAX_COMMIT_ATTEMPTS = 12;
@@ -327,13 +328,10 @@ export class TrackerRepositoryCore implements TrackerRepository {
             p.goalId !== goal.id &&
             (p.mirroredGoalIds ?? []).includes(goal.id)
         );
-        const orderedPrimary = [...primary].sort((a, b) =>
-          comparePriority(a.priority, b.priority)
-        );
-        const orderedMirrors = [...mirrors].sort((a, b) =>
-          comparePriority(a.priority, b.priority)
-        );
-        const orderedProjects = [...orderedPrimary, ...orderedMirrors];
+        const orderedProjects = sortProjectsBlockedUnderBlocker([
+          ...primary,
+          ...mirrors,
+        ]);
         const projects: ProjectWithMilestones[] = orderedProjects.map(
           (project) => {
             const projectMilestones = data.milestones
@@ -351,6 +349,9 @@ export class TrackerRepositoryCore implements TrackerRepository {
             const blockerMilestones = blocker
               ? data.milestones.filter((m) => m.projectId === blocker.id)
               : [];
+            const isDepBlocked = Boolean(
+              blocker && isBlockingProjectIncomplete(blockerMilestones)
+            );
 
             return {
               ...project,
@@ -358,9 +359,10 @@ export class TrackerRepositoryCore implements TrackerRepository {
               milestones: projectMilestones,
               progress: milestoneProgressPercent(projectMilestones),
               isMirror: project.goalId !== goal.id,
+              ...(isDepBlocked ? { status: "Blocked" as const } : {}),
               ...(blocker
                 ? {
-                    isBlocked: isBlockingProjectIncomplete(blockerMilestones),
+                    isBlocked: isDepBlocked,
                     blockedByProjectName: blocker.name,
                   }
                 : {}),

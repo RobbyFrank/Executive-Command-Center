@@ -1,20 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   createMilestoneSlackThread,
-  draftMilestoneThreadMessage,
   getSlackThreadPosterPreviewIdentity,
-  reviseMilestoneThreadDraft,
 } from "@/server/actions/slack";
 import { formatSlackChannelHash } from "@/lib/slackDisplay";
 import type { Person } from "@/lib/types/tracker";
 import { cn } from "@/lib/utils";
 import { SlackDraftMessagePreview } from "./SlackDraftMessagePreview";
 import { SlackLogo } from "./SlackLogo";
+import {
+  SlackThreadSpotlightBackdrop,
+  readSpotlightHole,
+  type SlackThreadSpotlightHole,
+} from "./SlackThreadSpotlightBackdrop";
 
 type DraftViewMode = "preview" | "edit";
 
@@ -31,6 +40,8 @@ interface SlackCreateThreadDialogProps {
   /** Team roster: used to resolve `<@U…>` mentions in the preview. */
   people?: Person[];
   onCreated?: (slackUrl: string) => void;
+  /** Milestone row (or other container) to leave clear of the dimmed overlay. */
+  spotlightRef?: RefObject<HTMLElement | null>;
 }
 
 export function SlackCreateThreadDialog({
@@ -44,6 +55,7 @@ export function SlackCreateThreadDialog({
   channelName,
   people = [],
   onCreated,
+  spotlightRef,
 }: SlackCreateThreadDialogProps) {
   const [phase, setPhase] = useState<
     "idle" | "drafting" | "ready" | "revising" | "sending"
@@ -58,10 +70,62 @@ export function SlackCreateThreadDialog({
     avatarSrc: string | null;
   } | null>(null);
   const [previewAt, setPreviewAt] = useState(() => new Date());
+  const [spotlightGeo, setSpotlightGeo] = useState<{
+    hole: SlackThreadSpotlightHole;
+    vw: number;
+    vh: number;
+  } | null>(null);
+  const reviseAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!open) {
+      reviseAbortRef.current?.abort();
+      reviseAbortRef.current = null;
+    }
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setSpotlightGeo(null);
+      return;
+    }
+    const el = spotlightRef?.current ?? null;
+    if (!el || typeof window === "undefined") {
+      setSpotlightGeo(null);
+      return;
+    }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const hole = readSpotlightHole(el, el);
+    if (!hole) {
+      setSpotlightGeo(null);
+      return;
+    }
+    setSpotlightGeo({ hole, vw, vh });
+  }, [open, spotlightRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScrollOrResize = () => {
+      const el = spotlightRef?.current ?? null;
+      if (!el || typeof window === "undefined") return;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const hole = readSpotlightHole(el, el);
+      if (!hole) return;
+      setSpotlightGeo({ hole, vw, vh });
+    };
+    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [open, spotlightRef]);
 
   useEffect(() => {
     if (!open) {
@@ -89,49 +153,159 @@ export function SlackCreateThreadDialog({
     }
 
     setDraftView("preview");
-    let cancelled = false;
+    const ac = new AbortController();
     setPhase("drafting");
     setError(null);
     setDraft("");
     setReviseHint("");
 
     void (async () => {
-      const r = await draftMilestoneThreadMessage(milestoneId);
-      if (cancelled) return;
-      if (!r.ok) {
-        setError(r.error);
+      try {
+        const res = await fetch("/api/slack-draft-thread-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ milestoneId }),
+          signal: ac.signal,
+        });
+
+        if (!res.ok) {
+          let msg = `Request failed (${res.status})`;
+          try {
+            const j = (await res.json()) as { error?: string };
+            if (j.error) msg = j.error;
+          } catch {
+            /* ignore */
+          }
+          if (!ac.signal.aborted) {
+            setError(msg);
+            setPhase("ready");
+          }
+          return;
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) {
+          if (!ac.signal.aborted) {
+            setError("No response body");
+            setPhase("ready");
+          }
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let full = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          full += decoder.decode(value, { stream: true });
+          if (!ac.signal.aborted) setDraft(full);
+        }
+        full += decoder.decode();
+
+        if (ac.signal.aborted) return;
+        setDraft(full.trim());
         setPhase("ready");
-        return;
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setPhase("ready");
       }
-      setDraft(r.message);
-      setPhase("ready");
     })();
 
     return () => {
-      cancelled = true;
+      ac.abort();
     };
   }, [open, milestoneId]);
 
   if (!open) return null;
 
+  const tryDismissBackdrop = () => {
+    if (
+      phase !== "sending" &&
+      phase !== "drafting" &&
+      phase !== "revising"
+    ) {
+      onClose();
+    }
+  };
+
   const channelLabel = formatSlackChannelHash(channelName || channelId);
 
   const revise = async () => {
     const hint = reviseHint.trim();
-    if (!hint || phase === "revising") return;
+    if (!hint || phase === "revising" || phase === "drafting") return;
+
+    reviseAbortRef.current?.abort();
+    const ac = new AbortController();
+    reviseAbortRef.current = ac;
+
+    const previousDraft = draft;
     setPhase("revising");
     setError(null);
-    const r = await reviseMilestoneThreadDraft(milestoneId, draft, hint);
-    if (!r.ok) {
-      setError(r.error);
+    setDraft("");
+
+    try {
+      const res = await fetch("/api/slack-revise-thread-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          milestoneId,
+          currentDraft: previousDraft,
+          feedback: hint,
+        }),
+        signal: ac.signal,
+      });
+
+      if (!res.ok) {
+        let msg = `Request failed (${res.status})`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* ignore */
+        }
+        if (!ac.signal.aborted) {
+          setDraft(previousDraft);
+          setError(msg);
+          setPhase("ready");
+          toast.error(msg);
+        }
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        if (!ac.signal.aborted) {
+          setDraft(previousDraft);
+          setError("No response body");
+          setPhase("ready");
+        }
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let full = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        full += decoder.decode(value, { stream: true });
+        if (!ac.signal.aborted) setDraft(full);
+      }
+      full += decoder.decode();
+
+      if (ac.signal.aborted) return;
+      setDraft(full.trim());
+      setReviseHint("");
+      setDraftView("preview");
       setPhase("ready");
-      toast.error(r.error);
-      return;
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      setDraft(previousDraft);
+      setError(msg);
+      setPhase("ready");
+      toast.error(msg);
     }
-    setDraft(r.message);
-    setReviseHint("");
-    setDraftView("preview");
-    setPhase("ready");
   };
 
   const send = async () => {
@@ -153,17 +327,24 @@ export function SlackCreateThreadDialog({
 
   const layer = (
     <>
-      <div
-        className="fixed inset-0 z-[220] bg-black/60"
-        aria-hidden
-        onClick={() =>
-          phase !== "sending" && phase !== "drafting" && phase !== "revising"
-            ? onClose()
-            : undefined
-        }
-      />
+      {spotlightGeo ? (
+        <SlackThreadSpotlightBackdrop
+          hole={spotlightGeo.hole}
+          winW={spotlightGeo.vw}
+          winH={spotlightGeo.vh}
+          backdropZIndex={218}
+          onDismiss={tryDismissBackdrop}
+        />
+      ) : (
+        <div
+          className="fixed inset-0 z-[220] bg-black/60"
+          aria-hidden
+          onClick={tryDismissBackdrop}
+        />
+      )}
       <div
         role="dialog"
+        aria-busy={phase === "drafting" || phase === "revising"}
         aria-labelledby="slack-create-thread-title"
         className={cn(
           "fixed left-1/2 top-1/2 z-[230] flex w-[min(44rem,calc(100vw-1.5rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-y-auto rounded-xl border border-zinc-600 bg-zinc-900 shadow-xl shadow-black/50 sm:w-[min(48rem,calc(100vw-2rem))]",
@@ -177,13 +358,15 @@ export function SlackCreateThreadDialog({
               id="slack-create-thread-title"
               className="text-base font-semibold leading-snug text-zinc-100"
             >
-              Draft Slack thread with AI
+              Draft a new Slack thread with AI
             </h2>
             <button
               type="button"
               className="rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
               onClick={onClose}
-              disabled={phase === "sending" || phase === "drafting"}
+              disabled={
+                phase === "sending" || phase === "drafting" || phase === "revising"
+              }
               aria-label="Close"
             >
               <X className="h-5 w-5" />
@@ -219,16 +402,29 @@ export function SlackCreateThreadDialog({
           </div>
         </div>
 
-        {phase === "drafting" ? (
-          <div className="px-5 py-14 text-center sm:px-6">
-            <p className="text-sm text-zinc-400">
-              Drafting opening message with AI…
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-4 px-5 pb-4 pt-4 sm:px-6 sm:pt-4">
-              <div>
+        <>
+          <div className="space-y-4 px-5 pb-4 pt-4 sm:px-6 sm:pt-4">
+            {phase === "drafting" ? (
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg border border-zinc-700/80 bg-zinc-950/50 px-3.5 py-2.5 text-sm text-zinc-300",
+                  draft.trim() !== "" && "border-zinc-800/80 bg-transparent py-1.5"
+                )}
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2
+                  className="h-4 w-4 shrink-0 animate-spin text-violet-400"
+                  aria-hidden
+                />
+                <span>
+                  {draft.trim() === ""
+                    ? "Drafting a new Slack thread with AI…"
+                    : "Finishing draft…"}
+                </span>
+              </div>
+            ) : null}
+            <div>
                 <p
                   id="slack-draft-message-label"
                   className="mb-2 text-xs font-medium text-zinc-400"
@@ -244,11 +440,13 @@ export function SlackCreateThreadDialog({
                     type="button"
                     role="tab"
                     aria-selected={draftView === "preview"}
+                    disabled={phase === "drafting"}
                     className={cn(
                       "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       draftView === "preview"
                         ? "bg-zinc-700 text-zinc-100 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-300"
+                        : "text-zinc-500 hover:text-zinc-300",
+                      phase === "drafting" && "pointer-events-none opacity-50"
                     )}
                     onClick={() => setDraftView("preview")}
                   >
@@ -258,11 +456,13 @@ export function SlackCreateThreadDialog({
                     type="button"
                     role="tab"
                     aria-selected={draftView === "edit"}
+                    disabled={phase === "drafting"}
                     className={cn(
                       "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                       draftView === "edit"
                         ? "bg-zinc-700 text-zinc-100 shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-300"
+                        : "text-zinc-500 hover:text-zinc-300",
+                      phase === "drafting" && "pointer-events-none opacity-50"
                     )}
                     onClick={() => setDraftView("edit")}
                   >
@@ -288,7 +488,11 @@ export function SlackCreateThreadDialog({
                     id="slack-draft-body"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
-                    disabled={phase === "revising" || phase === "sending"}
+                    disabled={
+                      phase === "drafting" ||
+                      phase === "revising" ||
+                      phase === "sending"
+                    }
                     rows={14}
                     aria-labelledby="slack-draft-message-label"
                     className="min-h-[min(42vh,18rem)] w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3.5 py-3 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
@@ -306,21 +510,46 @@ export function SlackCreateThreadDialog({
                     type="text"
                     value={reviseHint}
                     onChange={(e) => setReviseHint(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      void revise();
+                    }}
                     placeholder="e.g. Shorter, mention the deadline, add a call to action…"
-                    disabled={phase === "revising" || phase === "sending"}
+                    disabled={
+                      phase === "drafting" ||
+                      phase === "revising" ||
+                      phase === "sending"
+                    }
                     className="min-h-[2.75rem] min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                   />
                   <button
                     type="button"
                     disabled={
+                      phase === "drafting" ||
                       phase === "revising" ||
                       phase === "sending" ||
                       !reviseHint.trim()
                     }
                     onClick={() => void revise()}
-                    className="shrink-0 rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-2.5 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 sm:min-w-[7.5rem]"
+                    className={cn(
+                      "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium sm:min-w-[7.5rem]",
+                      phase === "revising"
+                        ? "cursor-wait border-zinc-500 bg-zinc-800 text-zinc-200"
+                        : "border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40"
+                    )}
                   >
-                    {phase === "revising" ? "Revising…" : "Revise"}
+                    {phase === "revising" ? (
+                      <>
+                        <Loader2
+                          className="h-4 w-4 shrink-0 animate-spin text-zinc-400"
+                          aria-hidden
+                        />
+                        Revising…
+                      </>
+                    ) : (
+                      "Revise"
+                    )}
                   </button>
                 </div>
               </div>
@@ -335,7 +564,11 @@ export function SlackCreateThreadDialog({
                 type="button"
                 className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
                 onClick={onClose}
-                disabled={phase === "sending" || phase === "revising"}
+                disabled={
+                  phase === "sending" ||
+                  phase === "revising" ||
+                  phase === "drafting"
+                }
               >
                 Cancel
               </button>
@@ -343,13 +576,16 @@ export function SlackCreateThreadDialog({
                 type="button"
                 className="rounded-lg border border-violet-600 bg-violet-950/80 px-4 py-2.5 text-sm font-medium text-violet-100 hover:bg-violet-900/90 disabled:cursor-not-allowed disabled:opacity-40"
                 onClick={() => void send()}
-                disabled={phase === "sending" || !draft.trim()}
+                disabled={
+                  phase === "sending" ||
+                  phase === "drafting" ||
+                  !draft.trim()
+                }
               >
                 {phase === "sending" ? "Posting…" : "Post to Slack"}
               </button>
             </div>
           </>
-        )}
       </div>
     </>
   );

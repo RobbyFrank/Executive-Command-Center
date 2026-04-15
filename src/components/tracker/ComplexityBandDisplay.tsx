@@ -1,14 +1,15 @@
 "use client";
 
-import { parseScoreBand, scoreBandLabel, scoreBandLabelShort } from "@/lib/tracker-score-bands";
+import { Check } from "lucide-react";
+import {
+  parseScoreBand,
+  scoreBandLabel,
+  scoreBandLabelShort,
+} from "@/lib/tracker-score-bands";
 import { cn } from "@/lib/utils";
+import type { OverlaySelectFormatContext } from "./overlaySelectTypes";
 
-function fillClass(n: number): string {
-  if (n <= 2) return "bg-zinc-500/45";
-  if (n === 3) return "bg-violet-500/40";
-  if (n === 4) return "bg-violet-500/55";
-  return "bg-fuchsia-500/45";
-}
+const BAR_HEIGHTS_PX = [5, 9, 13] as const;
 
 function labelClass(n: number): string {
   if (n <= 2) return "text-zinc-400";
@@ -17,37 +18,92 @@ function labelClass(n: number): string {
   return "text-fuchsia-100/95";
 }
 
+/** Whether bar `idx` (0 = shortest) is filled for complexity 1–5. */
+function barFilled(n: number, idx: number): boolean {
+  if (n <= 1) return false;
+  if (n === 2) return idx === 0;
+  if (n === 3) return idx <= 1;
+  return true;
+}
+
+function barFillClass(n: number, idx: number): string {
+  if (!barFilled(n, idx)) return "";
+  if (n === 2) return "bg-zinc-500/75";
+  if (n === 3) return idx === 0 ? "bg-zinc-400/85" : "bg-violet-500/60";
+  if (n === 4) return "bg-violet-500/75";
+  return "bg-fuchsia-400/90";
+}
+
 /**
- * Collapsed complexity readout for project rows: thin bar + band label (same pattern as cost of delay on goals).
- * Used with `InlineEditCell` `formatDisplay` (invisible native select overlay).
+ * Three ascending bars (signal-strength style): unfilled = outline, filled = solid.
+ * Matches 1–5 by how many bars activate (1→none … 4–5→all three, with stronger hues at top).
  */
-export function complexityFormatDisplay(value: string) {
-  const n = parseScoreBand(value);
-  const pct = (n / 5) * 100;
-  const labelFull = scoreBandLabel(n);
-  const label = scoreBandLabelShort(n);
+export function ComplexitySignalIcon({ level }: { level: number }) {
+  const n = Math.min(5, Math.max(1, Math.round(level)));
   return (
-    <span className="flex min-w-0 w-full items-center gap-1.5" title={labelFull}>
-      <span
-        className="relative h-1 w-9 shrink-0 overflow-hidden rounded-full bg-zinc-800/90"
-        aria-hidden
-      >
+    <span
+      className="inline-flex h-[13px] shrink-0 items-end gap-[3px]"
+      aria-hidden
+    >
+      {BAR_HEIGHTS_PX.map((h, idx) => {
+        const filled = barFilled(n, idx);
+        return (
+          <span
+            key={idx}
+            className={cn(
+              "w-[3px] shrink-0 rounded-[1px]",
+              filled
+                ? barFillClass(n, idx)
+                : "border border-zinc-500/55 bg-transparent"
+            )}
+            style={{ height: h }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
+/**
+ * Collapsed complexity readout: signal bars + short label (same pattern as priority: icon + text).
+ */
+export function complexityFormatDisplay(
+  value: string,
+  ctx?: OverlaySelectFormatContext
+) {
+  const n = parseScoreBand(value);
+  const labelFull = scoreBandLabel(n);
+
+  if (ctx?.role === "trigger") {
+    return (
+      <span className="flex w-full items-center justify-center" title={labelFull}>
+        <ComplexitySignalIcon level={n} />
+      </span>
+    );
+  }
+
+  const label = scoreBandLabelShort(n);
+  const showCheck = ctx?.role === "option" && ctx.isSelected;
+  return (
+    <span className="flex min-w-0 w-full items-center justify-between gap-2" title={labelFull}>
+      <span className="flex min-w-0 items-center gap-2">
+        <ComplexitySignalIcon level={n} />
         <span
           className={cn(
-            "absolute left-0 top-0 h-full rounded-full transition-[width] duration-200",
-            fillClass(n)
+            "min-w-0 flex-1 truncate text-left text-sm font-medium leading-tight",
+            labelClass(n)
           )}
-          style={{ width: `${pct}%` }}
+        >
+          {label}
+        </span>
+      </span>
+      {showCheck ? (
+        <Check
+          className="h-3.5 w-3.5 shrink-0 text-violet-400"
+          strokeWidth={2.5}
+          aria-hidden
         />
-      </span>
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-left text-xs font-medium leading-tight",
-          labelClass(n)
-        )}
-      >
-        {label}
-      </span>
+      ) : null}
     </span>
   );
 }

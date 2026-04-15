@@ -788,9 +788,19 @@ export function slackTsFromArchivesPDigits(pDigits: string): string | null {
   return `${d.slice(0, -6)}.${d.slice(-6)}`;
 }
 
+/** Slack message `ts` as used in query params (`thread_ts`): `seconds.microseconds`. */
+function slackMessageTsFromQueryParam(raw: string | null): string | null {
+  const s = (raw ?? "").trim();
+  if (!s) return null;
+  if (!/^\d+\.\d+$/.test(s)) return null;
+  return s;
+}
+
 /**
  * Parses a Slack thread or message URL into `channelId` + `threadTs` for Web API calls.
  * Supports `…/archives/C…/p…` and `app.slack.com/.../thread/C…-ts` styles.
+ * For archive links to a **reply inside a thread**, Slack adds `?thread_ts=…` with the **parent**
+ * message ts; when present, that value is used so `conversations.replies` receives the thread root.
  */
 export function parseSlackThreadUrl(raw: string): ParsedSlackThreadUrl | null {
   const t = raw.trim();
@@ -816,7 +826,10 @@ export function parseSlackThreadUrl(raw: string): ParsedSlackThreadUrl | null {
   if (archives) {
     const ts = slackTsFromArchivesPDigits(archives[2]);
     if (!ts) return null;
-    return { channelId: archives[1], threadTs: ts };
+    const rootFromQuery = slackMessageTsFromQueryParam(
+      url.searchParams.get("thread_ts")
+    );
+    return { channelId: archives[1], threadTs: rootFromQuery ?? ts };
   }
 
   return null;

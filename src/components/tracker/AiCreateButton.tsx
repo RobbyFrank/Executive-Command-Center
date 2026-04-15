@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AiCreateDialog } from "./AiCreateDialog";
@@ -12,6 +12,8 @@ interface AiCreateButtonProps {
   /** Called with the new entity id after creation */
   onCreated?: (id: string) => void;
   inline?: boolean;
+  /** Row/card to leave clear behind the dimmed overlay (goal: company header; project: goal header). */
+  spotlightRef?: RefObject<HTMLElement | null>;
 }
 
 export function AiCreateButton({
@@ -20,6 +22,7 @@ export function AiCreateButton({
   goalId,
   onCreated,
   inline = false,
+  spotlightRef,
 }: AiCreateButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -33,14 +36,20 @@ export function AiCreateButton({
           setOpen(true);
         }}
         className={cn(
-          "inline-flex items-center justify-center rounded-sm transition-colors",
-          "text-zinc-500 hover:text-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950",
+          "group inline-flex items-center justify-center rounded-sm transition-[color,filter] duration-200",
+          "text-violet-400 hover:text-fuchsia-300",
+          "hover:drop-shadow-[0_0_10px_rgba(167,139,250,0.55)]",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/45 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950",
           inline
             ? "ml-1 align-baseline p-0"
             : "p-0.5",
         )}
       >
-        <Sparkles className={cn(inline ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} aria-hidden />
+        <Sparkles
+          className={cn(inline ? "h-3.5 w-3.5" : "h-3.5 w-3.5")}
+          strokeWidth={2.25}
+          aria-hidden
+        />
       </button>
 
       {open && (
@@ -50,6 +59,7 @@ export function AiCreateButton({
           goalId={goalId}
           onCreated={onCreated}
           onClose={() => setOpen(false)}
+          spotlightRef={spotlightRef}
         />
       )}
     </>

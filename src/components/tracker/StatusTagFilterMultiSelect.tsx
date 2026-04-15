@@ -3,7 +3,6 @@
 import { useCallback, useId, useMemo, useState } from "react";
 import type { TrackerStatusTagId } from "@/lib/tracker-search-filter";
 import {
-  AlertCircle,
   ChevronDown,
   Eye,
   Flag,
@@ -44,12 +43,6 @@ const OPTIONS: {
     Icon: UserRound,
   },
   {
-    id: "need_review",
-    label: "Need review",
-    hint: "Stale last-reviewed — window depends on owner autonomy",
-    Icon: AlertCircle,
-  },
-  {
     id: "close_watch",
     label: "Close watch",
     hint: "P0/P1 project owned by someone with autonomy 1–2",
@@ -58,7 +51,7 @@ const OPTIONS: {
   {
     id: "zombie",
     label: "Zombie",
-    hint: "In progress, no milestone done, review stale 21+ days",
+    hint: "In progress but no milestone progress yet",
     Icon: Ghost,
   },
   {

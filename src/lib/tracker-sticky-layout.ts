@@ -8,6 +8,13 @@ export const TRACKER_PROJECTS_COLUMN_HEADER_HEIGHT_PX = 36;
 /** Until `RoadmapStickyToolbar` reports height (avoids a flash of wrong offset). */
 export const ROADMAP_TOOLBAR_STICKY_FALLBACK_PX = 140;
 
+/**
+ * Space **between** the sticky filter toolbar and the sticky company row — not padding
+ * inside the toolbar. See `RoadmapStickyBelowToolbarGap` in the Roadmap layout; company
+ * `top` and downstream sticky offsets add this after the measured toolbar height.
+ */
+export const ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX = 20;
+
 /** Goal header row (`py-1.5` + one line) — fallback before ResizeObserver. */
 export const TRACKER_GOAL_HEADER_ROW_FALLBACK_PX = 38;
 

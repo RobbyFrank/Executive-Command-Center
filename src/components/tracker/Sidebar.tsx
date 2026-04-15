@@ -64,49 +64,9 @@ export function Sidebar({ username }: { username: string }) {
     <aside
       className={cn(
         "border-r border-zinc-800 bg-zinc-950 flex min-h-0 flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out",
-        collapsed ? "w-16" : "w-64"
+        collapsed ? "w-16" : "w-56"
       )}
     >
-      <div
-        className={cn(
-          "border-b border-zinc-800",
-          collapsed ? "p-2 flex flex-col items-center gap-2" : "p-4"
-        )}
-      >
-        {!collapsed && (
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h1 className="text-sm font-bold text-zinc-100 tracking-tight">
-                Executive Command Center
-              </h1>
-              <p className="text-xs text-zinc-500 mt-0.5">MLabs Roadmap</p>
-            </div>
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              className="shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-              title="Collapse sidebar"
-              aria-expanded={!collapsed}
-              aria-label="Collapse sidebar"
-            >
-              <ChevronLeft className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-        )}
-        {collapsed && (
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-            title="Expand sidebar"
-            aria-expanded={false}
-            aria-label="Expand sidebar"
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden />
-          </button>
-        )}
-      </div>
-
       <nav className="min-h-0 flex-1 overflow-y-auto p-3 flex flex-col gap-0">
         {NAV_GROUPS.map((group, groupIndex) => (
           <div
@@ -162,24 +122,38 @@ export function Sidebar({ username }: { username: string }) {
       <div
         className={cn(
           "border-t border-zinc-800",
-          collapsed ? "p-2 flex flex-col items-center gap-2" : "p-3"
+          collapsed ? "p-2" : "p-3"
         )}
       >
         <div
           className={cn(
-            "flex items-center",
-            collapsed ? "flex-col gap-2" : "justify-between px-3 py-2"
+            "flex items-center gap-2 min-w-0",
+            collapsed && "flex-col"
           )}
         >
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4" aria-hidden />
+            ) : (
+              <ChevronLeft className="h-4 w-4" aria-hidden />
+            )}
+          </button>
           <span
             className={cn(
-              "text-sm text-zinc-400 truncate",
+              "text-sm text-zinc-400 truncate min-w-0 flex-1",
               collapsed && "sr-only"
             )}
           >
             {username}
           </span>
-          <form action={logoutAction}>
+          <form action={logoutAction} className="shrink-0">
             <button
               type="submit"
               className="text-zinc-500 hover:text-zinc-300 transition-colors"

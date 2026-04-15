@@ -20,26 +20,20 @@ import { ReviewLogHistoryList } from "./ReviewLogHistoryList";
 interface ReviewNotesPopoverProps {
   entries: ReviewLogEntry[] | undefined;
   onAppendNote: (text: string) => void | Promise<unknown>;
-  /**
-   * When true, the control stays visible and pulses — use when this project is in the
-   * Review queue (same rule as Roadmap “Need review” / stale vs last reviewed).
-   */
-  pulseAttention?: boolean;
   /** Roadmap: `group/goal` vs `group/project` for row hover. Default: goal rows. */
   rowGroup?: "goal" | "project";
   /**
    * When set, the popover positions from this element and no inline trigger is rendered
-   * (open via `openNonce` or keep using this for placement only — e.g. row “…” button).
+   * (open via `openNonce` or keep using this for placement only — e.g. row "…" button).
    */
   anchorRef?: RefObject<HTMLElement | null>;
-  /** Increment (e.g. from context menu “Review notes…”) to open the popover. */
+  /** Increment (e.g. from context menu "Review notes…") to open the popover. */
   openNonce?: number;
 }
 
 export function ReviewNotesPopover({
   entries,
   onAppendNote,
-  pulseAttention = false,
   rowGroup = "goal",
   anchorRef,
   openNonce,
@@ -210,30 +204,23 @@ export function ReviewNotesPopover({
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
         title={
-          pulseAttention
-            ? "Needs review — open notes (on Review queue)"
-            : count > 0
-              ? `Review notes (${count}) — open to read history or add`
-              : "Review notes — open to add"
+          count > 0
+            ? `Review notes (${count}) — open to read history or add`
+            : "Review notes — open to add"
         }
         onClick={() => setOpen((o) => !o)}
         className={cn(
           "relative inline-flex items-center justify-center rounded p-1 transition-colors",
-          pulseAttention &&
-            "text-amber-400/95 opacity-100 ring-2 ring-amber-500/50 motion-safe:animate-pulse hover:text-amber-300",
-          !pulseAttention &&
-            cn(
-              count > 0
-                ? cn(
-                    "text-zinc-400 opacity-0 hover:opacity-100 hover:text-zinc-300 focus-visible:opacity-100",
-                    rowGroupHoverOpacity
-                  )
-                : cn(
-                    "text-zinc-500 opacity-0 hover:opacity-100 hover:text-zinc-400 focus-visible:opacity-100",
-                    rowGroupHoverOpacity
-                  ),
-              open && "opacity-100"
-            )
+          count > 0
+            ? cn(
+                "text-zinc-400 opacity-0 hover:opacity-100 hover:text-zinc-300 focus-visible:opacity-100",
+                rowGroupHoverOpacity
+              )
+            : cn(
+                "text-zinc-500 opacity-0 hover:opacity-100 hover:text-zinc-400 focus-visible:opacity-100",
+                rowGroupHoverOpacity
+              ),
+          open && "opacity-100"
         )}
       >
         <MessageSquareText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />

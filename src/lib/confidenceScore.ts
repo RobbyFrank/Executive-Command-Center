@@ -82,11 +82,8 @@ export function explainProjectConfidence(
   if (!project.ownerId.trim()) {
     return {
       headline: "Confidence 0/5 (0%)",
-      paragraphs: [
-        "No owner — 0% until someone is assigned; then we score autonomy (Team) vs complexity.",
-      ],
-      ariaLabel:
-        "Confidence 0/5 (0%). No project owner assigned.",
+      paragraphs: ["Assign an owner to score confidence."],
+      ariaLabel: "Confidence 0/5 (0%). No project owner assigned.",
     };
   }
   const person = peopleById.get(project.ownerId);
@@ -94,25 +91,31 @@ export function explainProjectConfidence(
   if (autonomyRaw === undefined) {
     return {
       headline: "Confidence 0/5 (0%)",
-      paragraphs: [
-        "Owner isn’t on Team — autonomy unknown, so confidence stays at 0 until the roster matches.",
-      ],
-      ariaLabel:
-        "Confidence 0/5 (0%). Owner id not found on Team.",
+      paragraphs: ["Owner not found on Team."],
+      ariaLabel: "Confidence 0/5 (0%). Owner not found on Team.",
     };
   }
   const a = clampAutonomy(autonomyRaw);
   const c = Math.max(1, Math.min(5, project.complexityScore));
-  const linear = a - c + 3;
   const score = computeProjectConfidence(autonomyRaw, project.complexityScore);
   const pct = confidenceScoreToPercent(score);
+  const name = person?.name ?? "?";
+
+  let summary: string;
+  if (score >= 5)
+    summary = `${name} can comfortably own this project independently.`;
+  else if (score === 4)
+    summary = `${name} has the autonomy for a project of this complexity.`;
+  else if (score === 3)
+    summary = `${name} can manage this, but some oversight would help.`;
+  else if (score === 2)
+    summary = `${name} may not have enough autonomy for a project this complex \u2014 oversight is needed.`;
+  else
+    summary = `${name} does not have enough autonomy to manage a project of this complexity \u2014 close oversight is needed.`;
+
   const out: ConfidenceExplanation = {
     headline: `Confidence ${score}/5 (${pct}%)`,
-    paragraphs: [
-      `Owner “${person?.name ?? "?"}" has autonomy ${a}; this project’s complexity is ${c}.`,
-      `Formula: ${a} − ${c} + 3 = ${linear}, then clamped to the 1–5 band.`,
-      "Higher scores mean more execution headroom; lower scores mean tighter oversight.",
-    ],
+    paragraphs: [summary],
     ariaLabel: "",
   };
   out.ariaLabel = buildAriaLabel(out);
@@ -129,9 +132,7 @@ export function explainGoalConfidence(
   if (goal.projects.length === 0) {
     return {
       headline: "Confidence 0/5 (0%)",
-      paragraphs: [
-        "No projects yet — nothing to score. Add projects; confidence blends each project’s autonomy vs complexity.",
-      ],
+      paragraphs: ["Add projects under this goal to see a blended score."],
       ariaLabel:
         "Confidence 0/5 (0%). No projects yet; add projects to compute confidence.",
     };
@@ -140,7 +141,7 @@ export function explainGoalConfidence(
   const bullets = goal.projects.map((p) => {
     const s = computeProjectConfidenceFromProject(p, peopleById);
     const pPct = confidenceScoreToPercent(s);
-    return `"${p.name}" → ${s}/5 (${pPct}%)`;
+    return `"${p.name}" \u2192 ${s}/5 (${pPct}%)`;
   });
   const avg = computeGoalConfidence(goal.projects, peopleById, goal.costOfDelay);
   const pct = confidenceScoreToPercent(avg);
@@ -148,11 +149,9 @@ export function explainGoalConfidence(
     headline: `Confidence ${avg}/5 (${pct}%)`,
     paragraphs:
       codEmphasis === 0
-        ? [
-            "Cost of delay at minimum — simple average of project scores (autonomy vs complexity per project).",
-          ]
+        ? ["Straight average of project scores."]
         : [
-            `Cost of delay ${goal.costOfDelay}/5: high-autonomy owners count more when blending projects.`,
+            `Cost of delay ${goal.costOfDelay}/5 \u2014 higher-autonomy owners weigh more.`,
           ],
     bullets,
     ariaLabel: "",
@@ -162,8 +161,8 @@ export function explainGoalConfidence(
 }
 
 /**
- * Auto confidence: autonomy vs complexity. Equal scores → 3 (neutral).
- * Missing owner / missing autonomy on Team → 0.
+ * Auto confidence: autonomy vs complexity. Equal scores \u2192 3 (neutral).
+ * Missing owner / missing autonomy on Team \u2192 0.
  */
 export function computeProjectConfidence(
   ownerAutonomy: number | null | undefined,
@@ -185,7 +184,7 @@ export function computeProjectConfidenceFromProject(
 }
 
 /**
- * Child project confidences combined with cost-of-delay-aware weights, rounded; no projects → 0.
+ * Child project confidences combined with cost-of-delay-aware weights, rounded; no projects \u2192 0.
  * At minimum cost of delay this matches a straight average; as delay cost rises, projects owned by
  * higher-autonomy people count more (see `goalProjectConfidenceWeight`).
  */

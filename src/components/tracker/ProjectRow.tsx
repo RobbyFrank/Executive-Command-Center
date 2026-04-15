@@ -31,7 +31,8 @@ import {
   computeProjectConfidenceFromProject,
   explainProjectConfidence,
 } from "@/lib/confidenceScore";
-import { prioritySelectTextClass } from "@/lib/prioritySort";
+import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
+import { formatPriorityOverlayDisplay } from "./PrioritySelectDisplay";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { MilestoneRow } from "./MilestoneRow";
 import {
@@ -56,7 +57,8 @@ import {
   MessageSquareText,
   MoreHorizontal,
 } from "lucide-react";
-import { isReviewStale } from "@/lib/reviewStaleness";
+import { SlackCreateThreadDialog } from "./SlackCreateThreadDialog";
+import { StartSlackThreadChip } from "./StartSlackThreadChip";
 import { cn } from "@/lib/utils";
 
 import { useTrackerExpandBulk } from "./tracker-expand-context";
@@ -71,7 +73,7 @@ import {
 import { getTrackerProjectWarnings } from "@/lib/tracker-project-warnings";
 import { WarningsBadge } from "./WarningsBadge";
 import { SharedBadge } from "./SharedBadge";
-import { BlockedBadge } from "./BlockedBadge";
+import { BlockedByProjectHover } from "./BlockedByProjectHover";
 import { MirrorGoalPickerDialog } from "./MirrorGoalPickerDialog";
 import { BlockedByPickerDialog } from "./BlockedByPickerDialog";
 import {
@@ -80,7 +82,7 @@ import {
   formatRelativeCalendarDateCompact,
   parseCalendarDateString,
 } from "@/lib/relativeCalendarDate";
-import { PROJECT_STATUS_SELECT_OPTIONS } from "@/lib/projectStatus";
+import { PROJECT_STATUS_SELECT_OPTIONS_EDITABLE } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
 import {
   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
@@ -101,6 +103,7 @@ import {
   type SlackPingMode,
 } from "./SlackMilestoneThreadPopovers";
 import { isValidHttpUrl } from "@/lib/httpUrl";
+import { ROADMAP_TITLE_COL_CLASS } from "@/lib/tracker-roadmap-columns";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -169,12 +172,19 @@ export function ProjectRow({
     focusEnforceTick,
   } = useTrackerExpandBulk();
   const projectContext = useContextMenu();
+  const nextMsSlackConnectMenu = useContextMenu();
   const projectActionsRef = useRef<HTMLButtonElement>(null);
   const nextMilestoneSlackAnchorRef = useRef<HTMLButtonElement>(null);
+  /** Slack thread spotlight: full project header row (not just the Slack strip). */
+  const nextMilestoneSlackSpotlightRef = useRef<HTMLDivElement>(null);
   const [projectReviewNotesNonce, setProjectReviewNotesNonce] = useState(0);
   const [nextMsThreadPopoverOpen, setNextMsThreadPopoverOpen] = useState(false);
   const [nextMsThreadPingOpen, setNextMsThreadPingOpen] = useState(false);
   const [nextMsPingMode, setNextMsPingMode] = useState<SlackPingMode>("ping");
+  const [nextMilestoneCreateThreadOpen, setNextMilestoneCreateThreadOpen] =
+    useState(false);
+  const [nextMilestoneSlackUrlEditSignal, setNextMilestoneSlackUrlEditSignal] =
+    useState(0);
 
   const goalDescription = useMemo(() => {
     const g = allGoals.find((x) => x.id === goalId);
@@ -278,7 +288,10 @@ export function ProjectRow({
     [toggleProjectRow]
   );
 
-  const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
+  const priorityOptions = PriorityEnum.options.map((p) => ({
+    value: p,
+    label: PRIORITY_MENU_LABEL[p],
+  }));
   const peopleById = useMemo(
     () => new Map(people.map((p) => [p.id, p])),
     [people]
@@ -292,15 +305,6 @@ export function ProjectRow({
     [project, peopleById]
   );
   const ownerPerson = people.find((p) => p.id === project.ownerId);
-  const projectInReviewQueue = useMemo(
-    () =>
-      isReviewStale(
-        project.lastReviewed,
-        "project",
-        ownerPerson?.autonomyScore
-      ),
-    [project.lastReviewed, ownerPerson?.autonomyScore]
-  );
 
   const nextPendingMilestone = useMemo(
     () => getNextPendingMilestone(project.milestones),
@@ -367,6 +371,9 @@ export function ProjectRow({
           projectComplexity={project.complexityScore}
           milestonesSummary={milestonesSummaryForLikelihood}
           alignSlackPreviewToNextMilestoneColumn
+          slackUrlEditSignal={
+            isNext ? nextMilestoneSlackUrlEditSignal : 0
+          }
         />
       );
     },
@@ -381,6 +388,7 @@ export function ProjectRow({
       project.ownerId,
       project.complexityScore,
       milestonesSummaryForLikelihood,
+      nextMilestoneSlackUrlEditSignal,
     ]
   );
 
@@ -454,6 +462,43 @@ export function ProjectRow({
   const milestonesVisible = expanded && showMilestones;
   const showNextMilestoneSlackInline =
     !milestonesVisible && nextMilestoneSlackFetchUrl != null;
+  const showNextMilestoneSlackConnect =
+    !milestonesVisible &&
+    nextPendingMilestone != null &&
+    nextMilestoneSlackFetchUrl == null;
+
+  const goalChannelIdTrimmed = goalSlackChannelId.trim();
+  const canCreateSlackThread = Boolean(goalChannelIdTrimmed);
+
+  const nextMilestoneSlackConnectMenuEntries = useMemo((): ContextMenuEntry[] => {
+    return [
+      {
+        type: "item",
+        id: "next-ms-slack-ai",
+        label: "Draft a new Slack thread with AI…",
+        icon: Sparkles,
+        disabled: !canCreateSlackThread,
+        disabledReason:
+          "Set a Slack channel on the goal first (Roadmap goal row)",
+        onClick: () => {
+          nextMsSlackConnectMenu.close();
+          setNextMilestoneCreateThreadOpen(true);
+        },
+      },
+      {
+        type: "item",
+        id: "next-ms-slack-url",
+        label: "Attach existing Slack thread URL…",
+        icon: Pencil,
+        onClick: () => {
+          nextMsSlackConnectMenu.close();
+          setExpanded(true);
+          setShowMilestones(true);
+          setNextMilestoneSlackUrlEditSignal((n) => n + 1);
+        },
+      },
+    ];
+  }, [canCreateSlackThread]);
 
   const warnings = useMemo(
     () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
@@ -683,7 +728,7 @@ export function ProjectRow({
   return (
     <div
       className={cn(
-        "group/project max-w-full min-w-0",
+        "max-w-full min-w-0",
         project.atRisk &&
           "rounded-md border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30",
         !project.atRisk &&
@@ -692,6 +737,7 @@ export function ProjectRow({
       )}
     >
       <div
+        ref={nextMilestoneSlackSpotlightRef}
         title={
           !expanded
             ? "Expand project details and milestones (click row)"
@@ -701,7 +747,7 @@ export function ProjectRow({
         }
         onClick={onProjectRowClick}
         onContextMenuCapture={projectContext.onContextMenuCapture}
-        className="group/project-row flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
+        className="group/project group/project-row flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
           <ChevronRight
@@ -715,14 +761,13 @@ export function ProjectRow({
 
         {/* Project name — AI info icon inline at end of name; Shared/Mirror — w-[360px] matches goal + headers */}
         <div
-          className="w-[360px] min-w-0 shrink-0 flex items-center gap-1.5"
+          className={cn(
+            ROADMAP_TITLE_COL_CLASS,
+            "flex items-center gap-1.5"
+          )}
           onClick={(e) => {
             const t = e.target as HTMLElement;
-            if (
-              t.closest("[data-shared-badge-root]") ||
-              t.closest("[data-blocked-badge-root]")
-            )
-              e.stopPropagation();
+            if (t.closest("[data-shared-badge-root]")) e.stopPropagation();
           }}
         >
           <div className="min-w-0 flex-1">
@@ -764,14 +809,6 @@ export function ProjectRow({
               goals={allGoals}
               companies={allCompanies}
             />
-            {project.isBlocked === true &&
-            project.blockedByProjectName !== undefined ? (
-              <div className="shrink-0" data-blocked-badge-root>
-                <BlockedBadge
-                  blockedByProjectName={project.blockedByProjectName}
-                />
-              </div>
-            ) : null}
           </div>
         </div>
 
@@ -789,16 +826,20 @@ export function ProjectRow({
         </div>
 
         {/* Priority */}
-        <div className="w-14 shrink-0">
+        <div className="w-28 shrink-0">
           <InlineEditCell
             {...GRID_ALIGN}
+            className="group/status"
+            overlaySelectQuiet
             value={project.priority}
             onSave={(priority) =>
               updateProject(project.id, { priority: priority as Priority })
             }
             type="select"
             options={priorityOptions}
-            displayClassName={cn("font-medium", prioritySelectTextClass(project.priority))}
+            formatDisplay={formatPriorityOverlayDisplay}
+            displayTitle={`Priority — ${PRIORITY_MENU_LABEL[project.priority]}`}
+            selectPresentation="always"
           />
         </div>
 
@@ -832,33 +873,48 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Status */}
-        <div className="w-44 shrink-0 min-w-0">
-          <InlineEditCell
-            {...GRID_ALIGN}
-            className="group/status"
-            overlaySelectQuiet
-            value={project.status}
-            onSave={(status) =>
-              updateProject(project.id, { status: status as ProjectStatus })
-            }
-            type="select"
-            options={PROJECT_STATUS_SELECT_OPTIONS}
-            formatDisplay={(v) => (
-              <ProjectStatusPill status={v} variant="inline" />
-            )}
-            selectPresentation="always"
-          />
+        {/* Status — dependency-blocked rows show a read-only Blocked pill */}
+        <div
+          className="w-44 shrink-0 min-w-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {project.isBlocked === true &&
+          project.blockedByProjectName !== undefined ? (
+            <BlockedByProjectHover
+              blockedByProjectName={project.blockedByProjectName}
+              className="w-full"
+            >
+              <div className="group/status flex min-w-0">
+                <ProjectStatusPill status="Blocked" variant="inline" />
+              </div>
+            </BlockedByProjectHover>
+          ) : (
+            <InlineEditCell
+              {...GRID_ALIGN}
+              className="group/status"
+              overlaySelectQuiet
+              value={project.status}
+              onSave={(status) =>
+                updateProject(project.id, { status: status as ProjectStatus })
+              }
+              type="select"
+              options={PROJECT_STATUS_SELECT_OPTIONS_EDITABLE}
+              formatDisplay={(v) => (
+                <ProjectStatusPill status={v} variant="inline" />
+              )}
+              selectPresentation="always"
+            />
+          )}
         </div>
 
-        {/* Progress */}
-        <div className="w-32 shrink-0">
+        {/* Progress — nudged toward Status (−ml) vs header; Due date has +ml for clearer separation */}
+        <div className="w-32 shrink-0 -ml-1">
           <ProgressBar percent={project.progress} />
         </div>
 
         {/* Due date — derived from last milestone with a target date (same relative label as milestone dates) */}
         <div
-          className="w-28 shrink-0"
+          className="w-28 shrink-0 ml-3"
           title={
             project.targetDate.trim()
               ? `${formatCalendarDateHint(project.targetDate)} — from last milestone with a date`
@@ -879,8 +935,8 @@ export function ProjectRow({
           </span>
         </div>
 
-        {/* Next milestone — horizon + name; Slack strip only when collapsed (status prefetches whenever URL exists) */}
-        <div className="w-[36rem] min-w-0 shrink-0 overflow-hidden">
+        {/* Next milestone — horizon + name; hidden when milestones are expanded inline */}
+        <div className={cn("w-[36rem] min-w-0 shrink-0 overflow-hidden", milestonesVisible && "invisible")}>
           {project.milestones.length === 0 ? (
             <button
               type="button"
@@ -906,57 +962,74 @@ export function ProjectRow({
               <span className="min-w-0 truncate">Create milestone</span>
             </button>
           ) : nextPendingMilestone && nextMilestoneUi ? (
-            <div className="flex min-w-0 items-start gap-1.5">
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <div
-                  className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
-                  title={nextMilestoneUi.title}
-                >
-                  <span
-                    className={cn(
-                      "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
-                      nextMilestoneUi.chipLabel === "—"
-                        ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
-                        : nextMilestoneUi.isOverdueHorizon
-                          ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
-                          : "text-violet-200/95 bg-violet-500/15"
-                    )}
+            <div
+              className="flex min-w-0 items-center gap-2 px-1.5 py-1"
+              title={nextMilestoneUi.title}
+            >
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
+                  nextMilestoneUi.chipLabel === "—"
+                    ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
+                    : nextMilestoneUi.isOverdueHorizon
+                      ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
+                      : "text-violet-200/95 bg-violet-500/15"
+                )}
+              >
+                {nextMilestoneUi.chipLabel}
+              </span>
+              <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-6 overflow-hidden">
+                <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
+                  {nextPendingMilestone.name}
+                </p>
+                {showNextMilestoneSlackInline ? (
+                  <div
+                    className="min-w-0 max-w-[min(28rem,58%)] shrink-0"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {nextMilestoneUi.chipLabel}
-                  </span>
-                  <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
-                    {nextPendingMilestone.name}
-                  </p>
-                </div>
+                    <MilestoneSlackThreadInline
+                      ref={nextMilestoneSlackAnchorRef}
+                      compact
+                      status={nextMilestoneSlackThread.status}
+                      loading={nextMilestoneSlackThread.loading}
+                      error={nextMilestoneSlackThread.error}
+                      onOpen={() => setNextMsThreadPopoverOpen(true)}
+                      likelihood={
+                        nextMilestoneLikelihood.result &&
+                        nextPendingMilestone?.targetDate?.trim()
+                          ? {
+                              likelihood: nextMilestoneLikelihood.result.likelihood,
+                              riskLevel: nextMilestoneLikelihood.result.riskLevel,
+                            }
+                          : null
+                      }
+                      likelihoodLoading={
+                        Boolean(nextPendingMilestone?.targetDate?.trim()) &&
+                        nextMilestoneLikelihood.loading
+                      }
+                    />
+                  </div>
+                ) : showNextMilestoneSlackConnect ? (
+                  <div
+                    className="w-fit shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <StartSlackThreadChip
+                      menuOpen={nextMsSlackConnectMenu.open}
+                      onMenuTrigger={nextMsSlackConnectMenu.openFromTrigger}
+                      ariaLabel="Start Slack thread for next milestone"
+                    />
+                    <ContextMenu
+                      open={nextMsSlackConnectMenu.open}
+                      x={nextMsSlackConnectMenu.x}
+                      y={nextMsSlackConnectMenu.y}
+                      onClose={nextMsSlackConnectMenu.close}
+                      ariaLabel="Slack thread for next milestone"
+                      entries={nextMilestoneSlackConnectMenuEntries}
+                    />
+                  </div>
+                ) : null}
               </div>
-              {showNextMilestoneSlackInline ? (
-                <div
-                  className="min-w-0 max-w-[min(20rem,52%)] shrink-0 overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MilestoneSlackThreadInline
-                    ref={nextMilestoneSlackAnchorRef}
-                    compact
-                    status={nextMilestoneSlackThread.status}
-                    loading={nextMilestoneSlackThread.loading}
-                    error={nextMilestoneSlackThread.error}
-                    onOpen={() => setNextMsThreadPopoverOpen(true)}
-                    likelihood={
-                      nextMilestoneLikelihood.result &&
-                      nextPendingMilestone?.targetDate?.trim()
-                        ? {
-                            likelihood: nextMilestoneLikelihood.result.likelihood,
-                            riskLevel: nextMilestoneLikelihood.result.riskLevel,
-                          }
-                        : null
-                    }
-                    likelihoodLoading={
-                      Boolean(nextPendingMilestone?.targetDate?.trim()) &&
-                      nextMilestoneLikelihood.loading
-                    }
-                  />
-                </div>
-              ) : null}
             </div>
           ) : (
             <p
@@ -988,17 +1061,9 @@ export function ProjectRow({
               Spotlight
             </span>
           )}
-          {warnings.length === 1 && (
-            <span
-              className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
-              title={warnings[0].title}
-            >
-              {warnings[0].label}
-            </span>
-          )}
-          {warnings.length > 1 && (
+          {warnings.length > 0 ? (
             <WarningsBadge warnings={warnings} />
-          )}
+          ) : null}
           {showCloseWatch && (
             <span
               className="whitespace-nowrap rounded-md border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/95"
@@ -1009,7 +1074,7 @@ export function ProjectRow({
           )}
         </div>
 
-        <RowActionIcons rowGroup="project" forceVisible={project.atRisk || project.spotlight || projectInReviewQueue}>
+        <RowActionIcons rowGroup="project" forceVisible={project.atRisk || project.spotlight}>
           <button
             ref={projectActionsRef}
             type="button"
@@ -1018,11 +1083,7 @@ export function ProjectRow({
             aria-haspopup="menu"
             aria-expanded={projectContext.open}
             onClick={projectContext.openFromTrigger}
-            className={cn(
-              "rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45",
-              projectInReviewQueue &&
-                "text-amber-400/95 ring-2 ring-amber-500/50 motion-safe:animate-pulse hover:text-amber-300"
-            )}
+            className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
           >
             <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
           </button>
@@ -1047,6 +1108,7 @@ export function ProjectRow({
       {showNextMilestoneSlackInline && nextPendingMilestone ? (
         <SlackMilestoneThreadPopovers
           anchorRef={nextMilestoneSlackAnchorRef}
+          spotlightRef={nextMilestoneSlackSpotlightRef}
           slackUrl={nextMilestoneSlackFetchUrl}
           milestoneName={nextPendingMilestone.name}
           status={nextMilestoneSlackThread.status}
@@ -1068,6 +1130,21 @@ export function ProjectRow({
           likelihood={nextMilestoneLikelihood.result}
           likelihoodLoading={nextMilestoneLikelihood.loading}
           likelihoodError={nextMilestoneLikelihood.error}
+        />
+      ) : null}
+
+      {nextPendingMilestone ? (
+        <SlackCreateThreadDialog
+          open={nextMilestoneCreateThreadOpen}
+          onClose={() => setNextMilestoneCreateThreadOpen(false)}
+          milestoneId={nextPendingMilestone.id}
+          milestoneName={nextPendingMilestone.name}
+          goalDescription={goalDescription}
+          projectName={project.name}
+          channelId={goalChannelIdTrimmed}
+          channelName={goalSlackChannelName}
+          people={people}
+          spotlightRef={nextMilestoneSlackSpotlightRef}
         />
       ) : null}
 
@@ -1162,11 +1239,11 @@ export function ProjectRow({
                       renderMilestoneRow(ms)
                     )}
                   </CollapsePanel>
-                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-zinc-800/60 pl-14 pr-4 py-1.5">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800/60 pl-14 pr-4 py-1.5">
                     <button
                       type="button"
                       onClick={() => setFutureMilestonesOpen((open) => !open)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300 rounded-sm py-0.5 -my-0.5 pl-0 pr-2"
+                      className="inline-flex w-fit max-w-full shrink-0 items-center gap-2 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300 rounded-sm py-0.5 -my-0.5 pl-0 pr-2"
                       aria-expanded={futureMilestonesOpen}
                     >
                       {futureMilestonesOpen ? (

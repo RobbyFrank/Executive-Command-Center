@@ -25,14 +25,14 @@ import {
   scoreBandLabel,
 } from "@/lib/tracker-score-bands";
 import { computeGoalConfidence, explainGoalConfidence } from "@/lib/confidenceScore";
-import { prioritySelectTextClass } from "@/lib/prioritySort";
+import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
+import { formatPriorityOverlayDisplay } from "./PrioritySelectDisplay";
 import { AutoConfidencePercent } from "./AutoConfidencePercent";
 import { costOfDelayFormatDisplay } from "./CostOfDelayDisplay";
 import { ProjectRow } from "./ProjectRow";
 import {
   updateGoal,
   deleteGoal,
-  createGoal,
   createProject,
   appendGoalReviewNote,
 } from "@/server/actions/tracker";
@@ -61,6 +61,7 @@ import {
   ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
   TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
 } from "@/lib/tracker-sticky-layout";
+import { ROADMAP_TITLE_COL_CLASS } from "@/lib/tracker-roadmap-columns";
 import {
   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
   TRACKER_FOOTER_TEXT_ACTION,
@@ -87,8 +88,6 @@ interface GoalSectionProps {
   roadmapGoalRowStickyTopPx: number;
   /** When this matches `goal.id`, goal title (description) opens in edit mode on mount. */
   focusGoalTitleEditId?: string | null;
-  /** Notify parent so it can set `focusGoalTitleEditId` after creating a goal from this section. */
-  onGoalCreated?: (goalId: string) => void;
   /** First-mount expanded state only (e.g. match siblings when all were collapsed). */
   initialExpanded?: boolean;
   /** Fired when this goal is expanded/collapsed so the company can default new goals consistently. */
@@ -108,7 +107,6 @@ export function GoalSection({
   ownerWorkloadMap,
   roadmapGoalRowStickyTopPx,
   focusGoalTitleEditId = null,
-  onGoalCreated,
   initialExpanded,
   onExpandedChange,
   stackPosition = "only",
@@ -179,10 +177,8 @@ export function GoalSection({
 
   const goalHeaderWarnings = useMemo(
     () =>
-      getGoalHeaderWarnings(goal, people, {
-        includeProjectWarnings: !expanded,
-      }),
-    [goal, people, expanded]
+      getGoalHeaderWarnings(goal, people, { includeProjectWarnings: false }),
+    [goal, people]
   );
 
   useEffect(() => {
@@ -238,7 +234,10 @@ export function GoalSection({
     [toggleGoalExpanded]
   );
 
-  const priorityOptions = PriorityEnum.options.map((p) => ({ value: p, label: p }));
+  const priorityOptions = PriorityEnum.options.map((p) => ({
+    value: p,
+    label: PRIORITY_MENU_LABEL[p],
+  }));
   const peopleById = useMemo(
     () => new Map(people.map((p) => [p.id, p])),
     [people]
@@ -252,6 +251,11 @@ export function GoalSection({
     [goal, peopleById]
   );
   const ownerPerson = people.find((p) => p.id === goal.ownerId);
+
+  const onNewProjectCreated = useCallback((id: string) => {
+    setExpanded(true);
+    setNewProjectNameFocusId(id);
+  }, []);
 
   const addProjectToGoal = useCallback(async () => {
     const project = await createProject({
@@ -272,8 +276,8 @@ export function GoalSection({
       spotlight: false,
       reviewLog: [],
     });
-    setNewProjectNameFocusId(project.id);
-  }, [goal.id]);
+    onNewProjectCreated(project.id);
+  }, [goal.id, onNewProjectCreated]);
 
   const goalMenuEntries = useMemo((): ContextMenuEntry[] => {
     const execBlock: ContextMenuEntry[] = [];
@@ -344,33 +348,6 @@ export function GoalSection({
       },
       {
         type: "item",
-        id: "add-goal",
-        label: "Add goal (same company)",
-        icon: Plus,
-        onClick: async () => {
-          const g = await createGoal({
-            companyId: goal.companyId,
-            description: "New goal",
-            measurableTarget: "",
-            whyItMatters: "",
-            currentValue: "",
-            impactScore: 3,
-            confidenceScore: 0,
-            costOfDelay: 3,
-            ownerId: "",
-            priority: "P2",
-            slackChannel: "",
-            slackChannelId: "",
-            status: "Not Started",
-            atRisk: false,
-            spotlight: false,
-            reviewLog: [],
-          });
-          onGoalCreated?.(g.id);
-        },
-      },
-      {
-        type: "item",
         id: "rename-goal",
         label: "Rename goal",
         icon: Pencil,
@@ -433,13 +410,11 @@ export function GoalSection({
     addProjectToGoal,
     expanded,
     goal.atRisk,
-    goal.companyId,
     goal.description,
     assistant,
     goal.id,
     goal.projects.length,
     goal.spotlight,
-    onGoalCreated,
     toggleGoalExpanded,
     setGoalRenameNonce,
   ]);
@@ -472,10 +447,14 @@ export function GoalSection({
   const headerTopRounded =
     stackPosition === "only" || stackPosition === "first";
 
+  /** Bordered slot after the goal title (project count or empty-state add controls). */
+  const goalTitleMetaRuleClass =
+    "-translate-y-0.5 ml-2 mr-1.5 border-l border-zinc-600/35 pl-2.5";
+
   return (
     <div
       className={cn(
-        "group/goal max-w-full min-w-0 transition-colors duration-150",
+        "max-w-full min-w-0 transition-colors duration-150",
         stackPosition === "only" && "mb-2 rounded-md",
         stackPosition === "first" && "rounded-t-md border-b border-zinc-800/45",
         stackPosition === "middle" && "border-b border-zinc-800/45",
@@ -508,7 +487,7 @@ export function GoalSection({
         <div
           onClick={onGoalHeaderClick}
           className={cn(
-            "group/goal-header flex w-full min-w-max cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
+            "group/goal flex w-full min-w-0 cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
           )}
         >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -521,8 +500,8 @@ export function GoalSection({
           />
         </div>
 
-        {/* Goal title — AI info icon inline after name text (row hover to show) */}
-        <div className="w-[360px] min-w-0 shrink-0">
+        {/* Goal title — AI info icon inline after name; collapsed project count nudged up to align with title */}
+        <div className={cn(ROADMAP_TITLE_COL_CLASS)}>
           <InlineEditCell
             {...GRID_ALIGN}
             value={goal.description}
@@ -531,31 +510,80 @@ export function GoalSection({
             startInEditMode={goal.id === focusGoalTitleEditId}
             openEditNonce={goalRenameNonce}
             collapsedSuffix={
-              <span
-                className={cn(
-                  "inline-flex items-center align-middle transition-opacity duration-150",
-                  "opacity-0 group-hover/goal-header:opacity-100",
-                  aiContextUiOpen && "opacity-100",
-                  "pointer-events-none group-hover/goal-header:pointer-events-auto",
-                  aiContextUiOpen && "pointer-events-auto"
+              <>
+                {!expanded && collapsedSummary.projectCount > 0 && (
+                  <span
+                    className={cn(
+                      goalTitleMetaRuleClass,
+                      "inline-block whitespace-nowrap text-[10px] font-medium leading-none text-zinc-500"
+                    )}
+                    title={`${collapsedSummary.projectCount} project${collapsedSummary.projectCount === 1 ? "" : "s"} — click to expand`}
+                  >
+                    {collapsedSummary.projectCount} project
+                    {collapsedSummary.projectCount === 1 ? "" : "s"}
+                  </span>
                 )}
-              >
-                <AiContextInfoIcon
-                  inline
-                  variant="goal"
-                  goalId={goal.id}
-                  measurableTarget={goal.measurableTarget}
-                  whyItMatters={goal.whyItMatters}
-                  currentValue={goal.currentValue}
-                  onUiOpenChange={setAiContextUiOpen}
-                />
-              </span>
+                {!expanded && goal.projects.length === 0 && (
+                  <div
+                    className={cn(
+                      goalTitleMetaRuleClass,
+                      "inline-flex shrink-0 items-center gap-1",
+                      "opacity-0 pointer-events-none",
+                      "transition-opacity duration-300 ease-out motion-reduce:transition-none",
+                      "motion-reduce:pointer-events-auto motion-reduce:opacity-100",
+                      "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
+                      "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
+                      "focus-within:pointer-events-auto focus-within:opacity-100"
+                    )}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      title="Add a new project to this goal"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void addProjectToGoal();
+                      }}
+                      className={TRACKER_FOOTER_TEXT_ACTION}
+                    >
+                      Add project
+                    </button>
+                    <AiCreateButton
+                      type="project"
+                      goalId={goal.id}
+                      onCreated={onNewProjectCreated}
+                      inline
+                      spotlightRef={goalHeaderRef}
+                    />
+                  </div>
+                )}
+                <span
+                  className={cn(
+                    "inline-flex items-center align-middle",
+                    "transition-opacity duration-300 ease-out motion-reduce:transition-none",
+                    "opacity-0 motion-reduce:opacity-100 group-hover/goal:opacity-100",
+                    aiContextUiOpen && "opacity-100",
+                    "pointer-events-none motion-reduce:pointer-events-auto group-hover/goal:pointer-events-auto",
+                    aiContextUiOpen && "pointer-events-auto"
+                  )}
+                >
+                  <AiContextInfoIcon
+                    inline
+                    variant="goal"
+                    goalId={goal.id}
+                    measurableTarget={goal.measurableTarget}
+                    whyItMatters={goal.whyItMatters}
+                    currentValue={goal.currentValue}
+                    onUiOpenChange={setAiContextUiOpen}
+                  />
+                </span>
+              </>
             }
           />
         </div>
 
         {/* DRI */}
-        <div className="w-[5.85rem] min-w-0 shrink-0">
+        <div className="w-[5.85rem] min-w-0 shrink">
           <OwnerPickerCell
             {...GRID_ALIGN}
             people={people}
@@ -569,19 +597,23 @@ export function GoalSection({
         </div>
 
         {/* Priority */}
-        <div className="w-14 shrink-0">
+        <div className="w-28 min-w-0 shrink">
           <InlineEditCell
             {...GRID_ALIGN}
+            className="group/status"
+            overlaySelectQuiet
             value={goal.priority}
             onSave={(priority) => updateGoal(goal.id, { priority: priority as Priority })}
             type="select"
             options={priorityOptions}
-            displayClassName={cn("font-medium", prioritySelectTextClass(goal.priority))}
+            formatDisplay={formatPriorityOverlayDisplay}
+            displayTitle={`Priority — ${PRIORITY_MENU_LABEL[goal.priority]}`}
+            selectPresentation="always"
           />
         </div>
 
         {/* Cost of delay — w-28 aligns above project Complexity */}
-        <div className="w-28 shrink-0 min-w-0">
+        <div className="w-28 min-w-0 shrink">
           <InlineEditCell
             {...GRID_ALIGN}
             className="group/status"
@@ -598,7 +630,7 @@ export function GoalSection({
         </div>
 
         {/* Confidence — auto: average of project scores; w-28 aligns with project Confidence */}
-        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+        <div className="w-28 min-w-0 shrink flex items-center justify-end pr-0.5">
           <AutoConfidencePercent
             score={goalConfidenceAuto}
             explanation={goalConfidenceExplain}
@@ -606,7 +638,7 @@ export function GoalSection({
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) */}
-        <div className="w-52 shrink-0 min-w-0">
+        <div className="w-52 min-w-0 shrink">
           <SlackChannelPicker
             channelName={goal.slackChannel}
             channelId={goal.slackChannelId ?? ""}
@@ -666,28 +698,24 @@ export function GoalSection({
               </span>
             </span>
           )}
-          {!expanded && collapsedSummary.projectCount > 0 && (
-            <span
-              className="whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-medium text-zinc-500"
-              title={`${collapsedSummary.projectCount} project${collapsedSummary.projectCount === 1 ? "" : "s"} — click to expand`}
-            >
-              {collapsedSummary.projectCount} project{collapsedSummary.projectCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {goalHeaderWarnings.length === 1 && (
-            <span
-              className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95"
-              title={goalHeaderWarnings[0].title}
-            >
-              {goalHeaderWarnings[0].label}
-            </span>
-          )}
-          {goalHeaderWarnings.length > 1 && (
+          {goalHeaderWarnings.length > 0 ? (
             <WarningsBadge warnings={goalHeaderWarnings} />
-          )}
+          ) : null}
         </div>
 
         <RowActionIcons rowGroup="goal" forceVisible={goal.atRisk || goal.spotlight}>
+          <button
+            type="button"
+            title="Add a new project to this goal"
+            aria-label={`Add project to ${goal.description}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void addProjectToGoal();
+            }}
+            className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+          </button>
           <button
             ref={goalActionsRef}
             type="button"
@@ -727,7 +755,7 @@ export function GoalSection({
           expanded ? "opacity-100" : "opacity-0"
         )}
       >
-        <div>
+        <div className="group/project-area">
           {goal.projects.length > 0 && (
             <div className="rounded-r-md border-l-2 border-zinc-700/50 bg-zinc-900/25 shadow-[inset_1px_0_0_rgba(0,0,0,0.2)]">
               <ProjectsColumnHeaders
@@ -758,7 +786,7 @@ export function GoalSection({
           )}
 
           {goal.projects.length === 0 && (
-            <div className="pl-6 pr-4 py-1.5">
+            <div className="pl-16 pr-4 py-1.5">
               <div
                 className={cn(
                   "m-0 w-full min-w-0",
@@ -780,39 +808,14 @@ export function GoalSection({
                 <AiCreateButton
                   type="project"
                   goalId={goal.id}
-                  onCreated={(id) => setNewProjectNameFocusId(id)}
+                  onCreated={onNewProjectCreated}
                   inline
+                  spotlightRef={goalHeaderRef}
                 />
               </div>
             </div>
           )}
 
-          {/* Add project only when goal expanded; “Add goal” lives on CompanySection (visible when goals collapsed) */}
-          {goal.projects.length > 0 && (
-            <div
-              className={cn(
-                "flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5",
-                "opacity-0 pointer-events-none transition-opacity duration-150",
-                "group-hover/goal:pointer-events-auto group-hover/goal:opacity-100",
-                "group-focus-within/goal:pointer-events-auto group-focus-within/goal:opacity-100",
-                "focus-within:pointer-events-auto focus-within:opacity-100"
-              )}
-            >
-              <button
-                type="button"
-                title="Add a new project to this goal"
-                onClick={() => void addProjectToGoal()}
-                className={TRACKER_FOOTER_TEXT_ACTION}
-              >
-                Add project
-              </button>
-              <AiCreateButton
-                type="project"
-                goalId={goal.id}
-                onCreated={(id) => setNewProjectNameFocusId(id)}
-              />
-            </div>
-          )}
         </div>
       </CollapsePanel>
 

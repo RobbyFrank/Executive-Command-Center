@@ -37,10 +37,15 @@ const FONT_STEPS = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl"] as 
 const DEFAULT_FONT_STEP = 1;
 
 const PANEL_WIDTH_STORAGE_KEY = "ecc-assistant-panel-width";
-const MIN_PANEL_WIDTH = 300;
+const PANEL_HEIGHT_STORAGE_KEY = "ecc-assistant-panel-height";
+const MIN_PANEL_WIDTH = 450;
 const MAX_PANEL_WIDTH_CAP = 960;
 const PANEL_RIGHT_GUTTER_PX = 24;
 const MD_BREAKPOINT_PX = 768;
+
+const MIN_PANEL_HEIGHT = 650;
+/** Left handle starts below the top resize strip so edges do not overlap. */
+const TOP_RESIZE_STRIP_PX = 12;
 
 function maxPanelWidthPx(): number {
   if (typeof window === "undefined") return MAX_PANEL_WIDTH_CAP;
@@ -52,6 +57,16 @@ function maxPanelWidthPx(): number {
 
 function clampPanelWidth(w: number): number {
   return Math.min(maxPanelWidthPx(), Math.max(MIN_PANEL_WIDTH, w));
+}
+
+function maxPanelHeightPx(): number {
+  if (typeof window === "undefined") return 800;
+  const vh = window.innerHeight;
+  return Math.floor(Math.min(vh * 0.85, vh - 7 * 16));
+}
+
+function clampPanelHeight(h: number): number {
+  return Math.min(maxPanelHeightPx(), Math.max(MIN_PANEL_HEIGHT, h));
 }
 
 function readStoredTurns(): ChatTurn[] {
@@ -130,8 +145,9 @@ export function AiAssistantPanel({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [isMdUp, setIsMdUp] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
+  const [resizeAxis, setResizeAxis] = useState<null | "ew" | "ns" | "nwse">(null);
 
   const [entityBundle, setEntityBundle] = useState<AssistantEntitiesBundle | null>(
     null,
@@ -155,11 +171,18 @@ export function AiAssistantPanel({
     applyMq();
     mq.addEventListener("change", applyMq);
     try {
-      const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
-      if (raw != null) {
-        const n = Number.parseInt(raw, 10);
+      const rawW = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+      if (rawW != null) {
+        const n = Number.parseInt(rawW, 10);
         if (Number.isFinite(n)) {
           setPanelWidth(clampPanelWidth(n));
+        }
+      }
+      const rawH = localStorage.getItem(PANEL_HEIGHT_STORAGE_KEY);
+      if (rawH != null) {
+        const n = Number.parseInt(rawH, 10);
+        if (Number.isFinite(n)) {
+          setPanelHeight(clampPanelHeight(n));
         }
       }
     } catch {
@@ -170,23 +193,51 @@ export function AiAssistantPanel({
 
   useEffect(() => {
     function onResize() {
-      setPanelWidth((w) => (w == null ? null : clampPanelWidth(w)));
+      setPanelWidth((w) => {
+        if (w == null) return null;
+        const next = clampPanelWidth(w);
+        if (next !== w) {
+          try {
+            localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(next));
+          } catch {
+            /* ignore */
+          }
+        }
+        return next;
+      });
+      setPanelHeight((h) => {
+        if (h == null) return null;
+        const next = clampPanelHeight(h);
+        if (next !== h) {
+          try {
+            localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(next));
+          } catch {
+            /* ignore */
+          }
+        }
+        return next;
+      });
     }
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
   useEffect(() => {
-    if (!isResizing) return;
+    if (!resizeAxis) return;
     const prevCursor = document.body.style.cursor;
     const prevUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "ew-resize";
+    document.body.style.cursor =
+      resizeAxis === "ew"
+        ? "ew-resize"
+        : resizeAxis === "ns"
+          ? "ns-resize"
+          : "nwse-resize";
     document.body.style.userSelect = "none";
     return () => {
       document.body.style.cursor = prevCursor;
       document.body.style.userSelect = prevUserSelect;
     };
-  }, [isResizing]);
+  }, [resizeAxis]);
 
   useEffect(() => {
     setFontStep(readStoredFontStep());
@@ -436,7 +487,7 @@ export function AiAssistantPanel({
         if (ev.pointerId !== e.pointerId) return;
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
-        setIsResizing(false);
+        setResizeAxis(null);
         setPanelWidth((current) => {
           if (current != null) {
             try {
@@ -451,43 +502,170 @@ export function AiAssistantPanel({
 
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
-      setIsResizing(true);
+      setResizeAxis("ew");
     },
     [isMdUp, panelWidth],
   );
+
+  const onResizeTopPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isMdUp || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = panelRef.current;
+      const rect = el?.getBoundingClientRect();
+      const startY = e.clientY;
+      const startHeight =
+        rect?.height ??
+        clampPanelHeight(panelHeight ?? maxPanelHeightPx());
+
+      function move(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        const delta = ev.clientY - startY;
+        setPanelHeight(clampPanelHeight(startHeight - delta));
+      }
+
+      function up(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        setResizeAxis(null);
+        setPanelHeight((current) => {
+          if (current != null) {
+            try {
+              localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(current));
+            } catch {
+              /* ignore */
+            }
+          }
+          return current;
+        });
+      }
+
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      setResizeAxis("ns");
+    },
+    [isMdUp, panelHeight],
+  );
+
+  const onResizeCornerPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isMdUp || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = panelRef.current;
+      const rect = el?.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startWidth = rect?.width ?? clampPanelWidth(panelWidth ?? maxPanelWidthPx());
+      const startHeight =
+        rect?.height ?? clampPanelHeight(panelHeight ?? maxPanelHeightPx());
+
+      function move(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        const deltaX = ev.clientX - startX;
+        const deltaY = ev.clientY - startY;
+        setPanelWidth(clampPanelWidth(startWidth - deltaX));
+        setPanelHeight(clampPanelHeight(startHeight - deltaY));
+      }
+
+      function up(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        const deltaX = ev.clientX - startX;
+        const deltaY = ev.clientY - startY;
+        const w = clampPanelWidth(startWidth - deltaX);
+        const h = clampPanelHeight(startHeight - deltaY);
+        setPanelWidth(w);
+        setPanelHeight(h);
+        try {
+          localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(w));
+          localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(h));
+        } catch {
+          /* ignore */
+        }
+        setResizeAxis(null);
+      }
+
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      setResizeAxis("nwse");
+    },
+    [isMdUp, panelWidth, panelHeight],
+  );
+
+  const panelUsesCustomHeight = isMdUp && panelHeight != null;
 
   return (
     <div
       ref={panelRef}
       className={cn(
-        "fixed bottom-24 right-6 z-50 flex h-[min(85vh,calc(100dvh-7rem))] flex-col overflow-hidden rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl",
+        "fixed bottom-24 right-6 z-50 flex flex-col overflow-hidden rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl",
+        !panelUsesCustomHeight && "h-[min(85vh,calc(100dvh-7rem))]",
+        panelUsesCustomHeight && "min-h-[650px]",
         "max-md:left-4 max-md:right-4 max-md:w-auto",
         isMdUp && panelWidth == null && "w-[min(960px,calc(100vw-2rem))]",
-        isMdUp && panelWidth != null && "min-w-[300px] max-w-[min(960px,calc(100vw-3rem))]",
+        isMdUp && panelWidth != null && "min-w-[450px] max-w-[min(960px,calc(100vw-3rem))]",
         "origin-bottom-right transition-[opacity,transform,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-opacity motion-reduce:duration-200",
         visible
           ? "translate-y-0 scale-100 opacity-100"
           : "pointer-events-none translate-y-3 scale-[0.96] opacity-0 motion-reduce:translate-y-0 motion-reduce:scale-100",
       )}
       style={
-        isMdUp && panelWidth != null ? { width: panelWidth } : undefined
+        isMdUp
+          ? {
+              ...(panelWidth != null ? { width: panelWidth } : {}),
+              ...(panelHeight != null ? { height: panelHeight } : {}),
+            }
+          : undefined
       }
       role="dialog"
       aria-modal="true"
       aria-labelledby="ai-assistant-title"
     >
       {isMdUp ? (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize assistant width"
-          className={cn(
-            "absolute left-0 top-0 z-[60] w-3 cursor-ew-resize touch-none select-none rounded-l-md",
-            "hover:bg-emerald-500/10",
-            "after:pointer-events-none after:absolute after:inset-y-4 after:right-0 after:w-px after:bg-zinc-500/80",
-          )}
-          onPointerDown={onResizeHandlePointerDown}
-        />
+        <>
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize assistant height"
+            className={cn(
+              "absolute right-0 top-0 z-[60] cursor-ns-resize touch-none select-none rounded-tr-md",
+              "hover:bg-emerald-500/10",
+            )}
+            style={{
+              left: TOP_RESIZE_STRIP_PX,
+              height: TOP_RESIZE_STRIP_PX,
+            }}
+            onPointerDown={onResizeTopPointerDown}
+          />
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize assistant width"
+            className={cn(
+              "absolute bottom-0 left-0 z-[60] w-3 cursor-ew-resize touch-none select-none rounded-bl-md",
+              "hover:bg-emerald-500/10",
+            )}
+            style={{ top: TOP_RESIZE_STRIP_PX }}
+            onPointerDown={onResizeHandlePointerDown}
+          />
+          <div
+            role="group"
+            aria-label="Resize assistant width and height"
+            className={cn(
+              "absolute left-0 top-0 z-[61] cursor-nwse-resize touch-none select-none rounded-tl-md",
+              "hover:bg-emerald-500/10",
+            )}
+            style={{
+              width: TOP_RESIZE_STRIP_PX,
+              height: TOP_RESIZE_STRIP_PX,
+            }}
+            onPointerDown={onResizeCornerPointerDown}
+          />
+        </>
       ) : null}
       <div className="flex items-center justify-between gap-2 border-b border-zinc-700 px-3 py-2">
         <h2 id="ai-assistant-title" className="text-sm font-semibold text-zinc-100">

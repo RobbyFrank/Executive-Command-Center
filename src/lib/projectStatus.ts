@@ -6,6 +6,7 @@ export const PROJECT_STATUS_ORDER = [
   "Pending",
   "In Progress",
   "Stuck",
+  "Blocked",
   "For Review",
   "Done",
 ] as const;
@@ -13,6 +14,15 @@ export const PROJECT_STATUS_ORDER = [
 /** Select options in pipeline order (value === stored JSON). */
 export const PROJECT_STATUS_SELECT_OPTIONS: { value: string; label: string }[] =
   PROJECT_STATUS_ORDER.map((value) => ({ value, label: value }));
+
+/** Roadmap status dropdown — excludes `Blocked` (set automatically by dependency state). */
+export const PROJECT_STATUS_SELECT_OPTIONS_EDITABLE: {
+  value: string;
+  label: string;
+}[] = PROJECT_STATUS_ORDER.filter((s) => s !== "Blocked").map((value) => ({
+  value,
+  label: value,
+}));
 
 /**
  * Goal-level statuses that are not in {@link PROJECT_STATUS_ORDER} but can appear

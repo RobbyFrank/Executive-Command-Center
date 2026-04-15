@@ -23,13 +23,16 @@ export const GoalStatusEnum = z.enum([
 
 /**
  * Project-level workflow status. Legacy JSON values are coerced on load
- * (e.g. `Blocked` → `Stuck`, `Not Started` → `Pending`).
+ * (e.g. `Not Started` → `Pending`). `Blocked` is reserved for dependency blocks
+ * (shown in the UI when another project’s milestones are incomplete); it is not
+ * chosen from the status dropdown.
  */
 export const ProjectStatusEnum = z.enum([
   "Idea",
   "Pending",
   "In Progress",
   "Stuck",
+  "Blocked",
   "For Review",
   "Done",
 ]);
@@ -37,7 +40,7 @@ export const ProjectStatusEnum = z.enum([
 const LEGACY_PROJECT_STATUS: Record<string, string> = {
   "Not Started": "Pending",
   Planning: "Idea",
-  Blocked: "Stuck",
+  Blocked: "Blocked",
   Ongoing: "In Progress",
   "Demand Testing": "In Progress",
   Evaluating: "In Progress",
@@ -141,7 +144,6 @@ export const GoalSchema = z.object({
   slackChannel: z.string().default(""),
   /** Slack channel ID (e.g. C0G9QF9GW); empty when set manually without the picker. */
   slackChannelId: z.string().default(""),
-  lastReviewed: z.string().default(""),
   status: GoalStatusEnum.default("Not Started"),
   /** Executive signal: goal needs attention (mutually exclusive with spotlight) */
   atRisk: z.boolean().default(false),
@@ -183,7 +185,6 @@ export const ProjectSchema = z.object({
   targetDate: z.string().default(""),
   /** @deprecated Slack threads are now tracked per-milestone. Kept for backward-compat on load. */
   slackUrl: z.string().default(""),
-  lastReviewed: z.string().default(""),
   /** Executive signal: project needs attention (mutually exclusive with spotlight) */
   atRisk: z.boolean().default(false),
   /** Executive signal: highlight win or momentum (mutually exclusive with atRisk) */

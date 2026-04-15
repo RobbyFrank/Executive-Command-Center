@@ -1,5 +1,13 @@
 import type { Priority } from "@/lib/types/tracker";
 
+/** ClickUp-style labels (stored values remain P0–P3). */
+export const PRIORITY_MENU_LABEL: Record<Priority, string> = {
+  P0: "Urgent",
+  P1: "High",
+  P2: "Normal",
+  P3: "Low",
+};
+
 const PRIORITY_ORDER: Record<Priority, number> = {
   P0: 0,
   P1: 1,
@@ -29,5 +37,21 @@ export function prioritySelectTextClass(priority: string): string {
       return "text-zinc-400";
     default:
       return "text-zinc-300";
+  }
+}
+
+/** `Flag` icon color (lucide stroke). */
+export function priorityFlagIconClass(priority: string): string {
+  switch (priority) {
+    case "P0":
+      return "text-red-500";
+    case "P1":
+      return "text-amber-400";
+    case "P2":
+      return "text-blue-500";
+    case "P3":
+      return "text-zinc-500";
+    default:
+      return "text-zinc-400";
   }
 }

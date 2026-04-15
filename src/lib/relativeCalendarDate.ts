@@ -43,6 +43,49 @@ function calendarDaysBetween(target: Date, reference: Date): number {
 }
 
 /**
+ * True when `ymd` is a valid calendar date strictly before today (local).
+ * Empty or invalid input is treated as not past due.
+ */
+export function isCalendarDatePastDue(ymd: string, now = new Date()): boolean {
+  const target = parseCalendarDateString(ymd);
+  if (!target) return false;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return calendarDaysBetween(target, today) < 0;
+}
+
+/**
+ * Target-date urgency for open milestones (local calendar days until due).
+ * - `none`: empty or invalid date
+ * - `overdue`: before today
+ * - `today`: due today
+ * - `soon`: due in 1–3 days
+ * - `this_week`: due in 4–7 days
+ * - `later`: due in 8+ days
+ */
+export type MilestoneDueHorizon =
+  | "none"
+  | "overdue"
+  | "today"
+  | "soon"
+  | "this_week"
+  | "later";
+
+export function getMilestoneDueHorizon(
+  ymd: string,
+  now = new Date()
+): MilestoneDueHorizon {
+  const target = parseCalendarDateString(ymd);
+  if (!target) return "none";
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = calendarDaysBetween(target, today);
+  if (diff < 0) return "overdue";
+  if (diff === 0) return "today";
+  if (diff <= 3) return "soon";
+  if (diff <= 7) return "this_week";
+  return "later";
+}
+
+/**
  * Human-friendly relative label for a calendar date (e.g. target dates).
  * Examples: today, yesterday, in 6 days (under 2 weeks), in 5 weeks, 3 months ago, in 1 year.
  */

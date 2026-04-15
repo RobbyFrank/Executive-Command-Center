@@ -115,7 +115,7 @@ export function WarningsBadge({
         onBlur={scheduleClose}
         className="whitespace-nowrap rounded-md border border-orange-400/45 bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300/95 cursor-help"
       >
-        {warnings.length} warnings
+        {warnings.length === 1 ? "1 warning" : `${warnings.length} warnings`}
       </button>
       {mounted && overlay ? createPortal(overlay, document.body) : null}
     </>
