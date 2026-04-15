@@ -337,7 +337,12 @@ export function filterTrackerHierarchyByStatusEnum(
     .filter((c): c is CompanyWithGoals => c !== null);
 }
 
-/** When `hideDone` is true, drops projects with status `Done` and prunes empty goals/companies. */
+/**
+ * When `hideDone` is true: removes projects with status `Done` (except those with no
+ * milestones — those stay visible), drops goals that only had completed work but keeps
+ * goals with an empty project list, and drops companies with no remaining goals. Done
+ * milestone rows are hidden separately in `ProjectRow` via the same toolbar toggle.
+ */
 export function filterTrackerHierarchyHideDoneProjects(
   hierarchy: CompanyWithGoals[],
   hideDone: boolean
@@ -347,12 +352,14 @@ export function filterTrackerHierarchyHideDoneProjects(
   return hierarchy
     .map((c) => ({
       ...c,
-      goals: c.goals
-        .map((g) => ({
-          ...g,
-          projects: g.projects.filter((p) => p.status !== "Done"),
-        }))
-        .filter((g) => g.projects.length > 0),
+      goals: c.goals.flatMap((g) => {
+        const hadNoProjects = g.projects.length === 0;
+        const projects = g.projects.filter(
+          (p) => p.milestones.length === 0 || p.status !== "Done"
+        );
+        if (projects.length === 0 && !hadNoProjects) return [];
+        return [{ ...g, projects }];
+      }),
     }))
     .filter((c) => c.goals.length > 0);
 }

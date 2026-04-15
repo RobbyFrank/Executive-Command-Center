@@ -1660,6 +1660,13 @@ export function ReviewMode({ hierarchy, people }: ReviewModeProps) {
                           startNameInEditMode={ms.id === milestoneNameFocusId}
                           isNextPendingMilestone={isNext}
                           isQueuedPendingMilestone={isQueued}
+                          goalSlackChannelId={
+                            parentGoalForCurrentProject?.slackChannelId ?? ""
+                          }
+                          goalSlackChannelName={
+                            parentGoalForCurrentProject?.slackChannel ?? ""
+                          }
+                          people={people}
                         />
                       );
                     })}

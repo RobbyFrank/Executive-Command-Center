@@ -15,6 +15,7 @@ import type {
   Goal,
   Company,
   CompanyWithGoals,
+  Milestone,
 } from "@/lib/types/tracker";
 import { PriorityEnum } from "@/lib/schemas/tracker";
 import { InlineEditCell } from "./InlineEditCell";
@@ -92,6 +93,10 @@ import { AiUpdateDialog } from "./AiUpdateDialog";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { RowActionIcons } from "./RowActionIcons";
 import { useAssistant } from "@/contexts/AssistantContext";
+import { useSlackThreadStatus } from "@/hooks/useSlackThreadStatus";
+import { MilestoneSlackThreadInline } from "./MilestoneSlackThreadInline";
+import { SlackMilestoneThreadPopovers } from "./SlackMilestoneThreadPopovers";
+import { isValidHttpUrl } from "@/lib/httpUrl";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -112,6 +117,11 @@ interface ProjectRowProps {
   allCompanies: Company[];
   /** Full hierarchy for “Mirror to goal…” picker (unfiltered). */
   mirrorPickerHierarchy: CompanyWithGoals[];
+  /** Roadmap toolbar — when false, Done milestones are not listed (matches Show completed). */
+  showCompletedProjects?: boolean;
+  /** Parent goal Slack channel — milestones can create threads here. */
+  goalSlackChannelId?: string;
+  goalSlackChannelName?: string;
 }
 
 export function ProjectRow({
@@ -125,6 +135,9 @@ export function ProjectRow({
   allGoals,
   allCompanies,
   mirrorPickerHierarchy,
+  showCompletedProjects = true,
+  goalSlackChannelId = "",
+  goalSlackChannelName = "",
 }: ProjectRowProps) {
   const [expanded, setExpanded] = useState(false);
   /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
@@ -133,6 +146,7 @@ export function ProjectRow({
   const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
   const [showMilestones, setShowMilestones] = useState(true);
+  const [futureMilestonesOpen, setFutureMilestonesOpen] = useState(false);
   /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
   const [newMilestoneNameFocusId, setNewMilestoneNameFocusId] = useState<
     string | null
@@ -152,7 +166,10 @@ export function ProjectRow({
   } = useTrackerExpandBulk();
   const projectContext = useContextMenu();
   const projectActionsRef = useRef<HTMLButtonElement>(null);
+  const nextMilestoneSlackAnchorRef = useRef<HTMLButtonElement>(null);
   const [projectReviewNotesNonce, setProjectReviewNotesNonce] = useState(0);
+  const [nextMsThreadPopoverOpen, setNextMsThreadPopoverOpen] = useState(false);
+  const [nextMsThreadPingOpen, setNextMsThreadPingOpen] = useState(false);
 
   useEffect(() => {
     if (!focusProjectMode || focusEnforceTick === 0) return;
@@ -280,6 +297,65 @@ export function ProjectRow({
     [project.milestones]
   );
 
+  const milestonesForRunway = useMemo(() => {
+    if (showCompletedProjects) return project.milestones;
+    return project.milestones.filter((m) => m.status !== "Done");
+  }, [project.milestones, showCompletedProjects]);
+
+  const milestoneRunway = useMemo(() => {
+    const all = milestonesForRunway;
+    const firstPendingIdx = all.findIndex((m) => m.status !== "Done");
+    if (firstPendingIdx === -1) {
+      return {
+        completedBeforeRunway: all,
+        coreMilestones: [] as Milestone[],
+        futureMilestones: [] as Milestone[],
+      };
+    }
+    return {
+      completedBeforeRunway: all.slice(0, firstPendingIdx),
+      coreMilestones: all.slice(firstPendingIdx, firstPendingIdx + 3),
+      futureMilestones: all.slice(firstPendingIdx + 3),
+    };
+  }, [milestonesForRunway]);
+
+  const renderMilestoneRow = useCallback(
+    (ms: Milestone) => {
+      const isNext =
+        nextPendingMilestone != null && ms.id === nextPendingMilestone.id;
+      const isQueued = ms.status !== "Done" && !isNext;
+      return (
+        <MilestoneRow
+          key={ms.id}
+          milestone={ms}
+          startNameInEditMode={ms.id === newMilestoneNameFocusId}
+          isNextPendingMilestone={isNext}
+          isQueuedPendingMilestone={isQueued}
+          goalSlackChannelId={goalSlackChannelId}
+          goalSlackChannelName={goalSlackChannelName}
+          people={people}
+        />
+      );
+    },
+    [
+      nextPendingMilestone,
+      newMilestoneNameFocusId,
+      goalSlackChannelId,
+      goalSlackChannelName,
+      people,
+    ]
+  );
+
+  const onAddMilestoneClick = useCallback(async () => {
+    const ms = await createMilestone({
+      projectId: project.id,
+      name: "New milestone",
+      status: "Not Done",
+      targetDate: "",
+    });
+    setNewMilestoneNameFocusId(ms.id);
+  }, [project.id]);
+
   const nextMilestoneUi = useMemo(() => {
     if (!nextPendingMilestone) return null;
     const td = nextPendingMilestone.targetDate.trim();
@@ -306,6 +382,18 @@ export function ProjectRow({
       isOverdueHorizon: compact != null && compact.startsWith("-"),
     };
   }, [nextPendingMilestone, project.milestones]);
+
+  const nextMilestoneSlackUrl = useMemo(() => {
+    if (expanded) return null;
+    if (!nextPendingMilestone) return null;
+    const u = nextPendingMilestone.slackUrl.trim();
+    return isValidHttpUrl(u) ? u : null;
+  }, [expanded, nextPendingMilestone]);
+
+  const nextMilestoneSlackThread = useSlackThreadStatus(
+    nextMilestoneSlackUrl,
+    people
+  );
 
   const warnings = useMemo(
     () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
@@ -725,61 +813,82 @@ export function ProjectRow({
           </span>
         </div>
 
-        {/* Next milestone — horizon chip (D/W/M/Y) + name; clicks pass through except interactive controls */}
-        <div className="w-[18rem] shrink-0 min-w-0">
-          {project.milestones.length === 0 ? (
-            <button
-              type="button"
-              title="Click to add a milestone"
-              className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
-              onClick={async (e) => {
-                e.stopPropagation();
-                const ms = await createMilestone({
-                  projectId: project.id,
-                  name: "New milestone",
-                  status: "Not Done",
-                  targetDate: "",
-                });
-                setNewMilestoneNameFocusId(ms.id);
-                setExpanded(true);
-                setShowMilestones(true);
-              }}
-            >
-              <Plus
-                className="h-3 w-3 shrink-0 text-amber-300/90"
-                aria-hidden
-              />
-              <span className="min-w-0 truncate">Create milestone</span>
-            </button>
-          ) : nextPendingMilestone && nextMilestoneUi ? (
-            <div
-              className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
-              title={nextMilestoneUi.title}
-            >
-              <span
-                className={cn(
-                  "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
-                  nextMilestoneUi.chipLabel === "—"
-                    ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
-                    : nextMilestoneUi.isOverdueHorizon
-                      ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
-                      : "text-violet-200/95 bg-violet-500/15"
-                )}
+        {/* Next milestone — horizon + name; optional Slack thread preview when collapsed (same URL as next pending milestone) */}
+        <div className="w-[36rem] shrink-0 min-w-0" aria-hidden={expanded}>
+          {!expanded ? (
+            project.milestones.length === 0 ? (
+              <button
+                type="button"
+                title="Click to add a milestone"
+                className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const ms = await createMilestone({
+                    projectId: project.id,
+                    name: "New milestone",
+                    status: "Not Done",
+                    targetDate: "",
+                  });
+                  setNewMilestoneNameFocusId(ms.id);
+                  setExpanded(true);
+                  setShowMilestones(true);
+                }}
               >
-                {nextMilestoneUi.chipLabel}
-              </span>
-              <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
-                {nextPendingMilestone.name}
+                <Plus
+                  className="h-3 w-3 shrink-0 text-amber-300/90"
+                  aria-hidden
+                />
+                <span className="min-w-0 truncate">Create milestone</span>
+              </button>
+            ) : nextPendingMilestone && nextMilestoneUi ? (
+              <div className="flex min-w-0 items-start gap-2">
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <div
+                    className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
+                    title={nextMilestoneUi.title}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
+                        nextMilestoneUi.chipLabel === "—"
+                          ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
+                          : nextMilestoneUi.isOverdueHorizon
+                            ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
+                            : "text-violet-200/95 bg-violet-500/15"
+                      )}
+                    >
+                      {nextMilestoneUi.chipLabel}
+                    </span>
+                    <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
+                      {nextPendingMilestone.name}
+                    </p>
+                  </div>
+                </div>
+                {nextMilestoneSlackUrl ? (
+                  <div
+                    className="min-w-0 max-w-[min(20rem,52%)] shrink-0 border-l border-zinc-800/80 pl-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MilestoneSlackThreadInline
+                      ref={nextMilestoneSlackAnchorRef}
+                      compact
+                      status={nextMilestoneSlackThread.status}
+                      loading={nextMilestoneSlackThread.loading}
+                      error={nextMilestoneSlackThread.error}
+                      onOpen={() => setNextMsThreadPopoverOpen(true)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p
+                className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
+                title="All milestones are done"
+              >
+                All milestones done
               </p>
-            </div>
-          ) : (
-            <p
-              className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
-              title="All milestones are done"
-            >
-              All milestones done
-            </p>
-          )}
+            )
+          ) : null}
         </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
@@ -858,6 +967,22 @@ export function ProjectRow({
         onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
       />
 
+      {nextMilestoneSlackUrl && nextPendingMilestone ? (
+        <SlackMilestoneThreadPopovers
+          anchorRef={nextMilestoneSlackAnchorRef}
+          slackUrl={nextMilestoneSlackUrl}
+          milestoneName={nextPendingMilestone.name}
+          status={nextMilestoneSlackThread.status}
+          rosterHints={nextMilestoneSlackThread.rosterHints}
+          popoverOpen={nextMsThreadPopoverOpen}
+          onPopoverOpenChange={setNextMsThreadPopoverOpen}
+          pingOpen={nextMsThreadPingOpen}
+          onPingOpenChange={setNextMsThreadPingOpen}
+          onRefreshStatus={() => void nextMilestoneSlackThread.refresh()}
+          onPingSent={() => void nextMilestoneSlackThread.refresh()}
+        />
+      ) : null}
+
       <MirrorGoalPickerDialog
         open={mirrorPickerOpen}
         onClose={() => setMirrorPickerOpen(false)}
@@ -914,50 +1039,97 @@ export function ProjectRow({
                 </button>
               </p>
             </div>
+          ) : milestonesForRunway.length === 0 && !showCompletedProjects ? (
+            <div className="pl-14 pr-4 py-2 text-xs text-zinc-500">
+              Completed milestones are hidden — turn on Show completed in the
+              toolbar to see them.
+            </div>
           ) : (
             <>
-              {project.milestones.map((ms) => {
-                const isNext =
-                  nextPendingMilestone != null &&
-                  ms.id === nextPendingMilestone.id;
-                const isQueued =
-                  ms.status !== "Done" && !isNext;
-                return (
-                  <MilestoneRow
-                    key={ms.id}
-                    milestone={ms}
-                    startNameInEditMode={ms.id === newMilestoneNameFocusId}
-                    isNextPendingMilestone={isNext}
-                    isQueuedPendingMilestone={isQueued}
-                  />
-                );
-              })}
-              <div
-                className={cn(
-                  "overflow-hidden pl-14 pr-4",
-                  "max-h-0 py-0 opacity-0 pointer-events-none",
-                  "transition-[max-height,padding,opacity] duration-150 ease-out",
-                  "group-hover/milestones:max-h-14 group-hover/milestones:py-1.5 group-hover/milestones:opacity-100 group-hover/milestones:pointer-events-auto",
-                  "focus-within:max-h-14 focus-within:py-1.5 focus-within:opacity-100 focus-within:pointer-events-auto"
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const ms = await createMilestone({
-                      projectId: project.id,
-                      name: "New milestone",
-                      status: "Not Done",
-                      targetDate: "",
-                    });
-                    setNewMilestoneNameFocusId(ms.id);
-                  }}
-                  className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+              {milestoneRunway.completedBeforeRunway.map((ms) =>
+                renderMilestoneRow(ms)
+              )}
+
+              {milestoneRunway.completedBeforeRunway.length > 0 &&
+              (milestoneRunway.coreMilestones.length > 0 ||
+                milestoneRunway.futureMilestones.length > 0) ? (
+                <div
+                  className="border-b border-zinc-800/60 mb-0.5"
+                  aria-hidden
+                />
+              ) : null}
+
+              {milestoneRunway.coreMilestones.map((ms) =>
+                renderMilestoneRow(ms)
+              )}
+
+              {milestoneRunway.futureMilestones.length > 0 ? (
+                <>
+                  <CollapsePanel
+                    open={futureMilestonesOpen}
+                    fadeContent
+                    transitionClassName="duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none"
+                  >
+                    {milestoneRunway.futureMilestones.map((ms) =>
+                      renderMilestoneRow(ms)
+                    )}
+                  </CollapsePanel>
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-zinc-800/60 pl-14 pr-4 py-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFutureMilestonesOpen((open) => !open)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300 rounded-sm py-0.5 -my-0.5 pl-0 pr-2"
+                      aria-expanded={futureMilestonesOpen}
+                    >
+                      {futureMilestonesOpen ? (
+                        <ChevronDown
+                          className="h-3.5 w-3.5 shrink-0"
+                          aria-hidden
+                        />
+                      ) : (
+                        <ChevronRight
+                          className="h-3.5 w-3.5 shrink-0"
+                          aria-hidden
+                        />
+                      )}
+                      <span className="min-w-0">
+                        {futureMilestonesOpen ? "Hide" : "Show"}{" "}
+                        {milestoneRunway.futureMilestones.length === 1
+                          ? "1 future milestone"
+                          : `${milestoneRunway.futureMilestones.length} future milestones`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onAddMilestoneClick}
+                      title="Add a new milestone to this project"
+                      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add milestone
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div
+                  className={cn(
+                    "overflow-hidden pl-14 pr-4",
+                    "max-h-0 py-0 opacity-0 pointer-events-none",
+                    "transition-[max-height,padding,opacity] duration-150 ease-out",
+                    "group-hover/milestones:max-h-14 group-hover/milestones:py-1.5 group-hover/milestones:opacity-100 group-hover/milestones:pointer-events-auto",
+                    "focus-within:max-h-14 focus-within:py-1.5 focus-within:opacity-100 focus-within:pointer-events-auto"
+                  )}
                 >
-                  <Plus className="h-3 w-3" />
-                  Add milestone
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={onAddMilestoneClick}
+                    className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add milestone
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

@@ -49,6 +49,7 @@ interface CompanySectionProps {
   allGoals: Goal[];
   allCompanies: Company[];
   mirrorPickerHierarchy: CompanyWithGoals[];
+  showCompletedProjects?: boolean;
 }
 
 export function CompanySection({
@@ -59,6 +60,7 @@ export function CompanySection({
   allGoals,
   allCompanies,
   mirrorPickerHierarchy,
+  showCompletedProjects = true,
 }: CompanySectionProps) {
   const [expanded, setExpanded] = useState(true);
   /** Per-goal expanded state so we can default new goals when siblings are all collapsed. */
@@ -355,6 +357,7 @@ export function CompanySection({
                     allGoals={allGoals}
                     allCompanies={allCompanies}
                     mirrorPickerHierarchy={mirrorPickerHierarchy}
+                    showCompletedProjects={showCompletedProjects}
                   />
                 ))}
               </div>

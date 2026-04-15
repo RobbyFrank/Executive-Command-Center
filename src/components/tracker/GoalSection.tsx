@@ -98,6 +98,7 @@ interface GoalSectionProps {
   allGoals: Goal[];
   allCompanies: Company[];
   mirrorPickerHierarchy: CompanyWithGoals[];
+  showCompletedProjects?: boolean;
 }
 
 export function GoalSection({
@@ -114,6 +115,7 @@ export function GoalSection({
   allGoals,
   allCompanies,
   mirrorPickerHierarchy,
+  showCompletedProjects = true,
 }: GoalSectionProps) {
   const [expanded, setExpanded] = useState(() => initialExpanded ?? true);
   /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
@@ -740,6 +742,9 @@ export function GoalSection({
                     allGoals={allGoals}
                     allCompanies={allCompanies}
                     mirrorPickerHierarchy={mirrorPickerHierarchy}
+                    showCompletedProjects={showCompletedProjects}
+                    goalSlackChannelId={goal.slackChannelId ?? ""}
+                    goalSlackChannelName={goal.slackChannel ?? ""}
                   />
                 </div>
               ))}

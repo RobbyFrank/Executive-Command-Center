@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ExternalLink, Hash, Loader2, X } from "lucide-react";
+import { ChevronDown, Hash, Loader2, Pencil, X } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
 import { fetchSlackChannelsList } from "@/server/actions/slack";
 import { formatSlackChannelHash, slackChannelUrl } from "@/lib/slackDisplay";
@@ -210,45 +210,78 @@ export function SlackChannelPicker({
   const displayHash = hasChannel ? formatSlackChannelHash(channelName || channelId) : "";
   const linkUrl = channelId.trim() ? slackChannelUrl(channelId) : "";
 
+  const pickerAnchorClasses = cn(
+    "flex shrink-0 items-center rounded p-1 text-zinc-500 opacity-0 transition-[opacity,colors] group-hover/channel:opacity-100 hover:bg-zinc-800 hover:text-zinc-300",
+  );
+
   const collapsed = (
     <div className="group/channel flex min-w-0 items-center gap-1">
-      <button
-        ref={anchorRef}
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen(!open);
-        }}
-        className={cn(
-          "group/slack relative flex min-h-[28px] min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-6 text-left text-sm transition-colors hover:bg-zinc-800",
-          trackerGridAlign ? "pl-0" : "pl-1.5",
-          variant === "plain" && "hover:bg-zinc-800/60",
-        )}
-        title={hasChannel ? `Slack channel: ${displayHash}` : "Click to set Slack channel"}
-      >
-        {hasChannel ? (
-          <span className="min-w-0 truncate font-medium text-zinc-300">
-            {displayHash}
-          </span>
-        ) : (
-          <span className="italic text-zinc-600">Add channel</span>
-        )}
-        <ChevronDown
-          className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity group-hover/slack:opacity-100"
-          aria-hidden
-        />
-      </button>
-      {hasChannel && linkUrl && (
-        <a
-          href={linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="flex shrink-0 items-center rounded p-1 text-zinc-500 opacity-0 transition-[opacity,colors] group-hover/channel:opacity-100 hover:bg-zinc-800 hover:text-zinc-300"
-          title="Open in Slack"
+      {hasChannel && linkUrl ? (
+        <>
+          <a
+            href={linkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "group/slack relative flex min-h-[28px] min-w-0 max-w-full flex-1 cursor-pointer items-center rounded py-0.5 text-left text-sm transition-colors hover:bg-zinc-800",
+              trackerGridAlign ? "pl-0" : "pl-1.5",
+              variant === "plain" && "hover:bg-zinc-800/60",
+            )}
+            title={`Open ${displayHash} in Slack`}
+          >
+            <span className="min-w-0 truncate font-medium text-zinc-300">
+              {displayHash}
+            </span>
+          </a>
+          <button
+            ref={anchorRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(!open);
+            }}
+            className={pickerAnchorClasses}
+            title="Change Slack channel"
+            aria-expanded={open}
+            aria-haspopup="listbox"
+          >
+            <Pencil className="h-3 w-3" aria-hidden />
+          </button>
+        </>
+      ) : (
+        <button
+          ref={anchorRef}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(!open);
+          }}
+          className={cn(
+            "group/slack relative flex min-h-[28px] min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-6 text-left text-sm transition-colors hover:bg-zinc-800",
+            trackerGridAlign ? "pl-0" : "pl-1.5",
+            variant === "plain" && "hover:bg-zinc-800/60",
+          )}
+          title={
+            hasChannel
+              ? `Slack channel: ${displayHash} — click to change`
+              : "Click to set Slack channel"
+          }
+          aria-expanded={open}
+          aria-haspopup="listbox"
         >
-          <ExternalLink className="h-3 w-3" />
-        </a>
+          {hasChannel ? (
+            <span className="min-w-0 truncate font-medium text-zinc-300">
+              {displayHash}
+            </span>
+          ) : (
+            <span className="italic text-zinc-600">Add channel</span>
+          )}
+          <ChevronDown
+            className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity group-hover/slack:opacity-100"
+            aria-hidden
+          />
+        </button>
       )}
     </div>
   );

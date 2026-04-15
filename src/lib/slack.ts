@@ -5,6 +5,7 @@
  *   `profile.start_date`; `users.profile.get` returns the full profile (incl. Slack Atlas).
  * - SLACK_BILLING_USER_TOKEN: team.billableInfo only — must be a user token (xoxp-), not the bot; see billableInfoUserTokenHelp().
  * - SLACK_CHANNEL_LIST_USER_TOKEN (optional): user token (xoxp-) for `conversations.list` only. When set, the Roadmap channel picker lists channels **this user** can access (including private channels they’re in). If unset, `SLACK_BILLING_USER_TOKEN` is used for listing when present, else the bot token (private channels only if the bot was invited).
+ * - Milestone Slack threads (`conversations.replies`, `chat.postMessage`): use **user token** via slackUserTokenForThreads() — add User Token Scopes `channels:history`, `groups:history`, `chat:write` so you can read/post in channels you’re in without inviting the bot; messages post as the OAuth user.
  * @see https://api.slack.com/methods/users.list
  * @see https://api.slack.com/methods/users.profile.get
  * @see https://api.slack.com/methods/team.billableInfo
@@ -241,6 +242,18 @@ function slackTokenForConversationsList(): string | undefined {
   const billing = process.env.SLACK_BILLING_USER_TOKEN?.trim();
   if (billing) return billing;
   return slackToken();
+}
+
+/**
+ * User OAuth token for reading/posting milestone Slack threads. No bot fallback — thread
+ * history and replies must run as a workspace member (see `.env.example` scopes).
+ */
+export function slackUserTokenForThreads(): string | undefined {
+  const dedicated = process.env.SLACK_CHANNEL_LIST_USER_TOKEN?.trim();
+  if (dedicated) return dedicated;
+  const billing = process.env.SLACK_BILLING_USER_TOKEN?.trim();
+  if (billing && !billing.startsWith("xoxb-")) return billing;
+  return undefined;
 }
 
 /** Explains why team.billableInfo needs a separate user token; bot + team.billing:read are not enough. */
@@ -756,4 +769,427 @@ export async function fetchSlackWorkspaceMembers(): Promise<
   });
 
   return { ok: true, members: withActiveBilling };
+}
+
+// ---------------------------------------------------------------------------
+// Milestone Slack thread URLs + conversations.replies + chat.postMessage
+// ---------------------------------------------------------------------------
+
+/** Parsed Slack thread permalink: channel + message/thread `ts`. */
+export type ParsedSlackThreadUrl = { channelId: string; threadTs: string };
+
+/**
+ * Converts `p` + digits from an archives permalink to Slack message `ts` (`seconds.micro`).
+ * @see https://api.slack.com/messaging/retrieving#individual_messages
+ */
+export function slackTsFromArchivesPDigits(pDigits: string): string | null {
+  const d = pDigits.replace(/\D/g, "");
+  if (d.length < 7) return null;
+  return `${d.slice(0, -6)}.${d.slice(-6)}`;
+}
+
+/**
+ * Parses a Slack thread or message URL into `channelId` + `threadTs` for Web API calls.
+ * Supports `…/archives/C…/p…` and `app.slack.com/.../thread/C…-ts` styles.
+ */
+export function parseSlackThreadUrl(raw: string): ParsedSlackThreadUrl | null {
+  const t = raw.trim();
+  if (!t) return null;
+  let url: URL;
+  try {
+    url = new URL(t);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  const path = url.pathname;
+
+  const threadSeg = path.match(/\/thread\/([CDG][A-Z0-9]+)-(\d+\.\d+)\/?$/i);
+  if (threadSeg) {
+    return { channelId: threadSeg[1], threadTs: threadSeg[2] };
+  }
+
+  const archives = path.match(
+    /\/archives\/([CDG][A-Z0-9]+)\/p(\d+)\/?$/i
+  );
+  if (archives) {
+    const ts = slackTsFromArchivesPDigits(archives[2]);
+    if (!ts) return null;
+    return { channelId: archives[1], threadTs: ts };
+  }
+
+  return null;
+}
+
+export type SlackThreadApiMessage = {
+  ts: string;
+  user?: string;
+  text?: string;
+  bot_id?: string;
+  subtype?: string;
+};
+
+type ConversationsRepliesResponse = {
+  ok?: boolean;
+  error?: string;
+  messages?: SlackThreadApiMessage[];
+  response_metadata?: { next_cursor?: string };
+};
+
+function compareSlackTs(a: string, b: string): number {
+  const da = parseFloat(a);
+  const db = parseFloat(b);
+  if (Number.isFinite(da) && Number.isFinite(db)) return da - db;
+  return a.localeCompare(b);
+}
+
+/**
+ * Loads all messages in a thread via `conversations.replies` (paginated) using the user token.
+ */
+export async function fetchSlackThreadReplies(
+  channelId: string,
+  threadTs: string
+): Promise<
+  | {
+      ok: true;
+      messages: SlackThreadApiMessage[];
+      /** Latest `ts` among all messages in the thread. */
+      latestTs: string;
+      /** Oldest `ts` in the thread (parent message) — use as `thread_ts` when posting. */
+      rootTs: string;
+      latestDate: Date;
+    }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured for threads. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scopes channels:history, groups:history, and chat:write.",
+    };
+  }
+
+  const collected: SlackThreadApiMessage[] = [];
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set("channel", channelId.trim());
+    params.set("ts", threadTs.trim());
+    params.set("limit", "200");
+    if (cursor) params.set("cursor", cursor);
+
+    const res = await fetch(
+      `https://slack.com/api/conversations.replies?${params.toString()}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Slack API request failed (${res.status}).`,
+      };
+    }
+
+    const data = (await res.json()) as ConversationsRepliesResponse;
+
+    if (!data.ok) {
+      const err = data.error ?? "unknown_error";
+      if (err === "missing_scope") {
+        return {
+          ok: false,
+          error:
+            "Slack token is missing a required scope (channels:history or groups:history). Add User Token Scopes and reinstall the app.",
+        };
+      }
+      if (err === "channel_not_found") {
+        return {
+          ok: false,
+          error:
+            "Channel not found or you’re not a member — check the Slack URL and your workspace access.",
+        };
+      }
+      if (err === "not_in_channel") {
+        return {
+          ok: false,
+          error:
+            "You’re not in this channel — join the channel in Slack or use a thread URL from a channel you can access.",
+        };
+      }
+      return {
+        ok: false,
+        error: `Slack API error: ${err}`,
+      };
+    }
+
+    collected.push(...(data.messages ?? []));
+
+    const next = data.response_metadata?.next_cursor?.trim();
+    if (!next) break;
+    cursor = next;
+  }
+
+  if (collected.length === 0) {
+    return {
+      ok: false,
+      error: "No messages returned for this thread.",
+    };
+  }
+
+  let latestTs = collected[0]!.ts;
+  let rootTs = collected[0]!.ts;
+  for (const m of collected) {
+    if (compareSlackTs(m.ts, latestTs) > 0) latestTs = m.ts;
+    if (compareSlackTs(m.ts, rootTs) < 0) rootTs = m.ts;
+  }
+
+  const sec = parseFloat(latestTs);
+  const latestDate = Number.isFinite(sec)
+    ? new Date(Math.floor(sec * 1000))
+    : new Date();
+
+  return {
+    ok: true,
+    messages: collected,
+    latestTs,
+    /** Parent / root message `ts` — use as `thread_ts` when posting replies. */
+    rootTs,
+    latestDate,
+  };
+}
+
+type ChatPostMessageResponse = {
+  ok?: boolean;
+  error?: string;
+  ts?: string;
+  channel?: string;
+};
+
+/**
+ * Posts a new top-level channel message (starts a thread when others reply) as the Slack user.
+ */
+export async function postSlackChannelMessage(
+  channelId: string,
+  text: string
+): Promise<
+  | { ok: true; ts: string; channel: string }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scope chat:write.",
+    };
+  }
+
+  const body = new URLSearchParams();
+  body.set("channel", channelId.trim());
+  body.set("text", text);
+
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `Slack API request failed (${res.status}).` };
+  }
+
+  const data = (await res.json()) as ChatPostMessageResponse;
+  if (!data.ok) {
+    const err = data.error ?? "unknown_error";
+    if (err === "missing_scope") {
+      return {
+        ok: false,
+        error:
+          "Slack token is missing chat:write (User Token Scope). Add it and reinstall the app.",
+      };
+    }
+    if (err === "not_in_channel") {
+      return {
+        ok: false,
+        error:
+          "Cannot post — you’re not in this channel. Join it in Slack or pick another channel.",
+      };
+    }
+    return { ok: false, error: `Slack API error: ${err}` };
+  }
+
+  const ts = (data.ts ?? "").trim();
+  const ch = (data.channel ?? channelId).trim();
+  if (!ts) {
+    return { ok: false, error: "Slack did not return a message timestamp." };
+  }
+
+  return { ok: true, ts, channel: ch };
+}
+
+type ChatGetPermalinkResponse = {
+  ok?: boolean;
+  error?: string;
+  permalink?: string;
+};
+
+/**
+ * Returns a permalink URL for a message (`chat.getPermalink`).
+ */
+export async function getSlackMessagePermalink(
+  channelId: string,
+  messageTs: string
+): Promise<{ ok: true; permalink: string } | { ok: false; error: string }> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-).",
+    };
+  }
+
+  const params = new URLSearchParams();
+  params.set("channel", channelId.trim());
+  params.set("message_ts", messageTs.trim());
+
+  const res = await fetch(
+    `https://slack.com/api/chat.getPermalink?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    }
+  );
+
+  if (!res.ok) {
+    return { ok: false, error: `Slack API request failed (${res.status}).` };
+  }
+
+  const data = (await res.json()) as ChatGetPermalinkResponse;
+  if (!data.ok) {
+    const err = data.error ?? "unknown_error";
+    if (err === "missing_scope") {
+      return {
+        ok: false,
+        error:
+          "Slack token cannot read permalinks. Ensure the user token has access to this channel.",
+      };
+    }
+    return { ok: false, error: `Slack API error: ${err}` };
+  }
+
+  const permalink = (data.permalink ?? "").trim();
+  if (!permalink) {
+    return { ok: false, error: "Slack returned no permalink." };
+  }
+
+  return { ok: true, permalink };
+}
+
+/**
+ * Posts a reply in a thread as the Slack user (user token `chat:write`).
+ */
+export async function postSlackThreadReply(
+  channelId: string,
+  threadTs: string,
+  text: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scope chat:write.",
+    };
+  }
+
+  const body = new URLSearchParams();
+  body.set("channel", channelId.trim());
+  body.set("thread_ts", threadTs.trim());
+  body.set("text", text);
+
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `Slack API request failed (${res.status}).` };
+  }
+
+  const data = (await res.json()) as ChatPostMessageResponse;
+  if (!data.ok) {
+    const err = data.error ?? "unknown_error";
+    if (err === "missing_scope") {
+      return {
+        ok: false,
+        error:
+          "Slack token is missing chat:write (User Token Scope). Add it and reinstall the app.",
+      };
+    }
+    if (err === "not_in_channel") {
+      return {
+        ok: false,
+        error:
+          "Cannot post — you’re not in this channel or the thread is inaccessible.",
+      };
+    }
+    return { ok: false, error: `Slack API error: ${err}` };
+  }
+
+  return { ok: true };
+}
+
+type UsersInfoShortResponse = {
+  ok?: boolean;
+  error?: string;
+  user?: { id?: string; name?: string; profile?: { real_name?: string; display_name?: string } };
+};
+
+/**
+ * Resolves a Slack user id to a short display label (for thread previews). Uses the same
+ * user token as thread APIs when provided.
+ */
+export async function fetchSlackUserLabelForToken(
+  token: string,
+  slackUserId: string
+): Promise<string> {
+  const id = slackUserId.trim();
+  if (!id) return "Unknown";
+
+  const params = new URLSearchParams();
+  params.set("user", id);
+
+  const res = await fetch(`https://slack.com/api/users.info?${params.toString()}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+
+  if (!res.ok) return id;
+
+  const data = (await res.json()) as UsersInfoShortResponse;
+  if (!data.ok || !data.user) return id;
+
+  const profile = data.user.profile ?? {};
+  const real = (profile.real_name ?? "").trim();
+  const disp = (profile.display_name ?? "").trim();
+  const name = (data.user.name ?? "").trim();
+  return real || disp || name || id;
 }

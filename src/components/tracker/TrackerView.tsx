@@ -3,9 +3,7 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import type { Company, CompanyWithGoals, Person } from "@/lib/types/tracker";
@@ -22,7 +20,14 @@ import {
 } from "./tracker-expand-context";
 import { RoadmapViewProvider } from "./roadmap-view-context";
 import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
-import { Crosshair, FilterX, Map as MapIcon, Search } from "lucide-react";
+import { RoadmapExpandModeSelect } from "./RoadmapExpandModeSelect";
+import {
+  Check,
+  Crosshair,
+  FilterX,
+  Map as MapIcon,
+  Search,
+} from "lucide-react";
 import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
 import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
 import {
@@ -51,6 +56,19 @@ import type { RoadmapInitialFilters } from "@/lib/roadmap-query";
 import { emptyRoadmapFilters } from "@/lib/roadmap-query";
 
 const ROADMAP_FOCUS_MODE_STORAGE_KEY = "ecc-roadmap-focus-mode";
+const ROADMAP_EXPAND_PRESET_STORAGE_KEY = "ecc-roadmap-expand-preset";
+function parseStoredExpandPreset(raw: string): TrackerExpandPreset | undefined {
+  if (raw === "") return null;
+  if (
+    raw === "collapse" ||
+    raw === "goals_only" ||
+    raw === "goals_and_projects" ||
+    raw === "goals_projects_milestones"
+  ) {
+    return raw;
+  }
+  return undefined;
+}
 
 interface TrackerViewProps {
   hierarchy: CompanyWithGoals[];
@@ -94,58 +112,17 @@ export function TrackerView({
   const [showCompletedProjects, setShowCompletedProjects] = useState(true);
   /** Increment so goal/project rows re-apply the tree expansion preset */
   const [bulkTick, setBulkTick] = useState(1);
-  /** Tree expansion dropdown: default Goals only */
-  const [expandPreset, setExpandPreset] = useState<TrackerExpandPreset>("goals_only");
+  /** Tree expansion dropdown: default Custom (manual expansion). */
+  const [expandPreset, setExpandPreset] = useState<TrackerExpandPreset>(null);
   /** Focus mode — default off; restored from `localStorage` after mount */
   const [focusMode, setFocusMode] = useState(false);
   const [focusedGoalId, setFocusedGoalId] = useState<string | null>(null);
   const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
   const [focusEnforceTick, setFocusEnforceTick] = useState(0);
   const focusProjectMode = focusMode;
-  /** After reading Focus from localStorage — avoids persisting before restore */
-  const [focusPreferenceHydrated, setFocusPreferenceHydrated] = useState(false);
-
-  /** Width hint for the tree dropdown (widest preset label). */
-  const treeViewSelectMeasureLabel = "Goals + projects";
-
-  /** Visible label for styling — matches closed select (Custom when no preset). */
-  const treeViewSelectDisplayLabel = useMemo(() => {
-    if (expandPreset === null) return "Custom";
-    switch (expandPreset) {
-      case "collapse":
-        return "All collapsed";
-      case "goals_only":
-        return "Goals only";
-      case "goals_and_projects":
-        return "Goals + projects";
-      case "goals_projects_milestones":
-        return "Full tree";
-      default:
-        return "Custom";
-    }
-  }, [expandPreset]);
-
-  const expandModeMeasureRef = useRef<HTMLSpanElement>(null);
-  const [expandSelectWidthPx, setExpandSelectWidthPx] = useState<number | null>(
-    null
-  );
-
-  useLayoutEffect(() => {
-    const el = expandModeMeasureRef.current;
-    if (!el) return;
-    const update = () => {
-      const w = Math.ceil(el.getBoundingClientRect().width) + 2;
-      if (typeof window !== "undefined") {
-        const cap = Math.min(w, window.innerWidth - 24);
-        setExpandSelectWidthPx(cap);
-      } else {
-        setExpandSelectWidthPx(w);
-      }
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [treeViewSelectMeasureLabel]);
+  /** After reading Roadmap toolbar prefs from localStorage — avoids persisting before restore */
+  const [roadmapToolbarPrefsHydrated, setRoadmapToolbarPrefsHydrated] =
+    useState(false);
 
   const allGoals = useMemo(
     () => hierarchy.flatMap((c) => c.goals),
@@ -183,20 +160,34 @@ export function TrackerView({
   }, []);
 
   useEffect(() => {
+    let expandPresetFromStorage = false;
     try {
       const raw = localStorage.getItem(ROADMAP_FOCUS_MODE_STORAGE_KEY);
       if (raw === "1" || raw === "true") {
         setFocusMode(true);
         setFocusEnforceTick((x) => x + 1);
       }
+
+      const rawExpand = localStorage.getItem(ROADMAP_EXPAND_PRESET_STORAGE_KEY);
+      if (rawExpand !== null) {
+        const parsed = parseStoredExpandPreset(rawExpand);
+        if (parsed !== undefined) {
+          setExpandPreset(parsed);
+          expandPresetFromStorage = true;
+        }
+      }
+
     } catch {
       /* ignore quota / private mode */
     }
-    setFocusPreferenceHydrated(true);
+    if (expandPresetFromStorage) {
+      setBulkTick((t) => t + 1);
+    }
+    setRoadmapToolbarPrefsHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!focusPreferenceHydrated) return;
+    if (!roadmapToolbarPrefsHydrated) return;
     try {
       localStorage.setItem(
         ROADMAP_FOCUS_MODE_STORAGE_KEY,
@@ -205,22 +196,26 @@ export function TrackerView({
     } catch {
       /* ignore */
     }
-  }, [focusMode, focusPreferenceHydrated]);
+  }, [focusMode, roadmapToolbarPrefsHydrated]);
 
-  const onExpandModeChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const raw = e.target.value;
-      setFocusedGoalId(null);
-      setFocusedProjectId(null);
-      if (raw === "") {
-        setExpandPreset(null);
-      } else {
-        setExpandPreset(raw as TrackerExpandPreset);
-      }
-      setBulkTick((t) => t + 1);
-    },
-    []
-  );
+  useEffect(() => {
+    if (!roadmapToolbarPrefsHydrated) return;
+    try {
+      localStorage.setItem(
+        ROADMAP_EXPAND_PRESET_STORAGE_KEY,
+        expandPreset ?? ""
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [expandPreset, roadmapToolbarPrefsHydrated]);
+
+  const onExpandPresetChange = useCallback((next: TrackerExpandPreset) => {
+    setFocusedGoalId(null);
+    setFocusedProjectId(null);
+    setExpandPreset(next);
+    setBulkTick((t) => t + 1);
+  }, []);
 
   const onFocusModeToggle = useCallback(() => {
     if (filterActive) return;
@@ -582,15 +577,6 @@ export function TrackerView({
             onChange={setDueDateFilterIds}
           />
         </div>
-        <label className="inline-flex items-center gap-2 shrink-0 cursor-pointer select-none text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={showCompletedProjects}
-            onChange={(e) => setShowCompletedProjects(e.target.checked)}
-            className="rounded border-zinc-600 bg-zinc-900 text-emerald-600 focus:ring-emerald-500/40"
-          />
-          Show completed
-        </label>
         {filterActive ? (
           <button
             type="button"
@@ -614,67 +600,52 @@ export function TrackerView({
                   ? "Exit Focus — only one goal and one project stay open; click to return to normal"
                   : "Focus — only one goal and one project expanded; opening another closes the rest"
             }
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={cn(
+              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40",
               focusMode
                 ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-950/55"
-                : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
-            }`}
+                : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+            )}
             aria-pressed={focusMode}
           >
             <Crosshair className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
             Focus
           </button>
-          <label className="sr-only" htmlFor="tracker-expand-mode">
-            Tree expansion mode
-          </label>
-          <div className="relative inline-flex max-w-full min-w-0">
-            <span
-              ref={expandModeMeasureRef}
-              className="pointer-events-none absolute left-0 top-0 inline-block whitespace-nowrap pl-2.5 pr-8 text-xs font-medium opacity-0"
-              aria-hidden
-            >
-              {treeViewSelectMeasureLabel}
-            </span>
-            <select
-              id="tracker-expand-mode"
-              value={expandPreset ?? ""}
-              onChange={onExpandModeChange}
-              className={cn(
-                "max-w-full rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-2.5 pr-8 text-xs font-medium shadow-sm cursor-pointer hover:bg-zinc-800 hover:border-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500 appearance-none bg-[length:0.875rem] bg-[right_0.4rem_center] bg-no-repeat",
-                treeViewSelectDisplayLabel === "Custom" && "text-zinc-500"
-              )}
-              style={{
-                ...(expandSelectWidthPx != null
-                  ? { width: expandSelectWidthPx }
-                  : {}),
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-              }}
+          <div className="relative min-w-[10.5rem] shrink-0">
+            <button
+              type="button"
+              aria-pressed={showCompletedProjects}
               aria-label={
-                expandPreset === null
-                  ? "Tree expansion — Custom (manual); choose a preset to expand or collapse the tree"
-                  : "Tree expansion mode"
+                showCompletedProjects
+                  ? "Showing completed goals, projects, and milestones — click to hide"
+                  : "Hiding completed goals, projects, and milestones — click to show"
               }
-              title={
-                expandPreset === null
-                  ? "Custom — manual expansion; pick a preset below to apply it, or click rows yourself"
-                  : expandPreset === "collapse"
-                    ? "Companies, goals, projects, and milestones collapsed"
-                    : expandPreset === "goals_only"
-                      ? "Companies expanded; goal rows visible; project lists stay collapsed"
-                      : expandPreset === "goals_and_projects"
-                        ? "Projects expanded; milestone lists stay collapsed"
-                        : expandPreset === "goals_projects_milestones"
-                          ? "Expand goals, projects, and milestone lists"
-                          : "Custom — manual expansion; pick a preset below to apply it, or click rows yourself"
-              }
+              title="When off: hides Done milestones, Done projects (except projects with no milestones), and goals that only have completed work. Goals with no projects always stay visible."
+              onClick={() => setShowCompletedProjects((v) => !v)}
+              className={cn(
+                "flex min-h-[2.25rem] w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500",
+                showCompletedProjects
+                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)]"
+                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200"
+              )}
             >
-              <option value="">Custom</option>
-              <option value="collapse">All collapsed</option>
-              <option value="goals_only">Goals only</option>
-              <option value="goals_and_projects">Goals + projects</option>
-              <option value="goals_projects_milestones">Full tree</option>
-            </select>
+              <Check
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  showCompletedProjects
+                    ? "text-emerald-400"
+                    : "text-zinc-600"
+                )}
+                strokeWidth={2.5}
+                aria-hidden
+              />
+              <span className="min-w-0 truncate">Show completed</span>
+            </button>
           </div>
+          <RoadmapExpandModeSelect
+            expandPreset={expandPreset}
+            onChange={onExpandPresetChange}
+          />
         </div>
         </div>
       </RoadmapStickyToolbar>
@@ -719,6 +690,7 @@ export function TrackerView({
               allGoals={allGoals}
               allCompanies={allCompanies}
               mirrorPickerHierarchy={hierarchy}
+              showCompletedProjects={showCompletedProjects}
             />
           ))
         )}

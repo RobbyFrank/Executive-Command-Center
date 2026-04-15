@@ -142,8 +142,8 @@ export function ProjectsColumnHeaders({
           Due date
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-[18rem] shrink-0 min-w-0"
-          tooltip="The first milestone not marked done — horizon (e.g. 5D, 2W) from its target date when set, then name."
+          className="w-[36rem] shrink-0 min-w-0"
+          tooltip="The first milestone not marked done — horizon (e.g. 5D, 2W) from its target date when set, then name. When the project row is collapsed and the milestone has a Slack thread URL, the latest reply preview appears here."
         >
           Next milestone
         </RoadmapColumnHeader>

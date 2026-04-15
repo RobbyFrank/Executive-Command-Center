@@ -60,11 +60,17 @@ interface InlineEditCellProps {
    * A compact edit control appears beside it to change or clear the value.
    */
   linkBehavior?: boolean;
+  /**
+   * With `linkBehavior` + valid URL + `formatDisplay`, omit the trailing edit button so the parent
+   * can place it (e.g. fixed grid column on milestone Slack).
+   */
+  linkBehaviorHideTrailingEdit?: boolean;
   /** Called when the cell enters or leaves edit mode (e.g. to widen a narrow column while editing). */
   onEditingChange?: (editing: boolean) => void;
   /**
-   * When `type` is `select`, `always` shows the native `<select>` at rest so one click opens
-   * the menu. `toggle` uses a collapsed label and needs a second click to reveal the select.
+   * When `type` is `select`, `always` shows the control at rest so one click opens the menu
+   * (custom list when `formatDisplay` is set; otherwise native `<select>`).
+   * `toggle` uses a collapsed label and needs a second click to reveal the select.
    */
   selectPresentation?: "toggle" | "always";
   /**
@@ -108,7 +114,7 @@ interface InlineEditCellProps {
   /** When `type` is `date`, minimum allowed `YYYY-MM-DD` (native `min` — inclusive). */
   dateMin?: string;
   /**
-   * Overlay `select` (`formatDisplay` + invisible native select): skip the default hover grey wash
+   * Overlay `select` (`formatDisplay` + custom list menu): skip the default hover grey wash
    * so text-only cells (e.g. project Status) stay borderless until `group-hover` on the wrapper.
    */
   overlaySelectQuiet?: boolean;
@@ -137,6 +143,7 @@ export function InlineEditCell({
   collapsedButtonClassName,
   variant = "default",
   linkBehavior = false,
+  linkBehaviorHideTrailingEdit = false,
   onEditingChange,
   selectPresentation = "always",
   displayTruncateSingleLine = false,
@@ -162,6 +169,9 @@ export function InlineEditCell({
   const truncateTooltipRef = useRef<CellHoverTooltipHandle>(null);
   const validationHintId = `${useId()}-validation`;
   const dateFieldId = useId();
+  const overlaySelectListboxId = useId();
+  const [overlaySelectOpen, setOverlaySelectOpen] = useState(false);
+  const overlaySelectContainerRef = useRef<HTMLDivElement>(null);
   const resolvedEmptyLabel = emptyLabel ?? (type === "date" ? "Set date" : "—");
 
   const cellPadX = trackerGridAlign ? "pl-0 pr-1.5" : "px-1.5";
@@ -175,6 +185,31 @@ export function InlineEditCell({
     setDraft(value);
     setValidationError(undefined);
   }, [value]);
+
+  useEffect(() => {
+    setOverlaySelectOpen(false);
+  }, [value]);
+
+  useEffect(() => {
+    if (!overlaySelectOpen) return;
+    const onDocMouseDown = (e: globalThis.MouseEvent) => {
+      const el = overlaySelectContainerRef.current;
+      if (!el || el.contains(e.target as Node)) return;
+      setOverlaySelectOpen(false);
+    };
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOverlaySelectOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [overlaySelectOpen]);
 
   useEffect(() => {
     if (openEditNonce === undefined) return;
@@ -272,44 +307,80 @@ export function InlineEditCell({
     !formatDisplay;
 
   if (overlaySelect) {
+    const listLabel = displayTitle ?? "Choose an option";
     return (
-      <div className={cn("relative isolate w-full min-w-0", className)}>
-        <div
+      <div
+        ref={overlaySelectContainerRef}
+        className={cn("relative isolate w-full min-w-0", className)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          id={`${overlaySelectListboxId}-trigger`}
+          aria-haspopup="listbox"
+          aria-expanded={overlaySelectOpen}
+          aria-controls={overlaySelectListboxId}
+          onClick={() => setOverlaySelectOpen((o) => !o)}
+          title={listLabel}
+          aria-label={listLabel}
           className={cn(
-            "pointer-events-none flex min-h-8 max-w-full items-center rounded py-0.5 text-left text-sm",
+            "peer relative z-[1] flex min-h-8 w-full max-w-full cursor-pointer items-center rounded py-0.5 text-left text-sm transition-colors",
             selectPadX,
+            "pr-7",
             !value.trim() && "text-zinc-600 italic",
-            value.trim() && displayClassName
+            value.trim() && displayClassName,
+            overlaySelectQuiet
+              ? "border border-transparent bg-transparent hover:bg-transparent"
+              : "border border-transparent bg-transparent hover:bg-zinc-800",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
+            overlaySelectOpen && "ring-1 ring-blue-600"
           )}
         >
           {value.trim() ? formatDisplay!(value) : resolvedEmptyLabel}
-        </div>
-        <select
-          value={value}
-          onChange={(e) => {
-            const next = e.target.value;
-            if (next !== value) onSave(next);
-          }}
-          className={cn(
-            "peer absolute inset-0 z-[1] min-h-8 w-full max-w-full cursor-pointer appearance-none rounded border-0 bg-transparent opacity-0",
-            overlaySelectQuiet ? "hover:bg-transparent" : "hover:bg-zinc-800",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600"
-          )}
-          title={displayTitle ?? "Choose an option"}
-          aria-label={displayTitle ?? "Choose an option"}
-        >
-          {options.map((opt) => (
-            <option key={opt.value === "" ? "__empty" : opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        </button>
+        {overlaySelectOpen ? (
+          <div
+            id={overlaySelectListboxId}
+            role="listbox"
+            aria-labelledby={`${overlaySelectListboxId}-trigger`}
+            className="absolute left-0 top-full z-[60] mt-0.5 w-full min-w-[max(100%,10rem)] overflow-hidden rounded-md border border-zinc-600/70 bg-zinc-950 py-1 shadow-xl shadow-black/50 ring-1 ring-zinc-800/90"
+          >
+            {options!.map((opt) => {
+              const selected = opt.value === value;
+              return (
+                <button
+                  key={opt.value === "" ? "__empty" : opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={cn(
+                    "flex w-full min-w-0 cursor-pointer items-center px-1.5 py-1 text-left text-sm transition-colors",
+                    "hover:bg-zinc-800/95 focus:bg-zinc-800/95 focus:outline-none",
+                    selected && "bg-zinc-800/60"
+                  )}
+                  onClick={() => {
+                    setOverlaySelectOpen(false);
+                    if (opt.value !== value) onSave(opt.value);
+                  }}
+                >
+                  {formatDisplay!(opt.value)}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <ChevronDown
           className={cn(
             "pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity",
             overlaySelectQuiet
-              ? "opacity-0 group-hover/status:opacity-100 peer-focus-visible:opacity-100"
-              : "opacity-0 peer-hover:opacity-100 peer-focus-visible:opacity-100"
+              ? cn(
+                  "opacity-0 group-hover/status:opacity-100 peer-focus-visible:opacity-100",
+                  overlaySelectOpen && "opacity-100"
+                )
+              : cn(
+                  "opacity-0 peer-hover:opacity-100 peer-focus-visible:opacity-100",
+                  overlaySelectOpen && "opacity-100"
+                )
           )}
           aria-hidden
         />
@@ -457,8 +528,14 @@ export function InlineEditCell({
 
     const trimmed = value.trim();
     if (linkBehavior && trimmed && isValidHttpUrl(trimmed)) {
+      const iconOnlyLink = Boolean(formatDisplay);
       return (
-        <span className="inline-flex items-center gap-0.5 min-w-0 group/urlicon">
+        <span
+          className={cn(
+            "inline-flex items-center min-w-0",
+            linkBehaviorHideTrailingEdit ? "gap-0" : "gap-0.5 group/urlicon"
+          )}
+        >
           <a
             href={trimmed}
             target="_blank"
@@ -467,31 +544,35 @@ export function InlineEditCell({
               collapsedLayout,
               displayClassName,
               collapsedButtonClassName,
-              "inline-flex items-center no-underline text-inherit min-w-0",
-              formatDisplay ? "justify-start gap-1" : "justify-center"
+              "inline-flex items-center no-underline text-inherit",
+              iconOnlyLink
+                ? "h-7 w-7 shrink-0 justify-center !border-0 !p-0 !shadow-none !ring-0 min-w-0 bg-transparent hover:bg-zinc-800/80"
+                : "min-w-0 justify-start gap-1"
             )}
             title={trimmed}
             onClick={(e) => e.stopPropagation()}
           >
             {formatDisplay ? formatDisplay(trimmed) : trimmed}
           </a>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setEditing(true);
-            }}
-            className={cn(
-              "p-0.5 rounded shrink-0 text-zinc-500 hover:text-zinc-300 transition-opacity",
-              "opacity-0 group-hover/urlicon:opacity-100 focus-visible:opacity-100",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/35"
-            )}
-            title="Edit or remove link"
-            aria-label="Edit or remove link"
-          >
-            <Pencil className="h-3 w-3" strokeWidth={1.75} />
-          </button>
+          {linkBehaviorHideTrailingEdit ? null : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setEditing(true);
+              }}
+              className={cn(
+                "inline-flex h-7 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:text-zinc-300 transition-opacity",
+                "opacity-0 group-hover/urlicon:opacity-100 focus-visible:opacity-100",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/35"
+              )}
+              title="Edit or remove link"
+              aria-label="Edit or remove link"
+            >
+              <Pencil className="h-3 w-3" strokeWidth={1.75} />
+            </button>
+          )}
         </span>
       );
     }
