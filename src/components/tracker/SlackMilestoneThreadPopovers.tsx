@@ -6,6 +6,7 @@ import type {
   MilestoneLikelihoodRiskLevel,
 } from "@/server/actions/slack";
 import type { SlackThreadStatusOk } from "@/lib/slackThreadStatusCache";
+import type { Person } from "@/lib/types/tracker";
 import { SlackThreadPopover } from "./SlackThreadPopover";
 import { SlackPingDialog } from "./SlackPingDialog";
 
@@ -15,6 +16,11 @@ interface SlackMilestoneThreadPopoversProps {
   anchorRef: RefObject<HTMLButtonElement | null>;
   /** Row/card to keep clear of the dimmed overlay (defaults to Slack control only). */
   spotlightRef?: RefObject<HTMLElement | null>;
+  goalDescription?: string;
+  projectName?: string;
+  goalSlackChannelId?: string;
+  goalSlackChannelName?: string;
+  people?: Person[];
   slackUrl: string;
   milestoneName: string;
   status: SlackThreadStatusOk | null;
@@ -48,6 +54,11 @@ interface SlackMilestoneThreadPopoversProps {
 export function SlackMilestoneThreadPopovers({
   anchorRef,
   spotlightRef,
+  goalDescription = "",
+  projectName = "",
+  goalSlackChannelId = "",
+  goalSlackChannelName = "",
+  people = [],
   slackUrl,
   milestoneName,
   status,
@@ -101,10 +112,16 @@ export function SlackMilestoneThreadPopovers({
         onClose={() => onPingOpenChange(false)}
         slackUrl={slackUrl}
         milestoneName={milestoneName}
+        goalDescription={goalDescription}
+        projectName={projectName}
+        channelId={goalSlackChannelId}
+        channelName={goalSlackChannelName}
+        people={people}
         rosterHints={rosterHints}
         onSent={onPingSent}
         mode={pingMode}
         targetDate={targetDate}
+        spotlightRef={spotlightRef}
         likelihoodContext={
           pingMode === "nudge" && likelihood
             ? {

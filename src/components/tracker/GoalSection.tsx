@@ -553,7 +553,6 @@ export function GoalSection({
                       goalId={goal.id}
                       onCreated={onNewProjectCreated}
                       inline
-                      spotlightRef={goalHeaderRef}
                     />
                   </div>
                 )}
@@ -810,7 +809,6 @@ export function GoalSection({
                   goalId={goal.id}
                   onCreated={onNewProjectCreated}
                   inline
-                  spotlightRef={goalHeaderRef}
                 />
               </div>
             </div>

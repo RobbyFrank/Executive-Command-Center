@@ -753,6 +753,11 @@ export function MilestoneRow({
         <SlackMilestoneThreadPopovers
           anchorRef={threadAnchorRef}
           spotlightRef={slackThreadSpotlightRef}
+          goalDescription={goalDescription}
+          projectName={projectName}
+          goalSlackChannelId={goalSlackChannelId}
+          goalSlackChannelName={goalSlackChannelName}
+          people={people}
           slackUrl={slackUrlTrimmed}
           milestoneName={milestone.name}
           status={slackThread.status}

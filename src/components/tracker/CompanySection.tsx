@@ -352,7 +352,6 @@ export function CompanySection({
                   companyId={company.id}
                   onCreated={(id) => handleNewGoalRegistered(id)}
                   inline
-                  spotlightRef={companyHeaderRef}
                 />
               </div>
             </div>
@@ -426,7 +425,6 @@ export function CompanySection({
                   type="goal"
                   companyId={company.id}
                   onCreated={(id) => handleNewGoalRegistered(id)}
-                  spotlightRef={companyHeaderRef}
                 />
               </CompanyAddGoalFooterRow>
             </>

@@ -3,19 +3,12 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
-  type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { X, Loader2, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
-import {
-  SlackThreadSpotlightBackdrop,
-  readSpotlightHole,
-  type SlackThreadSpotlightHole,
-} from "./SlackThreadSpotlightBackdrop";
 
 type MessageRole = "user" | "assistant";
 interface Message {
@@ -83,8 +76,6 @@ interface AiCreateDialogProps {
   goalId?: string;
   onCreated?: (id: string) => void;
   onClose: () => void;
-  /** Company header (new goal) or goal header (new project) — left clear while the dialog is open. */
-  spotlightRef?: RefObject<HTMLElement | null>;
 }
 
 export function AiCreateDialog({
@@ -93,8 +84,8 @@ export function AiCreateDialog({
   goalId,
   onCreated,
   onClose,
-  spotlightRef,
 }: AiCreateDialogProps) {
+  const [mounted, setMounted] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState("");
@@ -102,55 +93,19 @@ export function AiCreateDialog({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
-  const [spotlightGeo, setSpotlightGeo] = useState<{
-    hole: SlackThreadSpotlightHole;
-    vw: number;
-    vh: number;
-  } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     const id = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(id);
   }, []);
-
-  useLayoutEffect(() => {
-    const el = spotlightRef?.current ?? null;
-    if (!el || typeof window === "undefined") {
-      setSpotlightGeo(null);
-      return;
-    }
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const hole = readSpotlightHole(el, el);
-    if (!hole) {
-      setSpotlightGeo(null);
-      return;
-    }
-    setSpotlightGeo({ hole, vw, vh });
-  }, [spotlightRef]);
-
-  useEffect(() => {
-    const el = spotlightRef?.current ?? null;
-    if (!el) return;
-    const onScrollOrResize = () => {
-      if (typeof window === "undefined") return;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const hole = readSpotlightHole(el, el);
-      if (!hole) return;
-      setSpotlightGeo({ hole, vw, vh });
-    };
-    window.addEventListener("resize", onScrollOrResize);
-    document.addEventListener("scroll", onScrollOrResize, true);
-    return () => {
-      window.removeEventListener("resize", onScrollOrResize);
-      document.removeEventListener("scroll", onScrollOrResize, true);
-    };
-  }, [spotlightRef]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -335,31 +290,21 @@ export function AiCreateDialog({
     : null;
   const displayProposal = proposal ?? streamingProposal;
 
-  return (
+  const layer = (
     <>
-      {spotlightGeo ? (
-        <SlackThreadSpotlightBackdrop
-          hole={spotlightGeo.hole}
-          winW={spotlightGeo.vw}
-          winH={spotlightGeo.vh}
-          backdropZIndex={40}
-          onDismiss={onClose}
-        />
-      ) : (
-        <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm motion-reduce:backdrop-blur-none"
-          aria-hidden
-          onClick={onClose}
-        />
-      )}
+      <div
+        className="fixed inset-0 z-[220] bg-black/60 backdrop-blur-sm motion-reduce:backdrop-blur-none"
+        aria-hidden
+        onClick={onClose}
+      />
 
-      {/* Dialog */}
+      {/* Dialog — z above tracker hover tooltips (z~200) and inline popovers (z~210); portaled to body like SlackCreateThreadDialog */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`AI create ${type}`}
-        className="fixed left-1/2 top-1/2 z-50 flex max-h-[min(600px,85vh)] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
+        className="fixed left-1/2 top-1/2 z-[230] flex max-h-[min(600px,85vh)] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/50"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700/80 px-4 py-2.5">
@@ -384,7 +329,7 @@ export function AiCreateDialog({
           {messages.map((m, i) => (
             <div key={i}>
               {m.role === "user" ? (
-                <div className="flex gap-2.5 rounded-md bg-zinc-800/70 px-3 py-2 text-zinc-200">
+                <div className="flex gap-2.5 rounded-md bg-zinc-800 px-3 py-2 text-zinc-200">
                   <span
                     className="shrink-0 select-none font-semibold tabular-nums text-zinc-400"
                     aria-hidden
@@ -396,7 +341,7 @@ export function AiCreateDialog({
                   </div>
                 </div>
               ) : (
-                <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950/40 px-3 py-2 text-zinc-300">
+                <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950 px-3 py-2 text-zinc-300">
                   <span
                     className="shrink-0 select-none font-semibold tabular-nums text-amber-500/90"
                     aria-hidden
@@ -413,7 +358,7 @@ export function AiCreateDialog({
 
           {/* Streaming text (before it's committed to messages) */}
           {loading && currentStreaming && (
-            <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950/40 px-3 py-2 text-zinc-300">
+            <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950 px-3 py-2 text-zinc-300">
               <span
                 className="shrink-0 select-none font-semibold tabular-nums text-amber-500/90"
                 aria-hidden
@@ -559,4 +504,7 @@ export function AiCreateDialog({
       </div>
     </>
   );
+
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(layer, document.body);
 }

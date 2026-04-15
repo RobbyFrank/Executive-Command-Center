@@ -587,11 +587,15 @@ export type GenerateThreadPingMessageResult =
   | { ok: true; message: string }
   | { ok: false; error: string };
 
-export async function generateThreadPingMessage(
+type ThreadPingTailTranscriptResult =
+  | { ok: true; transcript: string }
+  | { ok: false; error: string };
+
+/** Last 8 thread messages, labeled for AI (shared by ping / nudge / revise). */
+async function buildRecentThreadPingTranscript(
   slackUrl: string,
-  milestoneName: string,
   rosterHints?: SlackMemberRosterHint[]
-): Promise<GenerateThreadPingMessageResult> {
+): Promise<ThreadPingTailTranscriptResult> {
   const parsed = parseSlackThreadUrl(slackUrl);
   if (!parsed) {
     return { ok: false, error: "Invalid Slack thread URL." };
@@ -610,7 +614,10 @@ export async function generateThreadPingMessage(
   }
   const ids = [
     ...new Set([
-      ...tail.map((m) => m.user).filter((u): u is string => Boolean(u)).map((u) => u.toUpperCase()),
+      ...tail
+        .map((m) => m.user)
+        .filter((u): u is string => Boolean(u))
+        .map((u) => u.toUpperCase()),
       ...mentionIds,
     ]),
   ];
@@ -621,14 +628,116 @@ export async function generateThreadPingMessage(
     const who = uid
       ? (labelMap.get(uid) ?? rosterById.get(uid)?.name ?? uid)
       : "app/bot";
-    lines.push(`[${who}]: ${slackMessageTextForDisplay(m.text ?? "", 800, labelMap)}`);
+    lines.push(
+      `[${who}]: ${slackMessageTextForDisplay(m.text ?? "", 800, labelMap)}`
+    );
   }
+  return { ok: true, transcript: lines.join("\n\n") };
+}
 
-  const transcript = lines.join("\n\n");
+const THREAD_PING_REVISE_SYSTEM_PROMPT =
+  'The user wants you to revise a Slack thread reply — a short follow-up posted inside an existing Slack conversation (not a new top-level channel post). Apply their feedback while keeping the tone appropriate and professional. Never use an em dash (Unicode U+2014); use commas, colons, ASCII hyphens, or parentheses instead. If the current draft begins with a Slack user mention token like <@U…>, keep that exact mention as the first characters of the revised message. Output only the revised message text to post, with no preamble or quotes.';
+
+export async function generateThreadPingMessage(
+  slackUrl: string,
+  milestoneName: string,
+  rosterHints?: SlackMemberRosterHint[]
+): Promise<GenerateThreadPingMessageResult> {
+  const tr = await buildRecentThreadPingTranscript(slackUrl, rosterHints);
+  if (!tr.ok) return tr;
+  const transcript = tr.transcript;
   try {
     const message = await claudePlainText(
       `Generate a brief, friendly follow-up message for this Slack thread about the milestone "${milestoneName}". Ask for a status update based on the recent conversation. Keep it to at most two short sentences. Sound natural and professional. Output only the message text to post — no quotes or preamble.`,
       `Recent thread messages:\n\n${transcript || "(no text in thread)"}`
+    );
+    return { ok: true, message };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Revise a draft ping or deadline-nudge reply using the same thread context as generation.
+ */
+export async function reviseSlackThreadPingMessage(
+  slackUrl: string,
+  milestoneName: string,
+  rosterHints: SlackMemberRosterHint[] | undefined,
+  mode: "ping" | "nudge",
+  currentDraft: string,
+  feedback: string,
+  targetDate: string | undefined,
+  likelihoodContext: DeadlineNudgeLikelihoodContext | null | undefined
+): Promise<GenerateThreadPingMessageResult> {
+  const fb = feedback.trim();
+  if (!fb) {
+    return { ok: false, error: "Feedback is empty." };
+  }
+  const prev = currentDraft.trim();
+  if (!prev) {
+    return { ok: false, error: "Current draft is empty." };
+  }
+
+  if (mode === "nudge") {
+    const td = targetDate?.trim() ?? "";
+    if (!td || !likelihoodContext) {
+      return {
+        ok: false,
+        error:
+          "Deadline nudge needs a target date and a completed deadline assessment.",
+      };
+    }
+  }
+
+  const tr = await buildRecentThreadPingTranscript(slackUrl, rosterHints);
+  if (!tr.ok) return tr;
+  const transcript = tr.transcript;
+
+  let modeInstructions: string;
+  if (mode === "ping") {
+    modeInstructions = `The reply asks for a status update on milestone "${milestoneName}". Keep it brief and grounded in the thread context.`;
+  } else {
+    const td = targetDate!.trim();
+    const due = parseMilestoneTargetDate(td);
+    if (!due) {
+      return { ok: false, error: "Invalid or missing target date." };
+    }
+    const ctx = likelihoodContext!;
+    const today = new Date();
+    const todayCal = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+    const dueCal = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    const daysRemaining = calendarDaysDiffUtc(dueCal, todayCal);
+    const dueLabel = dueCal.toLocaleDateString(undefined, {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const daysPhrase =
+      daysRemaining === 0
+        ? "today"
+        : daysRemaining === 1
+          ? "1 day from now"
+          : daysRemaining > 1
+            ? `in ${daysRemaining} days`
+            : daysRemaining === -1
+              ? "yesterday (overdue)"
+              : `${Math.abs(daysRemaining)} days ago (overdue)`;
+    modeInstructions = `The reply is a manager/executive deadline nudge for milestone "${milestoneName}" due on ${dueLabel} (${daysPhrase}). Progress appears roughly ${ctx.progressEstimate}% complete; deadline risk is ${ctx.riskLevel}. Context: ${ctx.reasoning}. Keep first-person executive voice. Do not mention AI or "assessment". Tone scales with risk.`;
+  }
+
+  const userPayload = `Mode and goal:\n${modeInstructions}\n\nRecent thread messages:\n\n${transcript || "(no text in thread)"}\n\n---\n\nCurrent draft:\n${prev}\n\n---\n\nUser feedback:\n${fb}`;
+
+  try {
+    const message = await claudePlainText(
+      THREAD_PING_REVISE_SYSTEM_PROMPT,
+      userPayload
     );
     return { ok: true, message };
   } catch (e) {
@@ -907,46 +1016,14 @@ export async function generateDeadlineNudgeMessage(
   rosterHints: SlackMemberRosterHint[] | undefined,
   likelihoodContext: DeadlineNudgeLikelihoodContext
 ): Promise<GenerateDeadlineNudgeMessageResult> {
-  const parsed = parseSlackThreadUrl(slackUrl);
-  if (!parsed) {
-    return { ok: false, error: "Invalid Slack thread URL." };
-  }
-
   const due = parseMilestoneTargetDate(targetDate);
   if (!due) {
     return { ok: false, error: "Invalid or missing target date." };
   }
 
-  const rep = await fetchSlackThreadReplies(parsed.channelId, parsed.threadTs);
-  if (!rep.ok) return rep;
-
-  const token = slackUserTokenForThreads();
-  const rosterById = rosterMapFromHints(rosterHints);
-  const sorted = sortMessagesByTs(rep.messages);
-  const tail = sorted.slice(-8);
-  const mentionIds: string[] = [];
-  for (const m of tail) {
-    mentionIds.push(...collectSlackUserIdsFromMessageText(m.text ?? ""));
-  }
-  const ids = [
-    ...new Set([
-      ...tail
-        .map((m) => m.user)
-        .filter((u): u is string => Boolean(u))
-        .map((u) => u.toUpperCase()),
-      ...mentionIds,
-    ]),
-  ];
-  const { labelMap } = await buildSlackUserDisplayMaps(ids, token, rosterById);
-  const lines: string[] = [];
-  for (const m of tail) {
-    const uid = m.user?.trim().toUpperCase();
-    const who = uid
-      ? (labelMap.get(uid) ?? rosterById.get(uid)?.name ?? uid)
-      : "app/bot";
-    lines.push(`[${who}]: ${slackMessageTextForDisplay(m.text ?? "", 800, labelMap)}`);
-  }
-  const transcript = lines.join("\n\n");
+  const tr = await buildRecentThreadPingTranscript(slackUrl, rosterHints);
+  if (!tr.ok) return tr;
+  const transcript = tr.transcript;
 
   const today = new Date();
   const todayCal = new Date(

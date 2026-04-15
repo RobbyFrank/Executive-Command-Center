@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type RefObject } from "react";
+import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AiCreateDialog } from "./AiCreateDialog";
@@ -12,8 +12,6 @@ interface AiCreateButtonProps {
   /** Called with the new entity id after creation */
   onCreated?: (id: string) => void;
   inline?: boolean;
-  /** Row/card to leave clear behind the dimmed overlay (goal: company header; project: goal header). */
-  spotlightRef?: RefObject<HTMLElement | null>;
 }
 
 export function AiCreateButton({
@@ -22,7 +20,6 @@ export function AiCreateButton({
   goalId,
   onCreated,
   inline = false,
-  spotlightRef,
 }: AiCreateButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -59,7 +56,6 @@ export function AiCreateButton({
           goalId={goalId}
           onCreated={onCreated}
           onClose={() => setOpen(false)}
-          spotlightRef={spotlightRef}
         />
       )}
     </>
