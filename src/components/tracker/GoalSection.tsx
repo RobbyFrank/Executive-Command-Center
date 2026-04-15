@@ -73,7 +73,7 @@ import { AiContextInfoIcon } from "./AiContextInfoIcon";
 import { AiUpdateDialog } from "./AiUpdateDialog";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { RowActionIcons } from "./RowActionIcons";
-import { useAssistant } from "@/contexts/AssistantContext";
+import { useAssistantOptional } from "@/contexts/AssistantContext";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -124,7 +124,7 @@ export function GoalSection({
   const [newProjectNameFocusId, setNewProjectNameFocusId] = useState<
     string | null
   >(null);
-  const { openAssistant } = useAssistant();
+  const assistant = useAssistantOptional();
   const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
 
   /** Increment to focus the goal title field (context menu Rename). */
@@ -383,18 +383,22 @@ export function GoalSection({
         icon: Wand2,
         onClick: () => setAiUpdateOpen(true),
       },
-      {
-        type: "item",
-        id: "discuss-in-chat",
-        label: "Discuss in chat",
-        icon: MessageSquare,
-        onClick: () =>
-          openAssistant({
-            type: "goal",
-            id: goal.id,
-            label: goal.description,
-          }),
-      },
+      ...(assistant
+        ? [
+            {
+              type: "item" as const,
+              id: "discuss-in-chat",
+              label: "Discuss in chat",
+              icon: MessageSquare,
+              onClick: () =>
+                assistant.openAssistant({
+                  type: "goal",
+                  id: goal.id,
+                  label: goal.description,
+                }),
+            },
+          ]
+        : []),
       {
         type: "item",
         id: "review-notes",
@@ -431,8 +435,8 @@ export function GoalSection({
     goal.atRisk,
     goal.companyId,
     goal.description,
+    assistant,
     goal.id,
-    openAssistant,
     goal.projects.length,
     goal.spotlight,
     onGoalCreated,
@@ -580,6 +584,8 @@ export function GoalSection({
         <div className="w-28 shrink-0 min-w-0">
           <InlineEditCell
             {...GRID_ALIGN}
+            className="group/status"
+            overlaySelectQuiet
             value={String(goal.costOfDelay)}
             onSave={(v) =>
               updateGoal(goal.id, { costOfDelay: parseScoreBand(v) })
@@ -759,7 +765,7 @@ export function GoalSection({
                   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
                 )}
               >
-                No projects yet. Add a project to track milestones and delivery for this goal.&nbsp;
+                No projects yet.&nbsp;
                 <button
                   type="button"
                   title="Add a new project to this goal"

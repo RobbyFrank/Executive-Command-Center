@@ -12,7 +12,13 @@ import {
 import type { Company, CompanyWithGoals, Goal, Person } from "@/lib/types/tracker";
 import { GoalSection } from "./GoalSection";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import { ChevronRight, Building2, ChevronDown, Plus } from "lucide-react";
+import {
+  ChevronRight,
+  Building2,
+  ChevronDown,
+  Plus,
+  MessageSquare,
+} from "lucide-react";
 import { createGoal } from "@/server/actions/tracker";
 import { cn } from "@/lib/utils";
 import {
@@ -39,6 +45,7 @@ import {
   useCompanySectionOverlayOptional,
 } from "./company-section-overlay-context";
 import { CollapsePanel } from "./CollapsePanel";
+import { useAssistantOptional } from "@/contexts/AssistantContext";
 
 interface CompanySectionProps {
   company: CompanyWithGoals;
@@ -105,6 +112,7 @@ export function CompanySection({
   const toolbarPx =
     stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
   const companyContext = useContextMenu();
+  const assistant = useAssistantOptional();
   const companyHeaderRef = useRef<HTMLDivElement>(null);
   const [companyHeaderPx, setCompanyHeaderPx] = useState(56);
 
@@ -177,6 +185,22 @@ export function CompanySection({
         icon: Plus,
         onClick: () => void addGoal(),
       },
+      ...(assistant
+        ? ([
+            {
+              type: "item" as const,
+              id: "discuss-in-chat",
+              label: "Discuss in chat",
+              icon: MessageSquare,
+              onClick: () =>
+                assistant.openAssistant({
+                  type: "company",
+                  id: company.id,
+                  label: company.name,
+                }),
+            },
+          ] as const)
+        : []),
       { type: "divider", id: "d1" },
       {
         type: "item" as const,
@@ -186,7 +210,7 @@ export function CompanySection({
         onClick: () => setExpanded((v) => !v),
       },
     ];
-  }, [company.id, expanded, handleNewGoalRegistered]);
+  }, [assistant, company.id, company.name, expanded, handleNewGoalRegistered]);
 
   return (
     <CompanySectionOverlayProvider>
@@ -289,7 +313,7 @@ export function CompanySection({
                   TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS
                 )}
               >
-                No goals yet. Add a goal to plan work and projects for this company.&nbsp;
+                No goals yet.&nbsp;
                 <button
                   type="button"
                   title="Add a new goal for this company"

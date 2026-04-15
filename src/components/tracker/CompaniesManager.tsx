@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Company, CompanyDirectoryStats } from "@/lib/types/tracker";
 import {
   groupCompaniesByRevenueTier,
   REVENUE_TIER_META,
+  PINNED_COMPANY_SECTION,
 } from "@/lib/companyRevenueTiers";
 import {
   buildMomentumTooltip,
@@ -21,7 +23,7 @@ import {
   deleteCompany,
 } from "@/server/actions/tracker";
 import { CompanyDescriptionGenerateExtras } from "./CompanyDescriptionGenerateExtras";
-import { Building2, Plus, Rocket } from "lucide-react";
+import { Building2, Pin, Plus, Rocket } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatWebsiteFaviconDisplay } from "@/lib/formatWebsiteDisplay";
 
@@ -71,12 +73,14 @@ const NEW_COMPANY_DEFAULT = {
   launchDate: "",
   website: "",
   description: "",
+  pinned: false,
 } as const;
 
 export function CompaniesManager({
   initialCompanies,
   companyStatsByCompanyId,
 }: CompaniesManagerProps) {
+  const router = useRouter();
   const companies = initialCompanies;
   const [viewMode, setViewMode] = useState<CompaniesViewMode>("mrr_tier");
   /** After adding a company, name cell opens in edit mode so the user can type immediately. */
@@ -89,6 +93,11 @@ export function CompaniesManager({
     setNewCompanyNameFocusId(company.id);
   }
 
+  async function handleTogglePin(company: Company) {
+    await updateCompany(company.id, { pinned: !company.pinned });
+    router.refresh();
+  }
+
   const tierGroups = useMemo(
     () => groupCompaniesByRevenueTier(companies),
     [companies]
@@ -98,12 +107,21 @@ export function CompaniesManager({
     if (viewMode === "mrr_tier") {
       return tierGroups.map(({ tierId, companies: tierCompanies }) => ({
         key: tierId,
-        title: REVENUE_TIER_META[tierId].title,
-        subtitle: REVENUE_TIER_META[tierId].mrrRange,
+        title:
+          tierId === "pinned"
+            ? PINNED_COMPANY_SECTION.title
+            : REVENUE_TIER_META[tierId].title,
+        subtitle:
+          tierId === "pinned"
+            ? PINNED_COMPANY_SECTION.subtitle
+            : REVENUE_TIER_META[tierId].mrrRange,
         companies: tierCompanies,
       }));
     }
     const sorted = [...companies].sort((a, b) => {
+      const ap = a.pinned ? 1 : 0;
+      const bp = b.pinned ? 1 : 0;
+      if (bp !== ap) return bp - ap;
       const sa = companyStatsByCompanyId[a.id] ?? EMPTY_STATS;
       const sb = companyStatsByCompanyId[b.id] ?? EMPTY_STATS;
       const d = sb.momentumScore - sa.momentumScore;
@@ -121,7 +139,7 @@ export function CompaniesManager({
   }, [viewMode, companies, tierGroups, companyStatsByCompanyId]);
 
   const companyRowGridClass =
-    "grid grid-cols-[3rem_minmax(8rem,10.5rem)_minmax(8rem,10.5rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_3.5rem_minmax(8rem,1fr)_minmax(2.75rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
+    "grid grid-cols-[3rem_minmax(8rem,10.5rem)_minmax(12rem,20rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_3.5rem_minmax(8rem,1fr)_minmax(5rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
 
   function validateWebsite(draft: string): string | undefined {
     const t = draft.trim();
@@ -379,7 +397,24 @@ export function CompaniesManager({
                       />
                     </div>
 
-                    <div className="justify-self-end">
+                    <div className="justify-self-end flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void handleTogglePin(company)}
+                        className={cn(
+                          "rounded p-1.5 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-500/50",
+                          company.pinned
+                            ? "text-amber-400 hover:bg-zinc-800"
+                            : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/80"
+                        )}
+                        aria-label={
+                          company.pinned ? "Unpin company" : "Pin company"
+                        }
+                        aria-pressed={company.pinned}
+                        title={company.pinned ? "Unpin from top" : "Pin to top"}
+                      >
+                        <Pin className="h-4 w-4" />
+                      </button>
                       <ConfirmDeletePopover
                         entityName={company.name}
                         disabled={hasGoals}

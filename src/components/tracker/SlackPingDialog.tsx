@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import {
+  generateDeadlineNudgeMessage,
   generateThreadPingMessage,
   pingSlackThread,
+  type DeadlineNudgeLikelihoodContext,
   type SlackMemberRosterHint,
 } from "@/server/actions/slack";
 import { invalidateSlackThreadStatusCache } from "@/lib/slackThreadStatusCache";
+import { formatCalendarDateHint } from "@/lib/relativeCalendarDate";
 import { cn } from "@/lib/utils";
 
 interface SlackPingDialogProps {
@@ -19,6 +23,10 @@ interface SlackPingDialogProps {
   rosterHints?: SlackMemberRosterHint[];
   /** Called after a successful post so the parent can refetch thread status. */
   onSent?: () => void;
+  /** "ping" = ask for an update; "nudge" = push on deadline (requires `targetDate` + `likelihoodContext`). */
+  mode?: "ping" | "nudge";
+  targetDate?: string;
+  likelihoodContext?: DeadlineNudgeLikelihoodContext | null;
 }
 
 export function SlackPingDialog({
@@ -28,12 +36,20 @@ export function SlackPingDialog({
   milestoneName,
   rosterHints = [],
   onSent,
+  mode = "ping",
+  targetDate = "",
+  likelihoodContext = null,
 }: SlackPingDialogProps) {
   const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "sending">(
     "idle"
   );
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -49,6 +65,36 @@ export function SlackPingDialog({
     setDraft("");
 
     void (async () => {
+      if (mode === "nudge") {
+        const td = targetDate.trim();
+        if (!td || !likelihoodContext) {
+          if (!cancelled) {
+            setError(
+              "Deadline nudge needs a target date and a completed deadline assessment."
+            );
+            setPhase("ready");
+          }
+          return;
+        }
+        const r = await generateDeadlineNudgeMessage(
+          slackUrl,
+          milestoneName,
+          td,
+          rosterHints,
+          likelihoodContext
+        );
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(r.error);
+          setPhase("ready");
+          setDraft("");
+          return;
+        }
+        setDraft(r.message);
+        setPhase("ready");
+        return;
+      }
+
       const r = await generateThreadPingMessage(
         slackUrl,
         milestoneName,
@@ -68,7 +114,15 @@ export function SlackPingDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, slackUrl, milestoneName, rosterHints]);
+  }, [
+    open,
+    slackUrl,
+    milestoneName,
+    rosterHints,
+    mode,
+    targetDate,
+    likelihoodContext,
+  ]);
 
   if (!open) return null;
 
@@ -90,7 +144,13 @@ export function SlackPingDialog({
     onClose();
   };
 
-  return (
+  const title =
+    mode === "nudge" ? "Nudge on deadline" : "Ask for an update";
+  const dueHint = targetDate.trim()
+    ? formatCalendarDateHint(targetDate.trim())
+    : null;
+
+  const layer = (
     <>
       <div
         className="fixed inset-0 z-[220] bg-black/60"
@@ -113,7 +173,7 @@ export function SlackPingDialog({
             id="slack-ping-title"
             className="text-sm font-semibold text-zinc-100"
           >
-            Ping thread
+            {title}
           </h2>
           <button
             type="button"
@@ -125,12 +185,25 @@ export function SlackPingDialog({
           </button>
         </div>
         <p className="mb-2 text-[11px] text-zinc-500">
-          Review or edit the draft. It will post from your Slack account (user
-          token).
+          {mode === "nudge" && dueHint ? (
+            <>
+              Draft pushes the team on hitting the milestone (
+              <span className="text-zinc-400">{dueHint}</span>
+              ). Edit before sending; posts from your Slack user token.
+            </>
+          ) : (
+            <>
+              Draft asks for a status update—especially useful when the thread
+              has been quiet. Edit before sending; posts from your Slack account
+              (user token).
+            </>
+          )}
         </p>
         {phase === "loading" ? (
           <p className="py-6 text-center text-xs text-zinc-400">
-            Generating follow-up…
+            {mode === "nudge"
+              ? "Generating deadline nudge…"
+              : "Generating update request…"}
           </p>
         ) : (
           <>
@@ -138,7 +211,7 @@ export function SlackPingDialog({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               disabled={phase === "sending"}
-              rows={5}
+              rows={mode === "nudge" ? 6 : 5}
               className="mb-2 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2.5 py-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500/60"
               placeholder="Message to post in the thread…"
             />
@@ -168,4 +241,8 @@ export function SlackPingDialog({
       </div>
     </>
   );
+
+  if (!mounted) return null;
+
+  return createPortal(layer, document.body);
 }

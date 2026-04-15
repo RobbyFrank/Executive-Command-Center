@@ -1,10 +1,15 @@
 "use client";
 
 import type { RefObject } from "react";
-import type { SlackMemberRosterHint } from "@/server/actions/slack";
+import type {
+  SlackMemberRosterHint,
+  MilestoneLikelihoodRiskLevel,
+} from "@/server/actions/slack";
 import type { SlackThreadStatusOk } from "@/lib/slackThreadStatusCache";
 import { SlackThreadPopover } from "./SlackThreadPopover";
 import { SlackPingDialog } from "./SlackPingDialog";
+
+export type SlackPingMode = "ping" | "nudge";
 
 interface SlackMilestoneThreadPopoversProps {
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -16,11 +21,28 @@ interface SlackMilestoneThreadPopoversProps {
   onPopoverOpenChange: (open: boolean) => void;
   pingOpen: boolean;
   onPingOpenChange: (open: boolean) => void;
+  pingMode: SlackPingMode;
+  onPingModeChange: (mode: SlackPingMode) => void;
   onRefreshStatus: () => void;
   onPingSent: () => void;
+  targetDate: string;
+  ownerName: string | null;
+  ownerAutonomy: number | null;
+  projectComplexity: number;
+  likelihood: {
+    likelihood: number;
+    riskLevel: MilestoneLikelihoodRiskLevel;
+    reasoning: string;
+    threadSummaryLine: string;
+    progressEstimate: number;
+    daysRemaining: number;
+    daysElapsed: number;
+  } | null;
+  likelihoodLoading: boolean;
+  likelihoodError: string | null;
 }
 
-/** Popover + ping dialog wired to an external anchor (e.g. inline thread summary). */
+/** Popover + ping/nudge dialog wired to an external anchor (e.g. inline thread summary). */
 export function SlackMilestoneThreadPopovers({
   anchorRef,
   slackUrl,
@@ -31,8 +53,17 @@ export function SlackMilestoneThreadPopovers({
   onPopoverOpenChange,
   pingOpen,
   onPingOpenChange,
+  pingMode,
+  onPingModeChange,
   onRefreshStatus,
   onPingSent,
+  targetDate,
+  ownerName,
+  ownerAutonomy,
+  projectComplexity,
+  likelihood,
+  likelihoodLoading,
+  likelihoodError,
 }: SlackMilestoneThreadPopoversProps) {
   return (
     <>
@@ -45,7 +76,21 @@ export function SlackMilestoneThreadPopovers({
         status={status}
         rosterHints={rosterHints}
         onRefreshStatus={onRefreshStatus}
-        onOpenPing={() => onPingOpenChange(true)}
+        onOpenPing={() => {
+          onPingModeChange("ping");
+          onPingOpenChange(true);
+        }}
+        onOpenNudge={() => {
+          onPingModeChange("nudge");
+          onPingOpenChange(true);
+        }}
+        targetDate={targetDate}
+        ownerName={ownerName}
+        ownerAutonomy={ownerAutonomy}
+        projectComplexity={projectComplexity}
+        likelihood={likelihood}
+        likelihoodLoading={likelihoodLoading}
+        likelihoodError={likelihoodError}
       />
       <SlackPingDialog
         open={pingOpen}
@@ -54,6 +99,17 @@ export function SlackMilestoneThreadPopovers({
         milestoneName={milestoneName}
         rosterHints={rosterHints}
         onSent={onPingSent}
+        mode={pingMode}
+        targetDate={targetDate}
+        likelihoodContext={
+          pingMode === "nudge" && likelihood
+            ? {
+                reasoning: likelihood.reasoning,
+                riskLevel: likelihood.riskLevel,
+                progressEstimate: likelihood.progressEstimate,
+              }
+            : null
+        }
       />
     </>
   );

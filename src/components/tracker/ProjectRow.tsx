@@ -92,10 +92,14 @@ import { AiContextInfoIcon } from "./AiContextInfoIcon";
 import { AiUpdateDialog } from "./AiUpdateDialog";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { RowActionIcons } from "./RowActionIcons";
-import { useAssistant } from "@/contexts/AssistantContext";
+import { useAssistantOptional } from "@/contexts/AssistantContext";
 import { useSlackThreadStatus } from "@/hooks/useSlackThreadStatus";
+import { useMilestoneLikelihood } from "@/hooks/useMilestoneLikelihood";
 import { MilestoneSlackThreadInline } from "./MilestoneSlackThreadInline";
-import { SlackMilestoneThreadPopovers } from "./SlackMilestoneThreadPopovers";
+import {
+  SlackMilestoneThreadPopovers,
+  type SlackPingMode,
+} from "./SlackMilestoneThreadPopovers";
 import { isValidHttpUrl } from "@/lib/httpUrl";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
@@ -153,7 +157,7 @@ export function ProjectRow({
   >(null);
   /** Increment to focus the project name field (context menu Rename). */
   const [projectRenameNonce, setProjectRenameNonce] = useState(0);
-  const { openAssistant } = useAssistant();
+  const assistant = useAssistantOptional();
   const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
   const {
     bulkTick,
@@ -170,6 +174,12 @@ export function ProjectRow({
   const [projectReviewNotesNonce, setProjectReviewNotesNonce] = useState(0);
   const [nextMsThreadPopoverOpen, setNextMsThreadPopoverOpen] = useState(false);
   const [nextMsThreadPingOpen, setNextMsThreadPingOpen] = useState(false);
+  const [nextMsPingMode, setNextMsPingMode] = useState<SlackPingMode>("ping");
+
+  const goalDescription = useMemo(() => {
+    const g = allGoals.find((x) => x.id === goalId);
+    return g?.description?.trim() ?? "";
+  }, [allGoals, goalId]);
 
   useEffect(() => {
     if (!focusProjectMode || focusEnforceTick === 0) return;
@@ -297,6 +307,23 @@ export function ProjectRow({
     [project.milestones]
   );
 
+  const milestonesSummaryForLikelihood = useMemo(
+    () =>
+      project.milestones
+        .map(
+          (m) =>
+            `- ${m.name} [${m.status}]${m.targetDate ? ` ${m.targetDate}` : ""}`
+        )
+        .join("\n"),
+    [project.milestones]
+  );
+
+  const roadmapForNextMilestoneAi = useMemo(
+    () =>
+      `Project: ${project.name}\n\nMilestones:\n${milestonesSummaryForLikelihood}`,
+    [project.name, milestonesSummaryForLikelihood]
+  );
+
   const milestonesForRunway = useMemo(() => {
     if (showCompletedProjects) return project.milestones;
     return project.milestones.filter((m) => m.status !== "Done");
@@ -333,7 +360,13 @@ export function ProjectRow({
           isQueuedPendingMilestone={isQueued}
           goalSlackChannelId={goalSlackChannelId}
           goalSlackChannelName={goalSlackChannelName}
+          goalDescription={goalDescription}
           people={people}
+          projectName={project.name}
+          projectOwnerId={project.ownerId}
+          projectComplexity={project.complexityScore}
+          milestonesSummary={milestonesSummaryForLikelihood}
+          alignSlackPreviewToNextMilestoneColumn
         />
       );
     },
@@ -342,7 +375,12 @@ export function ProjectRow({
       newMilestoneNameFocusId,
       goalSlackChannelId,
       goalSlackChannelName,
+      goalDescription,
       people,
+      project.name,
+      project.ownerId,
+      project.complexityScore,
+      milestonesSummaryForLikelihood,
     ]
   );
 
@@ -383,17 +421,39 @@ export function ProjectRow({
     };
   }, [nextPendingMilestone, project.milestones]);
 
-  const nextMilestoneSlackUrl = useMemo(() => {
-    if (expanded) return null;
+  /** Always derive from data — used to prefetch thread status even when the row is expanded (expand preset hides the inline preview). */
+  const nextMilestoneSlackFetchUrl = useMemo(() => {
     if (!nextPendingMilestone) return null;
     const u = nextPendingMilestone.slackUrl.trim();
     return isValidHttpUrl(u) ? u : null;
-  }, [expanded, nextPendingMilestone]);
+  }, [nextPendingMilestone]);
 
   const nextMilestoneSlackThread = useSlackThreadStatus(
-    nextMilestoneSlackUrl,
+    nextMilestoneSlackFetchUrl,
     people
   );
+
+  const nextThreadReplyCountForLikelihood = nextMilestoneSlackThread.loading
+    ? null
+    : (nextMilestoneSlackThread.status?.replyCount ?? null);
+
+  const nextMilestoneLikelihood = useMilestoneLikelihood({
+    slackUrl: nextMilestoneSlackFetchUrl,
+    milestoneName: nextPendingMilestone?.name ?? "",
+    targetDate: nextPendingMilestone?.targetDate ?? "",
+    ownerAutonomy: ownerPerson?.autonomyScore ?? null,
+    projectComplexity: project.complexityScore,
+    rosterHints: nextMilestoneSlackThread.rosterHints,
+    roadmapContext: roadmapForNextMilestoneAi,
+    threadReplyCount:
+      nextMilestoneSlackFetchUrl != null
+        ? nextThreadReplyCountForLikelihood
+        : null,
+  });
+
+  const milestonesVisible = expanded && showMilestones;
+  const showNextMilestoneSlackInline =
+    !milestonesVisible && nextMilestoneSlackFetchUrl != null;
 
   const warnings = useMemo(
     () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
@@ -518,18 +578,22 @@ export function ProjectRow({
         icon: Wand2,
         onClick: () => setAiUpdateOpen(true),
       },
-      {
-        type: "item",
-        id: "p-discuss-in-chat",
-        label: "Discuss in chat",
-        icon: MessageSquare,
-        onClick: () =>
-          openAssistant({
-            type: "project",
-            id: project.id,
-            label: project.name,
-          }),
-      },
+      ...(assistant
+        ? [
+            {
+              type: "item" as const,
+              id: "p-discuss-in-chat",
+              label: "Discuss in chat",
+              icon: MessageSquare,
+              onClick: () =>
+                assistant.openAssistant({
+                  type: "project",
+                  id: project.id,
+                  label: project.name,
+                }),
+            },
+          ]
+        : []),
       {
         type: "item",
         id: "p-review-notes",
@@ -613,7 +677,7 @@ export function ProjectRow({
     setProjectRenameNonce,
     showMilestones,
     toggleProjectRow,
-    openAssistant,
+    assistant,
   ]);
 
   return (
@@ -745,6 +809,8 @@ export function ProjectRow({
         >
           <InlineEditCell
             {...GRID_ALIGN}
+            className="group/status"
+            overlaySelectQuiet
             value={String(project.complexityScore)}
             onSave={(v) =>
               updateProject(project.id, {
@@ -813,82 +879,93 @@ export function ProjectRow({
           </span>
         </div>
 
-        {/* Next milestone — horizon + name; optional Slack thread preview when collapsed (same URL as next pending milestone) */}
-        <div className="w-[36rem] shrink-0 min-w-0" aria-hidden={expanded}>
-          {!expanded ? (
-            project.milestones.length === 0 ? (
-              <button
-                type="button"
-                title="Click to add a milestone"
-                className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  const ms = await createMilestone({
-                    projectId: project.id,
-                    name: "New milestone",
-                    status: "Not Done",
-                    targetDate: "",
-                  });
-                  setNewMilestoneNameFocusId(ms.id);
-                  setExpanded(true);
-                  setShowMilestones(true);
-                }}
-              >
-                <Plus
-                  className="h-3 w-3 shrink-0 text-amber-300/90"
-                  aria-hidden
-                />
-                <span className="min-w-0 truncate">Create milestone</span>
-              </button>
-            ) : nextPendingMilestone && nextMilestoneUi ? (
-              <div className="flex min-w-0 items-start gap-2">
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <div
-                    className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
-                    title={nextMilestoneUi.title}
+        {/* Next milestone — horizon + name; Slack strip only when collapsed (status prefetches whenever URL exists) */}
+        <div className="w-[36rem] min-w-0 shrink-0 overflow-hidden">
+          {project.milestones.length === 0 ? (
+            <button
+              type="button"
+              title="Click to add a milestone"
+              className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
+              onClick={async (e) => {
+                e.stopPropagation();
+                const ms = await createMilestone({
+                  projectId: project.id,
+                  name: "New milestone",
+                  status: "Not Done",
+                  targetDate: "",
+                });
+                setNewMilestoneNameFocusId(ms.id);
+                setExpanded(true);
+                setShowMilestones(true);
+              }}
+            >
+              <Plus
+                className="h-3 w-3 shrink-0 text-amber-300/90"
+                aria-hidden
+              />
+              <span className="min-w-0 truncate">Create milestone</span>
+            </button>
+          ) : nextPendingMilestone && nextMilestoneUi ? (
+            <div className="flex min-w-0 items-start gap-1.5">
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <div
+                  className="flex min-w-0 items-start gap-1.5 px-1.5 py-1"
+                  title={nextMilestoneUi.title}
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
+                      nextMilestoneUi.chipLabel === "—"
+                        ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
+                        : nextMilestoneUi.isOverdueHorizon
+                          ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
+                          : "text-violet-200/95 bg-violet-500/15"
+                    )}
                   >
-                    <span
-                      className={cn(
-                        "mt-0.5 shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
-                        nextMilestoneUi.chipLabel === "—"
-                          ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
-                          : nextMilestoneUi.isOverdueHorizon
-                            ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
-                            : "text-violet-200/95 bg-violet-500/15"
-                      )}
-                    >
-                      {nextMilestoneUi.chipLabel}
-                    </span>
-                    <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
-                      {nextPendingMilestone.name}
-                    </p>
-                  </div>
+                    {nextMilestoneUi.chipLabel}
+                  </span>
+                  <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
+                    {nextPendingMilestone.name}
+                  </p>
                 </div>
-                {nextMilestoneSlackUrl ? (
-                  <div
-                    className="min-w-0 max-w-[min(20rem,52%)] shrink-0 border-l border-zinc-800/80 pl-2"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MilestoneSlackThreadInline
-                      ref={nextMilestoneSlackAnchorRef}
-                      compact
-                      status={nextMilestoneSlackThread.status}
-                      loading={nextMilestoneSlackThread.loading}
-                      error={nextMilestoneSlackThread.error}
-                      onOpen={() => setNextMsThreadPopoverOpen(true)}
-                    />
-                  </div>
-                ) : null}
               </div>
-            ) : (
-              <p
-                className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
-                title="All milestones are done"
-              >
-                All milestones done
-              </p>
-            )
-          ) : null}
+              {showNextMilestoneSlackInline ? (
+                <div
+                  className="min-w-0 max-w-[min(20rem,52%)] shrink-0 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MilestoneSlackThreadInline
+                    ref={nextMilestoneSlackAnchorRef}
+                    compact
+                    status={nextMilestoneSlackThread.status}
+                    loading={nextMilestoneSlackThread.loading}
+                    error={nextMilestoneSlackThread.error}
+                    onOpen={() => setNextMsThreadPopoverOpen(true)}
+                    likelihood={
+                      nextMilestoneLikelihood.result &&
+                      nextPendingMilestone?.targetDate?.trim()
+                        ? {
+                            likelihood: nextMilestoneLikelihood.result.likelihood,
+                            riskLevel: nextMilestoneLikelihood.result.riskLevel,
+                          }
+                        : null
+                    }
+                    likelihoodLoading={
+                      Boolean(nextPendingMilestone?.targetDate?.trim()) &&
+                      nextMilestoneLikelihood.loading
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p
+              className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
+              title="All milestones are done"
+            >
+              All milestones done
+            </p>
+          )}
         </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
@@ -967,10 +1044,10 @@ export function ProjectRow({
         onAppendNote={(t) => appendProjectReviewNote(project.id, t)}
       />
 
-      {nextMilestoneSlackUrl && nextPendingMilestone ? (
+      {showNextMilestoneSlackInline && nextPendingMilestone ? (
         <SlackMilestoneThreadPopovers
           anchorRef={nextMilestoneSlackAnchorRef}
-          slackUrl={nextMilestoneSlackUrl}
+          slackUrl={nextMilestoneSlackFetchUrl}
           milestoneName={nextPendingMilestone.name}
           status={nextMilestoneSlackThread.status}
           rosterHints={nextMilestoneSlackThread.rosterHints}
@@ -978,8 +1055,19 @@ export function ProjectRow({
           onPopoverOpenChange={setNextMsThreadPopoverOpen}
           pingOpen={nextMsThreadPingOpen}
           onPingOpenChange={setNextMsThreadPingOpen}
-          onRefreshStatus={() => void nextMilestoneSlackThread.refresh()}
-          onPingSent={() => void nextMilestoneSlackThread.refresh()}
+          pingMode={nextMsPingMode}
+          onPingModeChange={setNextMsPingMode}
+          onRefreshStatus={() =>
+            void nextMilestoneSlackThread.refresh({ force: true })
+          }
+          onPingSent={() => void nextMilestoneSlackThread.refresh({ force: true })}
+          targetDate={nextPendingMilestone.targetDate}
+          ownerName={ownerPerson?.name ?? null}
+          ownerAutonomy={ownerPerson?.autonomyScore ?? null}
+          projectComplexity={project.complexityScore}
+          likelihood={nextMilestoneLikelihood.result}
+          likelihoodLoading={nextMilestoneLikelihood.loading}
+          likelihoodError={nextMilestoneLikelihood.error}
         />
       ) : null}
 

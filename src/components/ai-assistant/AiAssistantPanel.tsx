@@ -1,13 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  AArrowDown,
+  AArrowUp,
   AtSign,
-  Maximize2,
-  Minimize2,
-  Minus,
-  Plus,
-  RotateCcw,
+  Eraser,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,7 +33,26 @@ type HistoryMessage = { role: "user" | "assistant"; content: string };
 const FONT_STEP_STORAGE_KEY = "ecc-assistant-font-step";
 const CHAT_TURNS_STORAGE_KEY = "ecc-assistant-chat-turns";
 const FONT_STEPS = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl"] as const;
-const DEFAULT_FONT_STEP = 3;
+/** Default is two steps below the previous default (text-lg → text-sm). */
+const DEFAULT_FONT_STEP = 1;
+
+const PANEL_WIDTH_STORAGE_KEY = "ecc-assistant-panel-width";
+const MIN_PANEL_WIDTH = 300;
+const MAX_PANEL_WIDTH_CAP = 960;
+const PANEL_RIGHT_GUTTER_PX = 24;
+const MD_BREAKPOINT_PX = 768;
+
+function maxPanelWidthPx(): number {
+  if (typeof window === "undefined") return MAX_PANEL_WIDTH_CAP;
+  return Math.min(
+    MAX_PANEL_WIDTH_CAP,
+    Math.max(MIN_PANEL_WIDTH, window.innerWidth - PANEL_RIGHT_GUTTER_PX * 2),
+  );
+}
+
+function clampPanelWidth(w: number): number {
+  return Math.min(maxPanelWidthPx(), Math.max(MIN_PANEL_WIDTH, w));
+}
 
 function readStoredTurns(): ChatTurn[] {
   if (typeof window === "undefined") return [];
@@ -92,9 +109,12 @@ function isMentionTriggerPosition(value: string, atIndex: number): boolean {
 export function AiAssistantPanel({
   onClose,
   entityTag,
+  visible = true,
 }: {
   onClose: () => void;
   entityTag: AssistantEntityTag | null;
+  /** When false, plays the close animation (used by the FAB mount wrapper). Defaults to true. */
+  visible?: boolean;
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [turnsHydrated, setTurnsHydrated] = useState(false);
@@ -104,10 +124,14 @@ export function AiAssistantPanel({
   const [streaming, setStreaming] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(true);
   const [fontStep, setFontStep] = useState(DEFAULT_FONT_STEP);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const [panelWidth, setPanelWidth] = useState<number | null>(null);
+  const [isMdUp, setIsMdUp] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
 
   const [entityBundle, setEntityBundle] = useState<AssistantEntitiesBundle | null>(
     null,
@@ -124,6 +148,45 @@ export function AiAssistantPanel({
     setMentionStart(null);
     setMentionHighlight(0);
   }, []);
+
+  useLayoutEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${MD_BREAKPOINT_PX}px)`);
+    const applyMq = () => setIsMdUp(mq.matches);
+    applyMq();
+    mq.addEventListener("change", applyMq);
+    try {
+      const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+      if (raw != null) {
+        const n = Number.parseInt(raw, 10);
+        if (Number.isFinite(n)) {
+          setPanelWidth(clampPanelWidth(n));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return () => mq.removeEventListener("change", applyMq);
+  }, []);
+
+  useEffect(() => {
+    function onResize() {
+      setPanelWidth((w) => (w == null ? null : clampPanelWidth(w)));
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const prevCursor = document.body.style.cursor;
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevUserSelect;
+    };
+  }, [isResizing]);
 
   useEffect(() => {
     setFontStep(readStoredFontStep());
@@ -353,19 +416,79 @@ export function AiAssistantPanel({
     }, 0);
   }, [input, loading]);
 
+  const onResizeHandlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!isMdUp || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const el = panelRef.current;
+      const rect = el?.getBoundingClientRect();
+      const startX = e.clientX;
+      const startWidth = rect?.width ?? clampPanelWidth(panelWidth ?? maxPanelWidthPx());
+
+      function move(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        const delta = ev.clientX - startX;
+        setPanelWidth(clampPanelWidth(startWidth - delta));
+      }
+
+      function up(ev: PointerEvent) {
+        if (ev.pointerId !== e.pointerId) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        setIsResizing(false);
+        setPanelWidth((current) => {
+          if (current != null) {
+            try {
+              localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(current));
+            } catch {
+              /* ignore */
+            }
+          }
+          return current;
+        });
+      }
+
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      setIsResizing(true);
+    },
+    [isMdUp, panelWidth],
+  );
+
   return (
     <div
+      ref={panelRef}
       className={cn(
-        "fixed bottom-24 right-6 z-50 flex flex-col overflow-hidden rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl",
-        "transition-[width,height,max-width,max-height] duration-300 ease-out motion-reduce:transition-none",
-        expanded
-          ? "h-[min(85vh,calc(100dvh-7rem))] w-[min(960px,calc(100vw-2rem))] max-md:left-4 max-md:right-4 max-md:w-auto"
-          : "h-[min(500px,70vh)] w-[min(400px,calc(100vw-2rem))]"
+        "fixed bottom-24 right-6 z-50 flex h-[min(85vh,calc(100dvh-7rem))] flex-col overflow-hidden rounded-lg border border-zinc-600 bg-zinc-900 shadow-xl",
+        "max-md:left-4 max-md:right-4 max-md:w-auto",
+        isMdUp && panelWidth == null && "w-[min(960px,calc(100vw-2rem))]",
+        isMdUp && panelWidth != null && "min-w-[300px] max-w-[min(960px,calc(100vw-3rem))]",
+        "origin-bottom-right transition-[opacity,transform,box-shadow] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-opacity motion-reduce:duration-200",
+        visible
+          ? "translate-y-0 scale-100 opacity-100"
+          : "pointer-events-none translate-y-3 scale-[0.96] opacity-0 motion-reduce:translate-y-0 motion-reduce:scale-100",
       )}
+      style={
+        isMdUp && panelWidth != null ? { width: panelWidth } : undefined
+      }
       role="dialog"
       aria-modal="true"
       aria-labelledby="ai-assistant-title"
     >
+      {isMdUp ? (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize assistant width"
+          className={cn(
+            "absolute left-0 top-0 z-[60] w-3 cursor-ew-resize touch-none select-none rounded-l-md",
+            "hover:bg-emerald-500/10",
+            "after:pointer-events-none after:absolute after:inset-y-4 after:right-0 after:w-px after:bg-zinc-500/80",
+          )}
+          onPointerDown={onResizeHandlePointerDown}
+        />
+      ) : null}
       <div className="flex items-center justify-between gap-2 border-b border-zinc-700 px-3 py-2">
         <h2 id="ai-assistant-title" className="text-sm font-semibold text-zinc-100">
           Assistant
@@ -384,7 +507,7 @@ export function AiAssistantPanel({
             )}
             aria-label="Reset chat — clear conversation history"
           >
-            <RotateCcw
+            <Eraser
               className="h-5 w-5 transition-transform duration-200 ease-out hover:scale-110 motion-reduce:transition-none"
               aria-hidden
             />
@@ -397,11 +520,11 @@ export function AiAssistantPanel({
               "rounded p-1.5 text-zinc-400 transition-all duration-200 motion-reduce:transition-none",
               "hover:bg-zinc-800 hover:text-zinc-100 active:scale-90",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60",
-              "disabled:pointer-events-none disabled:opacity-35"
+              "disabled:pointer-events-none disabled:opacity-35",
             )}
             aria-label="Decrease chat font size"
           >
-            <Minus
+            <AArrowDown
               className="h-5 w-5 transition-transform duration-200 ease-out hover:scale-110 motion-reduce:transition-none"
               aria-hidden
             />
@@ -418,40 +541,10 @@ export function AiAssistantPanel({
             )}
             aria-label="Increase chat font size"
           >
-            <Plus
+            <AArrowUp
               className="h-5 w-5 transition-transform duration-200 ease-out hover:scale-110 motion-reduce:transition-none"
               aria-hidden
             />
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className="group relative rounded p-1.5 text-zinc-400 transition-transform duration-150 hover:bg-zinc-800 hover:text-zinc-100 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
-            aria-expanded={expanded}
-            aria-label={expanded ? "Shrink assistant" : "Expand assistant"}
-          >
-            <span className="relative flex h-5 w-5 items-center justify-center">
-              <Maximize2
-                className={cn(
-                  "absolute h-5 w-5 transition-all duration-300 ease-out motion-reduce:transition-none",
-                  "group-hover:drop-shadow-[0_0_6px_rgba(52,211,153,0.35)]",
-                  expanded
-                    ? "scale-75 rotate-90 opacity-0"
-                    : "scale-100 rotate-0 opacity-100"
-                )}
-                aria-hidden
-              />
-              <Minimize2
-                className={cn(
-                  "absolute h-5 w-5 transition-all duration-300 ease-out motion-reduce:transition-none",
-                  "group-hover:drop-shadow-[0_0_6px_rgba(52,211,153,0.35)]",
-                  expanded
-                    ? "scale-100 rotate-0 opacity-100"
-                    : "scale-75 -rotate-90 opacity-0"
-                )}
-                aria-hidden
-              />
-            </span>
           </button>
           <button
             type="button"
@@ -492,7 +585,11 @@ export function AiAssistantPanel({
             </div>
             <div className="rounded-md border border-zinc-700/80 bg-zinc-950/50 px-2 py-1.5 text-zinc-200">
               <div className="mb-1.5 font-medium text-emerald-500/90">Answer</div>
-              <AssistantMarkdown content={t.answer} className="text-inherit" />
+              <AssistantMarkdown
+                content={t.answer}
+                className="text-inherit"
+                people={entityBundle?.people ?? []}
+              />
             </div>
           </div>
         ))}
@@ -508,7 +605,11 @@ export function AiAssistantPanel({
               {loading && streaming === "" ? (
                 <span className="text-zinc-500">Thinking…</span>
               ) : (
-                <AssistantMarkdown content={streaming} className="text-inherit" />
+                <AssistantMarkdown
+                  content={streaming}
+                  className="text-inherit"
+                  people={entityBundle?.people ?? []}
+                />
               )}
             </div>
           </div>
@@ -535,7 +636,7 @@ export function AiAssistantPanel({
               applyMention(item);
             }}
           />
-          <div className="flex gap-2">
+          <div className="flex items-end gap-2">
             <div className="relative min-w-0 flex-1">
               <textarea
                 ref={inputRef}
@@ -624,7 +725,7 @@ export function AiAssistantPanel({
                 onClick={onInsertAtClick}
                 disabled={loading}
                 className={cn(
-                  "absolute bottom-1.5 right-1.5 rounded p-1.5 text-zinc-500 transition-colors",
+                  "absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-zinc-500 transition-colors",
                   "hover:bg-zinc-800 hover:text-emerald-400/90",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
                   "disabled:pointer-events-none disabled:opacity-40",
@@ -632,14 +733,14 @@ export function AiAssistantPanel({
                 title="Tag company, goal, project, or milestone"
                 aria-label="Insert at-tag for workspace item"
               >
-                <AtSign className="h-4 w-4" aria-hidden />
+                <AtSign className="h-4 w-4 shrink-0" aria-hidden />
               </button>
             </div>
             <button
               type="button"
               onClick={() => void send()}
               disabled={loading || !input.trim()}
-              className="self-end rounded-md bg-emerald-700 px-3 py-2 font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-[44px] shrink-0 items-center justify-center rounded-md bg-emerald-700 px-3 font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Send
             </button>

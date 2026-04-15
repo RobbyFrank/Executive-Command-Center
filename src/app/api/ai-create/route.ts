@@ -5,7 +5,7 @@ import { getRepository } from "@/server/repository";
 
 function formatCompanyDetail(c: Company): string {
   const lines: string[] = [];
-  lines.push(`COMPANY — ${c.name} (${c.shortName})`);
+  lines.push(`COMPANY: ${c.name} (${c.shortName})`);
   const desc = c.description.trim();
   if (desc) lines.push(`Description: ${desc}`);
   const website = c.website.trim();
@@ -22,7 +22,7 @@ function formatCompanyDetail(c: Company): string {
 
 function formatGoalDetail(g: Goal, goalOwnerName: string): string {
   const lines: string[] = [];
-  lines.push(`GOAL — ${g.description}`);
+  lines.push(`GOAL: ${g.description}`);
   const mt = g.measurableTarget.trim();
   if (mt) lines.push(`Measurable target: ${mt}`);
   const wim = g.whyItMatters.trim();
@@ -69,7 +69,7 @@ Goal fields you must populate:
 - description: The goal name/title. Short, outcome-oriented. e.g. "Reduce churn to <3% monthly"
 - priority: One of P0, P1, P2, P3 (P0 = highest)
 - measurableTarget: A concise description of the measurable outcome or success criteria
-- whyItMatters: Why achieving this goal matters — business impact, strategic value
+- whyItMatters: Why achieving this goal matters (business impact, strategic value)
 - currentValue: Where things stand right now relative to the goal
 `.trim();
 
@@ -77,7 +77,7 @@ const PROJECT_FIELDS_DESCRIPTION = `
 Project fields you must populate:
 - name: The project name. Short, action-oriented. e.g. "Onboarding flow redesign"
 - priority: One of P0, P1, P2, P3 (P0 = highest)
-- description: What this project delivers — scope and outcome in 1-2 sentences
+- description: What this project delivers (scope and outcome in 1-2 sentences)
 - definitionOfDone: Concrete criteria to know the project is complete
 - complexityScore: 1-5 integer (1 = trivial, 5 = very complex)
 - milestones: An array of 3-6 milestones that break the project into concrete, sequential deliverables. Each milestone is an object with:
@@ -104,28 +104,44 @@ function buildSystemPrompt(
 CONTEXT: The user is adding a new ${type} under the ${parentLabel} "${entityName}".
 Today's date is ${new Date().toISOString().slice(0, 10)}.
 
-PRIMARY SUBJECT — detailed record for the parent ${type === "goal" ? "company" : "company and goal"} (read this first; weight it heavily):
+PRIMARY SUBJECT (read first, weight heavily):
 ${parentContextBlock}
 
 ${primarySubjectHint}
 
-STYLE RULES — study the existing tracker data below and match its tone exactly:
-- Concise, actionable, readable. No filler, no buzzwords, no marketing language.
-- Use the same sentence structure, abbreviation style, and level of specificity you see in existing goals and projects.
-- The more data exists, the more precisely you should mirror its conventions.
+STYLE RULES: study the existing tracker data below and match its tone exactly.
+Concise, actionable, readable. No filler, no buzzwords, no marketing language.
+Use the same sentence structure, abbreviation style, and level of specificity you see in existing goals and projects.
+Never use em dashes. Use commas, periods, or parentheses instead.
 
 CONVERSATION RULES:
-- Ask exactly 2-3 short questions, ONE at a time. Each question should be 1-2 sentences max.
-- Your first question should ask what the user is trying to achieve.
-- Each follow-up should build on prior answers and fill in remaining gaps.
-- After you have enough information (2-3 exchanges), output your final proposal.
+Ask 2-3 questions, one at a time. Each question is ONE casual sentence, 8-15 words.
+Sound like a busy colleague in Slack, not an analyst writing a brief.
+
+How to be specific WITHOUT being verbose: mention the company or goal name naturally,
+then ask one open-ended thing. Do NOT recite numbers, metrics, priorities, or dates
+from PRIMARY SUBJECT. Do NOT offer multiple-choice lists ("X, Y, Z, or something else?").
+Use PRIMARY SUBJECT silently to shape the final JSON, not to show off context in questions.
+
+GOOD first-question examples (goal):
+  "What part of {company} are you trying to move the needle on?"
+  "What's the outcome you want for {company} here?"
+GOOD first-question examples (project):
+  "What should this project deliver for the {goal title} goal?"
+  "What does done look like for this one?"
+BAD (too generic): "What's the goal about?"
+BAD (stat dump): "With 21% churn and $10M exit target, what area are you focused on?"
+BAD (laundry list): "Is this about retention, growth, ops, or something else?"
+
+Follow-ups: same brevity. Ask only what you still need from prior answers.
+After 2-3 exchanges, output your final proposal.
 
 FINAL OUTPUT RULES:
-- When ready, write a short sentence like "Here's what I've got:" followed by a fenced JSON block.
-- The JSON block MUST be valid JSON wrapped in \`\`\`json ... \`\`\` fences.
-- ${fieldsBlock}
-- Do NOT include any fields beyond those listed above.
-- Do NOT include id, status, or other metadata — those are set automatically. (Exception: milestone targetDate is required.)
+When ready, write a short sentence like "Here's what I've got:" followed by a fenced JSON block.
+The JSON block MUST be valid JSON wrapped in \`\`\`json ... \`\`\` fences.
+${fieldsBlock}
+Do NOT include any fields beyond those listed above.
+Do NOT include id, status, or other metadata (those are set automatically). Exception: milestone targetDate is required.
 
 EXISTING TRACKER DATA (use this to match writing style and understand context):
 ${trackerJson}`;

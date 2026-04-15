@@ -55,8 +55,14 @@ export async function GET() {
     };
   });
 
+  const people = data.people.map((p) => ({
+    id: p.id,
+    name: p.name,
+    profilePicturePath: p.profilePicturePath?.trim() || null,
+  }));
+
   return Response.json(
-    { companies, goals, projects, milestones },
+    { companies, goals, projects, milestones, people },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

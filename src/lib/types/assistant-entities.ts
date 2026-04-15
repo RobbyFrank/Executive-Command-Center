@@ -5,9 +5,17 @@ export type AssistantEntityOption = {
   subtitle?: string;
 };
 
+/** Roster row for rendering names in assistant answers (avatar + label). */
+export type AssistantPersonRef = {
+  id: string;
+  name: string;
+  profilePicturePath?: string | null;
+};
+
 export type AssistantEntitiesBundle = {
   companies: AssistantEntityOption[];
   goals: AssistantEntityOption[];
   projects: AssistantEntityOption[];
   milestones: AssistantEntityOption[];
+  people: AssistantPersonRef[];
 };

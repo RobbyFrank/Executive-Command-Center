@@ -216,6 +216,7 @@ export function OwnerPickerCell({
       ) : (
         <span
           className={cn(
+            "text-[11px] leading-tight",
             unassignedHighlight
               ? "font-medium text-amber-100"
               : "italic text-zinc-600"

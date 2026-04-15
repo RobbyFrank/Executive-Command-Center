@@ -38,20 +38,47 @@ export function getRevenueTierId(revenueThousands: number): RevenueTierId {
   return "idea";
 }
 
-/** Groups companies by tier; within each tier, revenue descending. Omits empty tiers when iterating. */
+/** Synthetic tier for companies with `pinned: true` (listed above revenue tiers). */
+export type PinnedTierId = "pinned";
+
+export type CompanyGroupTierId = RevenueTierId | PinnedTierId;
+
+export const PINNED_COMPANY_SECTION = {
+  title: "Pinned",
+  /** Shown under the Pinned section heading on the Companies page. */
+  subtitle: "Shown first here and on Roadmap",
+} as const;
+
+/**
+ * Groups companies by tier; pinned companies appear in a leading "pinned" group only
+ * (they are not duplicated in their MRR tier). Within each group, order matches
+ * `sortCompaniesByRevenueDesc` (pinned first globally is represented by the pinned group).
+ */
 export function groupCompaniesByRevenueTier(
   companies: Company[]
-): { tierId: RevenueTierId; companies: Company[] }[] {
+): { tierId: CompanyGroupTierId; companies: Company[] }[] {
+  const pinned = companies.filter((c) => c.pinned);
+  const unpinned = companies.filter((c) => !c.pinned);
+
   const buckets = new Map<RevenueTierId, Company[]>();
   for (const id of REVENUE_TIER_ORDER) {
     buckets.set(id, []);
   }
-  for (const c of companies) {
+  for (const c of unpinned) {
     const tier = getRevenueTierId(c.revenue);
     buckets.get(tier)!.push(c);
   }
-  return REVENUE_TIER_ORDER.map((tierId) => ({
+  const rest = REVENUE_TIER_ORDER.map((tierId) => ({
     tierId,
     companies: sortCompaniesByRevenueDesc(buckets.get(tierId)!),
   })).filter((g) => g.companies.length > 0);
+
+  if (pinned.length === 0) return rest;
+  return [
+    {
+      tierId: "pinned",
+      companies: sortCompaniesByRevenueDesc(pinned),
+    },
+    ...rest,
+  ];
 }

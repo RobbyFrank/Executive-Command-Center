@@ -113,6 +113,8 @@ export const CompanySchema = z.object({
    * Free-form description (same editing pattern as goal **Description** / `measurableTarget` on Roadmap).
    */
   description: z.string().default(""),
+  /** When true, listed first on Companies and Roadmap (and company pickers that use tier grouping). */
+  pinned: z.boolean().default(false),
 });
 
 export const GoalSchema = z.object({

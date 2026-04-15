@@ -73,9 +73,9 @@ function parseStoredExpandPreset(raw: string): TrackerExpandPreset | undefined {
 interface TrackerViewProps {
   hierarchy: CompanyWithGoals[];
   people: Person[];
-  /** Deep-link from Matrix (/?focusGoal=&focusProject=) to expand one project. */
+  /** URL query `focusGoal` + `focusProject`: expand one project. */
   initialFocus?: { goalId: string; projectId: string };
-  /** Deep-link from Summary or bookmarks: pre-fill Roadmap filters from the URL. */
+  /** URL query params: pre-fill Roadmap filters (e.g. bookmarks). */
   initialFilters?: RoadmapInitialFilters;
 }
 
@@ -650,7 +650,10 @@ export function TrackerView({
         </div>
       </RoadmapStickyToolbar>
 
-      <div className="min-w-0 max-w-full px-6 pb-6">
+      {/* `overflow-x-auto` alone makes `overflow-y` compute to `auto`, which creates a scroll
+          container and breaks nested `position: sticky` vs `main` (Roadmap column headers).
+          `overflow-y-clip` keeps horizontal scroll without a vertical scrollport. */}
+      <div className="min-w-0 max-w-full overflow-x-auto overflow-y-clip overscroll-x-contain px-6 pb-6">
         {hierarchy.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
             <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">

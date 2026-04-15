@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import { Loader2 } from "lucide-react";
 import type { SlackThreadStatusOk } from "@/lib/slackThreadStatusCache";
 import { displayInitials } from "@/lib/displayInitials";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,11 @@ function truncateBody(s: string, maxChars: number): string {
   return `${t.slice(0, maxChars - 1)}…`;
 }
 
+export interface MilestoneSlackThreadInlineLikelihoodBadge {
+  likelihood: number;
+  riskLevel: "low" | "medium" | "high" | "critical";
+}
+
 export interface MilestoneSlackThreadInlineProps {
   status: SlackThreadStatusOk | null;
   loading: boolean;
@@ -21,6 +27,10 @@ export interface MilestoneSlackThreadInlineProps {
   onOpen: () => void;
   /** Tighter type and shorter preview (e.g. project row next-milestone strip). */
   compact?: boolean;
+  /** On-time % from AI assessment (`assessMilestoneOnTimeLikelihood`). */
+  likelihood?: MilestoneSlackThreadInlineLikelihoodBadge | null;
+  /** True while deadline likelihood + thread summary are being fetched (milestone has a target date). */
+  likelihoodLoading?: boolean;
 }
 
 /**
@@ -31,7 +41,15 @@ export const MilestoneSlackThreadInline = forwardRef<
   HTMLButtonElement,
   MilestoneSlackThreadInlineProps
 >(function MilestoneSlackThreadInline(
-  { status, loading, error, onOpen, compact = false },
+  {
+    status,
+    loading,
+    error,
+    onOpen,
+    compact = false,
+    likelihood = null,
+    likelihoodLoading = false,
+  },
   ref
 ) {
   const bodyMax = compact ? BODY_PREVIEW_MAX_CHARS_COMPACT : BODY_PREVIEW_MAX_CHARS;
@@ -58,6 +76,28 @@ export const MilestoneSlackThreadInline = forwardRef<
 
   const fallbackSnippet =
     !loading && !error && status?.snippet.trim() && !showAuthorRow;
+
+  /** Thread `loading`/`error` must not hide the % — expanded rows mount fresh and refetch thread status while likelihood may already be cached. */
+  const showLikelihoodLoader = likelihoodLoading;
+  const showLikelihoodBadge =
+    !likelihoodLoading && likelihood != null;
+
+  function likelihoodTextClass(
+    level: MilestoneSlackThreadInlineLikelihoodBadge["riskLevel"]
+  ): string {
+    switch (level) {
+      case "low":
+        return "text-emerald-400/95";
+      case "medium":
+        return "text-amber-300/95";
+      case "high":
+        return "text-orange-400/95";
+      case "critical":
+        return "text-red-400/95";
+      default:
+        return "text-zinc-400";
+    }
+  }
 
   return (
     <button
@@ -103,11 +143,42 @@ export const MilestoneSlackThreadInline = forwardRef<
       status &&
       !loading &&
       !error &&
-      status.replyCount > 0 ? (
+      status.replyCount > 1 ? (
         <span className="shrink-0 text-[10px] tabular-nums text-zinc-600">
           {" · "}
-          {status.replyCount} msg{status.replyCount === 1 ? "" : "s"}
+          {status.replyCount} msgs
         </span>
+      ) : null}
+      {showLikelihoodLoader ? (
+        <>
+          <span className="shrink-0 text-zinc-600" aria-hidden>
+            ·
+          </span>
+          <Loader2
+            className={cn(
+              "shrink-0 animate-spin text-zinc-500",
+              compact ? "h-2.5 w-2.5" : "h-3 w-3"
+            )}
+            aria-hidden
+          />
+          <span className="sr-only">Estimating on-time likelihood</span>
+        </>
+      ) : showLikelihoodBadge ? (
+        <>
+          <span className="shrink-0 text-zinc-600" aria-hidden>
+            ·
+          </span>
+          <span
+            className={cn(
+              "shrink-0 tabular-nums font-semibold",
+              compact ? "text-[10px]" : "text-[11px]",
+              likelihoodTextClass(likelihood.riskLevel)
+            )}
+            title="AI on-time likelihood"
+          >
+            {likelihood.likelihood}%
+          </span>
+        </>
       ) : null}
       {showAuthorRow ? (
         <>

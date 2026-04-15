@@ -20,16 +20,29 @@ import {
 } from "@/lib/companyMomentum";
 import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
+import { isValidHttpUrl } from "@/lib/httpUrl";
 
 const repo = getRepository();
+
+/** When a milestone gets a real Slack thread URL, treat the project as started. */
+async function maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
+  projectId: string,
+  previousSlackUrl: string | undefined,
+  nextSlackUrl: string
+): Promise<void> {
+  const next = nextSlackUrl.trim();
+  if (!isValidHttpUrl(next)) return;
+  if (isValidHttpUrl((previousSlackUrl ?? "").trim())) return;
+  const project = await repo.getProject(projectId);
+  if (!project) return;
+  if (project.status !== "Idea" && project.status !== "Pending") return;
+  await repo.updateProject(projectId, { status: "In Progress" });
+}
 
 function revalidate() {
   revalidatePath("/");
   revalidatePath("/companies");
   revalidatePath("/team");
-  revalidatePath("/summary");
-  revalidatePath("/matrix");
-  revalidatePath("/review");
 }
 
 // --- Companies ---
@@ -243,6 +256,11 @@ export async function createMilestone(
   const id = uuid();
   const milestone: Milestone = { id, slackUrl: "", ...data };
   await repo.createMilestone(milestone);
+  await maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
+    milestone.projectId,
+    "",
+    milestone.slackUrl
+  );
   revalidate();
   return milestone;
 }
@@ -251,7 +269,19 @@ export async function updateMilestone(
   id: string,
   updates: Partial<Milestone>
 ): Promise<Milestone> {
+  const previous =
+    updates.slackUrl !== undefined ? await repo.getMilestone(id) : undefined;
+
   const result = await repo.updateMilestone(id, updates);
+
+  if (updates.slackUrl !== undefined) {
+    await maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
+      result.projectId,
+      previous?.slackUrl,
+      result.slackUrl
+    );
+  }
+
   revalidate();
   return result;
 }

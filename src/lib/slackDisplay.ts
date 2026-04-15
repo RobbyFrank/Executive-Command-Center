@@ -155,12 +155,25 @@ const SLACK_EMOJI_SHORTCODE: Record<string, string> = {
   sunglasses: "😎",
 };
 
-function expandSlackEmojiShortcodes(s: string): string {
+export function expandSlackEmojiShortcodes(s: string): string {
   return s.replace(/:([a-z0-9_+-]+):/gi, (full, code: string) => {
     const key = code.toLowerCase();
     const u = SLACK_EMOJI_SHORTCODE[key];
     return u ?? full;
   });
+}
+
+/**
+ * Inline mrkdwn cleanup for UI previews: channel links and auto-links become plain
+ * labels/text; then emoji shortcodes expand. Does not handle user mentions (`<@…>`).
+ */
+export function slackInlineMrkdwnForPreviewPlain(s: string): string {
+  let t = s;
+  t = t.replace(/<#[CGD]([A-Z0-9]+)\|([^>]+)>/g, "#$2");
+  t = t.replace(/<#[CGD]([A-Z0-9]+)>/g, "#channel");
+  t = t.replace(/<(https?:[^|>]+)\|([^>]+)>/g, "$2");
+  t = t.replace(/<(https?:[^>]+)>/g, "$1");
+  return expandSlackEmojiShortcodes(t);
 }
 
 /**

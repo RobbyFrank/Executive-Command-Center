@@ -28,7 +28,8 @@ export type UseSlackThreadStatusResult = {
   error: string | null;
   rosterHints: SlackMemberRosterHint[];
   statusCacheKey: string;
-  refresh: () => Promise<void>;
+  /** Uses cache when fresh; pass `{ force: true }` after posting to Slack. */
+  refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
 /**
@@ -85,14 +86,24 @@ export function useSlackThreadStatus(
     void load();
   }, [load]);
 
-  const refresh = useCallback(async () => {
-    if (!slackUrl) return;
-    const r = await fetchSlackThreadStatus(slackUrl, rosterHints);
-    if (r.ok) {
-      writeSlackThreadStatusCache(statusCacheKey, r);
-      setStatus(r);
-    }
-  }, [slackUrl, rosterHints, statusCacheKey]);
+  const refresh = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!slackUrl) return;
+      if (!options?.force) {
+        const cached = readSlackThreadStatusCache(statusCacheKey);
+        if (cached) {
+          setStatus(cached);
+          return;
+        }
+      }
+      const r = await fetchSlackThreadStatus(slackUrl, rosterHints);
+      if (r.ok) {
+        writeSlackThreadStatusCache(statusCacheKey, r);
+        setStatus(r);
+      }
+    },
+    [slackUrl, rosterHints, statusCacheKey]
+  );
 
   return {
     status,

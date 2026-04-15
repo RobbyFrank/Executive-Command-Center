@@ -4,12 +4,14 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useId,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Pencil } from "lucide-react";
 import {
   formatCalendarDateHint,
@@ -172,6 +174,13 @@ export function InlineEditCell({
   const overlaySelectListboxId = useId();
   const [overlaySelectOpen, setOverlaySelectOpen] = useState(false);
   const overlaySelectContainerRef = useRef<HTMLDivElement>(null);
+  const overlaySelectMenuPortalRef = useRef<HTMLDivElement>(null);
+  const [overlayMenuPlacement, setOverlayMenuPlacement] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const resolvedEmptyLabel = emptyLabel ?? (type === "date" ? "Set date" : "—");
 
   const cellPadX = trackerGridAlign ? "pl-0 pr-1.5" : "px-1.5";
@@ -190,11 +199,48 @@ export function InlineEditCell({
     setOverlaySelectOpen(false);
   }, [value]);
 
+  const updateOverlayMenuPlacement = useCallback(() => {
+    const el = overlaySelectContainerRef.current;
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
+    const minW = 160; // min-w-[10rem]
+    const width = Math.max(rect.width, minW);
+    const top = rect.bottom + 2;
+    const left = rect.left;
+    const maxHeight = Math.min(
+      360,
+      Math.max(120, window.innerHeight - top - 12)
+    );
+    setOverlayMenuPlacement({ top, left, width, maxHeight });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!overlaySelectOpen) {
+      setOverlayMenuPlacement(null);
+      return;
+    }
+    updateOverlayMenuPlacement();
+  }, [overlaySelectOpen, updateOverlayMenuPlacement]);
+
+  useEffect(() => {
+    if (!overlaySelectOpen) return;
+    const onScrollOrResize = () => updateOverlayMenuPlacement();
+    window.addEventListener("resize", onScrollOrResize);
+    document.addEventListener("scroll", onScrollOrResize, true);
+    return () => {
+      window.removeEventListener("resize", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+    };
+  }, [overlaySelectOpen, updateOverlayMenuPlacement]);
+
   useEffect(() => {
     if (!overlaySelectOpen) return;
     const onDocMouseDown = (e: globalThis.MouseEvent) => {
       const el = overlaySelectContainerRef.current;
-      if (!el || el.contains(e.target as Node)) return;
+      const menuEl = overlaySelectMenuPortalRef.current;
+      const node = e.target as Node;
+      if (!el) return;
+      if (el.contains(node) || menuEl?.contains(node)) return;
       setOverlaySelectOpen(false);
     };
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -308,6 +354,51 @@ export function InlineEditCell({
 
   if (overlaySelect) {
     const listLabel = displayTitle ?? "Choose an option";
+    const overlayListbox =
+      overlaySelectOpen &&
+      overlayMenuPlacement &&
+      typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={overlaySelectMenuPortalRef}
+              id={overlaySelectListboxId}
+              role="listbox"
+              aria-labelledby={`${overlaySelectListboxId}-trigger`}
+              className="fixed z-[210] overflow-y-auto overflow-x-hidden rounded-md border border-zinc-600/70 bg-zinc-950 py-1 shadow-xl shadow-black/50 ring-1 ring-zinc-800/90"
+              style={{
+                top: overlayMenuPlacement.top,
+                left: overlayMenuPlacement.left,
+                width: overlayMenuPlacement.width,
+                maxHeight: overlayMenuPlacement.maxHeight,
+              }}
+            >
+              {options!.map((opt) => {
+                const selected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value === "" ? "__empty" : opt.value}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className={cn(
+                      "flex w-full min-w-0 cursor-pointer items-center px-1.5 py-1 text-left text-sm transition-colors",
+                      "hover:bg-zinc-800/95 focus:bg-zinc-800/95 focus:outline-none",
+                      selected && "bg-zinc-800/60"
+                    )}
+                    onClick={() => {
+                      setOverlaySelectOpen(false);
+                      if (opt.value !== value) onSave(opt.value);
+                    }}
+                  >
+                    {formatDisplay!(opt.value)}
+                  </button>
+                );
+              })}
+            </div>,
+            document.body
+          )
+        : null;
+
     return (
       <div
         ref={overlaySelectContainerRef}
@@ -330,45 +421,18 @@ export function InlineEditCell({
             !value.trim() && "text-zinc-600 italic",
             value.trim() && displayClassName,
             overlaySelectQuiet
-              ? "border border-transparent bg-transparent hover:bg-transparent"
-              : "border border-transparent bg-transparent hover:bg-zinc-800",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
+              ? "border-0 bg-transparent shadow-none hover:bg-transparent"
+              : "border-0 bg-transparent hover:bg-zinc-800",
+            // Quiet roadmap score cells: avoid a boxy ring at rest; keep a clear keyboard focus indicator.
+            overlaySelectQuiet
+              ? "focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:underline focus-visible:decoration-dotted focus-visible:decoration-zinc-500 focus-visible:underline-offset-4"
+              : "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
             overlaySelectOpen && "ring-1 ring-blue-600"
           )}
         >
           {value.trim() ? formatDisplay!(value) : resolvedEmptyLabel}
         </button>
-        {overlaySelectOpen ? (
-          <div
-            id={overlaySelectListboxId}
-            role="listbox"
-            aria-labelledby={`${overlaySelectListboxId}-trigger`}
-            className="absolute left-0 top-full z-[60] mt-0.5 w-full min-w-[max(100%,10rem)] overflow-hidden rounded-md border border-zinc-600/70 bg-zinc-950 py-1 shadow-xl shadow-black/50 ring-1 ring-zinc-800/90"
-          >
-            {options!.map((opt) => {
-              const selected = opt.value === value;
-              return (
-                <button
-                  key={opt.value === "" ? "__empty" : opt.value}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  className={cn(
-                    "flex w-full min-w-0 cursor-pointer items-center px-1.5 py-1 text-left text-sm transition-colors",
-                    "hover:bg-zinc-800/95 focus:bg-zinc-800/95 focus:outline-none",
-                    selected && "bg-zinc-800/60"
-                  )}
-                  onClick={() => {
-                    setOverlaySelectOpen(false);
-                    if (opt.value !== value) onSave(opt.value);
-                  }}
-                >
-                  {formatDisplay!(opt.value)}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+        {overlayListbox}
         <ChevronDown
           className={cn(
             "pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity",
@@ -528,12 +592,13 @@ export function InlineEditCell({
 
     const trimmed = value.trim();
     if (linkBehavior && trimmed && isValidHttpUrl(trimmed)) {
-      const iconOnlyLink = Boolean(formatDisplay);
       return (
         <span
           className={cn(
-            "inline-flex items-center min-w-0",
-            linkBehaviorHideTrailingEdit ? "gap-0" : "gap-0.5 group/urlicon"
+            "inline-flex min-w-0 max-w-full items-center",
+            linkBehaviorHideTrailingEdit
+              ? "h-full w-full justify-center gap-0"
+              : "gap-0.5 group/urlicon"
           )}
         >
           <a
@@ -544,10 +609,11 @@ export function InlineEditCell({
               collapsedLayout,
               displayClassName,
               collapsedButtonClassName,
-              "inline-flex items-center no-underline text-inherit",
-              iconOnlyLink
-                ? "h-7 w-7 shrink-0 justify-center !border-0 !p-0 !shadow-none !ring-0 min-w-0 bg-transparent hover:bg-zinc-800/80"
-                : "min-w-0 justify-start gap-1"
+              "inline-flex min-w-0 max-w-full items-center no-underline text-inherit",
+              /** Favicon + hostname (Companies) needs a row; compact icon-only links (e.g. Milestone Slack) stay centered in the grid cell. */
+              linkBehaviorHideTrailingEdit
+                ? "justify-center gap-0"
+                : "justify-start gap-1"
             )}
             title={trimmed}
             onClick={(e) => e.stopPropagation()}

@@ -15,7 +15,7 @@ export type AssistantEntityTag = {
   label: string;
 };
 
-type AssistantContextValue = {
+export type AssistantContextValue = {
   open: boolean;
   entityTag: AssistantEntityTag | null;
   openAssistant: (entity?: AssistantEntityTag) => void;
@@ -63,8 +63,13 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** Returns null when used outside `AssistantProvider` (e.g. during broken HMR or isolated renders). */
+export function useAssistantOptional(): AssistantContextValue | null {
+  return useContext(AssistantContext);
+}
+
 export function useAssistant(): AssistantContextValue {
-  const ctx = useContext(AssistantContext);
+  const ctx = useAssistantOptional();
   if (!ctx) {
     throw new Error("useAssistant must be used within AssistantProvider");
   }

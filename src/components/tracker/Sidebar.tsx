@@ -9,9 +9,6 @@ import {
   Users,
   Building2,
   LogOut,
-  BarChart3,
-  Grid3X3,
-  ClipboardCheck,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -23,22 +20,12 @@ type NavItem = {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
-  /** Subtle beta indicator in the expanded sidebar */
-  beta?: boolean;
 };
 
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Planning",
     items: [{ href: "/", label: "Roadmap", icon: LayoutDashboard }],
-  },
-  {
-    title: "Insights",
-    items: [
-      { href: "/summary", label: "Summary", icon: BarChart3, beta: true },
-      { href: "/matrix", label: "Matrix", icon: Grid3X3, beta: true },
-      { href: "/review", label: "Review", icon: ClipboardCheck, beta: true },
-    ],
   },
   {
     title: "Organization",
@@ -142,9 +129,7 @@ export function Sidebar({ username }: { username: string }) {
                   item.href === "/"
                     ? pathname === "/"
                     : pathname.startsWith(item.href);
-                const collapsedHint = item.beta
-                  ? `${item.label} (beta)`
-                  : item.label;
+                const collapsedHint = item.label;
                 return (
                   <Link
                     key={item.href}
@@ -164,14 +149,7 @@ export function Sidebar({ username }: { username: string }) {
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
                     {!collapsed && (
-                      <>
-                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                        {item.beta ? (
-                          <span className="shrink-0 text-[9px] font-normal text-zinc-600/70">
-                            Beta
-                          </span>
-                        ) : null}
-                      </>
+                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
                     )}
                   </Link>
                 );

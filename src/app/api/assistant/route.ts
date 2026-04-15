@@ -5,6 +5,7 @@ import {
   mentionKey,
   parseEccMentionsFromText,
 } from "@/lib/assistantMentions";
+import { isFounderPerson } from "@/lib/autonomyRoster";
 import { getRepository } from "@/server/repository";
 
 export async function POST(req: Request) {
@@ -110,9 +111,20 @@ ${buildEntityFocusBlock(data, {
 `;
   }
 
+  const founders = data.people.filter((p) => isFounderPerson(p));
+  const teamMembersOnly = data.people.filter((p) => !isFounderPerson(p));
+  const rosterSemantics = `Roster semantics (follow strictly):
+- Founders are NOT "team members." People marked isFounder, or legacy founder ids when isFounder is omitted (robby, nadav), are founders unless isFounder is explicitly false.
+- Current founders in data: ${founders.length ? founders.map((p) => p.name).join(", ") : "(none listed)"}.
+- Team members (non-founders only): ${teamMembersOnly.length ? teamMembersOnly.map((p) => p.name).join(", ") : "(none)"}.
+- When the user asks about team members, headcount, rankings, or "top" people on the team, include ONLY team members (non-founders). You may mention founders separately if relevant (e.g. leadership), but do not list founders inside a "team members" answer unless the user explicitly asks for founders or the full people list.
+- When naming people, write their names as plain text (do not wrap names in markdown links or URLs) so the client can show profile photos next to names.`;
+
   const systemPrompt = `${entityBlock}You are an executive analyst assistant for the MLabs portfolio strategic tracker. Answer questions using ONLY the JSON data below. Be concise, direct, and actionable. If something is not in the data, say you do not have that information.
 
 Hierarchy: Company → Goal → Project → Milestone. People can own goals/projects and appear on the team roster.
+
+${rosterSemantics}
 
 Tracker data (companies, goals, projects, milestones, people):
 ${JSON.stringify(data)}`;
