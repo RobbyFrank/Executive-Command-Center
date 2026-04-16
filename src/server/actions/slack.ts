@@ -934,6 +934,8 @@ export async function assessMilestoneOnTimeLikelihood(
 
   const system = `You are an executive project analyst. Given a milestone's Slack thread transcript, its target date, owner autonomy score, and project complexity, estimate the likelihood this milestone will be completed on time.
 
+HARD RULE: If "Days remaining" is negative the deadline has already passed. A missed deadline cannot be met retroactively. Set likelihood to 0 and riskLevel to "critical". The reasoning and progressEstimate should still reflect the thread's actual state.
+
 Consider:
 - How much progress is evident in the thread relative to time elapsed vs remaining
 - The pace and recency of activity (stale or quiet threads = higher risk)
@@ -986,10 +988,12 @@ Respond with EXACTLY one JSON object and no other text (no markdown fences):
       };
     }
 
+    const overdue = daysRemaining < 0;
+
     return {
       ok: true,
-      likelihood: Math.max(0, Math.min(100, Math.round(likelihood))),
-      riskLevel,
+      likelihood: overdue ? 0 : Math.max(0, Math.min(100, Math.round(likelihood))),
+      riskLevel: overdue ? "critical" : riskLevel,
       reasoning,
       threadSummaryLine,
       progressEstimate: Math.max(0, Math.min(100, Math.round(progressEstimate))),

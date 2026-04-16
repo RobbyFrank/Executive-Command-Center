@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
-import { Loader2 } from "lucide-react";
+import { CircleCheck, Clock, Loader2 } from "lucide-react";
 import type { SlackThreadStatusOk } from "@/lib/slackThreadStatusCache";
 import { displayInitials } from "@/lib/displayInitials";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,8 @@ function truncateBody(s: string, maxChars: number): string {
 
 export interface MilestoneSlackThreadInlineLikelihoodBadge {
   likelihood: number;
+  /** AI-estimated work completed for this milestone (0–100). Omitted only if cached data predates this field. */
+  progressEstimate?: number;
   riskLevel: "low" | "medium" | "high" | "critical";
 }
 
@@ -65,6 +67,16 @@ export const MilestoneSlackThreadInline = forwardRef<
       titleParts.push(status.snippet);
     }
   }
+  if (!likelihoodLoading && likelihood != null) {
+    const pe = likelihood.progressEstimate;
+    if (typeof pe === "number" && Number.isFinite(pe)) {
+      titleParts.push(
+        `On-time ${likelihood.likelihood}% · Est. ${pe}% done`
+      );
+    } else {
+      titleParts.push(`On-time ${likelihood.likelihood}%`);
+    }
+  }
   const title = titleParts.join(" · ") || "Slack thread";
 
   const showAuthorRow =
@@ -97,6 +109,20 @@ export const MilestoneSlackThreadInline = forwardRef<
       default:
         return "text-zinc-400";
     }
+  }
+
+  function progressTextClass(pct: number): string {
+    if (pct >= 90) return "text-emerald-400";
+    if (pct >= 70) return "text-emerald-400/70";
+    if (pct >= 45) return "text-sky-400/80";
+    return "text-zinc-400/90";
+  }
+
+  function progressIconClass(pct: number): string {
+    if (pct >= 90) return "text-emerald-400 drop-shadow-[0_0_3px_rgba(52,211,153,0.5)]";
+    if (pct >= 70) return "text-emerald-500/70";
+    if (pct >= 45) return "text-sky-500/60";
+    return "text-zinc-500";
   }
 
   return (
@@ -170,13 +196,68 @@ export const MilestoneSlackThreadInline = forwardRef<
           </span>
           <span
             className={cn(
-              "shrink-0 tabular-nums font-semibold",
-              compact ? "text-[10px]" : "text-[11px]",
-              likelihoodTextClass(likelihood.riskLevel)
+              "inline-flex shrink-0 items-center gap-0.5",
+              compact ? "gap-px" : "gap-0.5"
             )}
-            title="AI on-time likelihood"
+            title="On-time likelihood (deadline)"
           >
-            {likelihood.likelihood}%
+            <Clock
+              className={cn(
+                "shrink-0 opacity-90",
+                compact ? "h-2.5 w-2.5" : "h-3 w-3",
+                likelihoodTextClass(likelihood.riskLevel)
+              )}
+              aria-hidden
+            />
+            <span
+              className={cn(
+                "shrink-0 tabular-nums font-semibold",
+                compact ? "text-[10px]" : "text-[11px]",
+                likelihoodTextClass(likelihood.riskLevel)
+              )}
+            >
+              {likelihood.likelihood}%
+            </span>
+          </span>
+          {typeof likelihood.progressEstimate === "number" &&
+          Number.isFinite(likelihood.progressEstimate) ? (
+            <>
+              <span className="shrink-0 text-zinc-600" aria-hidden>
+                ·
+              </span>
+              <span
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-0.5",
+                  compact ? "gap-px" : "gap-0.5"
+                )}
+                title="Estimated completion"
+              >
+                <CircleCheck
+                  className={cn(
+                    "shrink-0",
+                    compact ? "h-2.5 w-2.5" : "h-3 w-3",
+                    progressIconClass(likelihood.progressEstimate!)
+                  )}
+                  aria-hidden
+                />
+                <span
+                  className={cn(
+                    "shrink-0 tabular-nums font-semibold",
+                    compact ? "text-[10px]" : "text-[11px]",
+                    progressTextClass(likelihood.progressEstimate!)
+                  )}
+                >
+                  {likelihood.progressEstimate}%
+                </span>
+              </span>
+            </>
+          ) : null}
+          <span className="sr-only">
+            On-time {likelihood.likelihood}%
+            {typeof likelihood.progressEstimate === "number" &&
+            Number.isFinite(likelihood.progressEstimate)
+              ? `, estimated done ${likelihood.progressEstimate}%`
+              : ""}
           </span>
         </>
       ) : null}

@@ -50,6 +50,8 @@ It calls `POST /api/assistant` with `{ question, history?, entityContext? }`. Wh
 
 **AI field update (goals/projects):** `POST /api/ai-update` accepts `{ type: 'goal' | 'project', goalId? | projectId?, currentFields, message?, history? }` and streams a conversational update flow; the model asks short questions then returns a fenced JSON object with the textarea fields to change. The client (`AiUpdateDialog`) shows **before/after** per field and applies patches via `updateGoal` / `updateProject`. Same Anthropic streaming pattern as `POST /api/ai-create`.
 
+**AI create (new goals/projects):** `POST /api/ai-create` accepts `{ type: 'goal' | 'project', companyId? | goalId?, message?, history? }`, streams a short interview then a fenced JSON proposal. After a proposal appears, `AiCreateDialog` offers **Revise with AI** (same idea as **Revise with AI** on Slack thread drafts): your feedback is sent as the next user message so the model updates the proposal without restarting the Q&A.
+
 ## Future
 
 - Optional: Postgres or another store behind the same `TrackerRepository` interface if Redis JSON blobs become limiting.

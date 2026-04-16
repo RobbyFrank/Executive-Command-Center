@@ -253,6 +253,7 @@ export function MilestoneRow({
         milestoneLikelihood.result && milestone.targetDate.trim()
           ? {
               likelihood: milestoneLikelihood.result.likelihood,
+              progressEstimate: milestoneLikelihood.result.progressEstimate,
               riskLevel: milestoneLikelihood.result.riskLevel,
             }
           : null

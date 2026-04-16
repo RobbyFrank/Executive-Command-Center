@@ -8,6 +8,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { X, Loader2, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
 
 type MessageRole = "user" | "assistant";
@@ -93,10 +94,13 @@ export function AiCreateDialog({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [reviseFeedback, setReviseFeedback] = useState("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const reviseInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -116,23 +120,24 @@ export function AiCreateDialog({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !loading && !creating) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, loading, creating]);
 
-  // Auto-start: send initial request on mount so AI asks its first question
-  const hasStarted = useRef(false);
   useEffect(() => {
-    if (hasStarted.current) return;
-    hasStarted.current = true;
-    void sendMessage("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      streamAbortRef.current?.abort();
+    };
   }, []);
 
   const sendMessage = useCallback(
     async (userMessage: string) => {
+      streamAbortRef.current?.abort();
+      const ac = new AbortController();
+      streamAbortRef.current = ac;
+
       setLoading(true);
       setError(null);
       setStreaming("");
@@ -150,6 +155,8 @@ export function AiCreateDialog({
         content: m.content,
       }));
 
+      let focusReviseAfter = false;
+
       try {
         const res = await fetch("/api/ai-create", {
           method: "POST",
@@ -161,21 +168,24 @@ export function AiCreateDialog({
             message: userMessage || undefined,
             history: userMessage ? history.slice(0, -1) : history,
           }),
+          signal: ac.signal,
         });
 
         if (!res.ok) {
           const errJson = (await res.json().catch(() => null)) as {
             error?: string;
           } | null;
-          setError(errJson?.error ?? `Request failed (${res.status})`);
-          setLoading(false);
+          if (!ac.signal.aborted) {
+            setError(errJson?.error ?? `Request failed (${res.status})`);
+          }
           return;
         }
 
         const reader = res.body?.getReader();
         if (!reader) {
-          setError("No response body");
-          setLoading(false);
+          if (!ac.signal.aborted) {
+            setError("No response body");
+          }
           return;
         }
 
@@ -185,12 +195,20 @@ export function AiCreateDialog({
           const { done, value } = await reader.read();
           if (done) break;
           full += decoder.decode(value, { stream: true });
-          setStreaming(full);
+          if (!ac.signal.aborted) setStreaming(full);
         }
+
+        if (ac.signal.aborted) return;
 
         const parsed = tryParseProposal(full);
         if (parsed) {
           setProposal(parsed);
+          focusReviseAfter = true;
+        } else if (userMessage && proposal) {
+          setError(
+            "Could not parse a revised proposal from the response. The previous proposal is unchanged.",
+          );
+          focusReviseAfter = true;
         }
 
         setMessages((prev) => [
@@ -198,15 +216,37 @@ export function AiCreateDialog({
           { role: "assistant", content: full },
         ]);
         setStreaming("");
+
+        if (userMessage) {
+          setReviseFeedback("");
+        }
       } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
         setError(e instanceof Error ? e.message : "Something went wrong");
       } finally {
-        setLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 0);
+        // Only touch loading/focus if this is still the active request.
+        // A superseded call's finally must not clobber the new call's loading=true.
+        if (streamAbortRef.current === ac) {
+          setLoading(false);
+          setTimeout(() => {
+            if (focusReviseAfter) {
+              reviseInputRef.current?.focus();
+            } else {
+              inputRef.current?.focus();
+            }
+          }, 0);
+        }
       }
     },
-    [messages, type, companyId, goalId],
+    [messages, type, companyId, goalId, proposal],
   );
+
+  // Auto-start: ask the first question. React 18 Strict Mode runs setup → cleanup → setup;
+  // cleanup aborts the in-flight request, so this must run again — do not use a "once" ref guard.
+  useEffect(() => {
+    void sendMessage("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only on mount; sendMessage changes with every message
+  }, []);
 
   const handleSend = useCallback(() => {
     const q = input.trim();
@@ -214,6 +254,13 @@ export function AiCreateDialog({
     setInput("");
     void sendMessage(q);
   }, [input, loading, sendMessage]);
+
+  const handleRevise = useCallback(() => {
+    const q = reviseFeedback.trim();
+    if (!q || loading) return;
+    setError(null);
+    void sendMessage(q);
+  }, [reviseFeedback, loading, sendMessage]);
 
   const handleCreate = useCallback(async () => {
     if (!proposal) return;
@@ -288,7 +335,8 @@ export function AiCreateDialog({
   const streamingProposal = currentStreaming
     ? tryParseProposal(currentStreaming)
     : null;
-  const displayProposal = proposal ?? streamingProposal;
+  /** Prefer live parse while streaming so revisions update the card as soon as JSON is complete. */
+  const displayProposal = streamingProposal ?? proposal;
 
   const layer = (
     <>
@@ -440,31 +488,81 @@ export function AiCreateDialog({
         {/* Input / action footer */}
         <div className="border-t border-zinc-700/80 px-4 py-2.5">
           {proposal ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void handleCreate()}
-                disabled={creating}
-                className="flex items-center gap-1.5 rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
-              >
-                {creating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Check className="h-3.5 w-3.5" />
-                )}
-                Create {type}
-                {type === "project" &&
-                  (proposal as ProjectProposal | null)?.milestones?.length
-                  ? ` + ${(proposal as ProjectProposal).milestones!.length} milestones`
-                  : ""}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-md px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200"
-              >
-                Cancel
-              </button>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Revise with AI
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                  <input
+                    ref={reviseInputRef}
+                    type="text"
+                    value={reviseFeedback}
+                    onChange={(e) => setReviseFeedback(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      handleRevise();
+                    }}
+                    placeholder="e.g. Make priority P0, shorten the title, add a milestone for QA…"
+                    disabled={loading || creating}
+                    className="min-h-[2.75rem] min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                    aria-label="Feedback to revise the proposal"
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      loading || creating || !reviseFeedback.trim()
+                    }
+                    onClick={handleRevise}
+                    className={cn(
+                      "inline-flex shrink-0 items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium sm:min-w-[7.5rem]",
+                      loading
+                        ? "cursor-wait border-zinc-500 bg-zinc-800 text-zinc-200"
+                        : "border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40",
+                    )}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2
+                          className="h-4 w-4 shrink-0 animate-spin text-zinc-400"
+                          aria-hidden
+                        />
+                        Revising…
+                      </>
+                    ) : (
+                      "Revise"
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleCreate()}
+                  disabled={creating || loading}
+                  className="flex items-center gap-1.5 rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {creating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                  Create {type}
+                  {type === "project" &&
+                    (proposal as ProjectProposal | null)?.milestones?.length
+                    ? ` + ${(proposal as ProjectProposal).milestones!.length} milestones`
+                    : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={creating || loading}
+                  className="rounded-md px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex min-w-0 flex-col gap-2">

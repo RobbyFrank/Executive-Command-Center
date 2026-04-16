@@ -999,6 +999,8 @@ export function ProjectRow({
                         nextPendingMilestone?.targetDate?.trim()
                           ? {
                               likelihood: nextMilestoneLikelihood.result.likelihood,
+                              progressEstimate:
+                                nextMilestoneLikelihood.result.progressEstimate,
                               riskLevel: nextMilestoneLikelihood.result.riskLevel,
                             }
                           : null
