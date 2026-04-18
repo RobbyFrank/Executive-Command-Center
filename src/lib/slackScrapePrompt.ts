@@ -1,4 +1,4 @@
-import type { Company, Goal, Project, TrackerData } from "@/lib/types/tracker";
+import type { Company, Goal, Person, Project, TrackerData } from "@/lib/types/tracker";
 
 export function formatCompanyDetail(c: Company): string {
   const lines: string[] = [];
@@ -79,6 +79,25 @@ export function buildExistingRoadmapBlock(
   return lines.join("\n");
 }
 
+/** People roster so the model can output ownerPersonId / assigneePersonId (matches Team Slack user IDs). */
+export function buildPeopleRosterBlock(people: Person[]): string {
+  if (people.length === 0) {
+    return "=== PEOPLE (roster empty) ===\n(none)";
+  }
+  const lines: string[] = [
+    "=== PEOPLE (Slack transcript lines use user_or_bot=<Slack user id>; match to slackUserId when assigning owners) ===",
+  ];
+  for (const p of people) {
+    const slack = (p.slackHandle ?? "").trim();
+    lines.push(
+      slack
+        ? `- personId="${p.id}" name=${JSON.stringify(p.name)} slackUserId=${slack}`
+        : `- personId="${p.id}" name=${JSON.stringify(p.name)} slackUserId=(not set in roster)`
+    );
+  }
+  return lines.join("\n");
+}
+
 const GOAL_FIELDS = `
 For kind "newGoalWithProjects", "goal" must include:
 - description: short outcome-oriented title
@@ -86,17 +105,20 @@ For kind "newGoalWithProjects", "goal" must include:
 - impactScore: 1-5 integer
 - priority: P0, P1, P2, or P3
 - status: one of: In Progress, Not Started, Planning, Blocked, Ongoing, Demand Testing, Evaluating, Idea
+- ownerPersonId: string — set to the tracker personId from the PEOPLE section when the message clearly assigns or @mentions an owner; otherwise use an empty string ""
 `.trim();
 
 const PROJECT_FIELDS = `
 For each project in "projects" (under a new goal) or "project" (under existing goal):
 - name, description, definitionOfDone, priority (P0-P3), complexityScore (1-5), type (Engineering, Product, Sales, Strategic, Operations, Hiring, Marketing)
 - milestones: array of { "name": string, "targetDate": "YYYY-MM-DD" } with 0-6 items
+- assigneePersonId: string — primary assignee personId from PEOPLE when the work is clearly owned or @mentioned; otherwise ""
 `.trim();
 
 export function buildSlackScrapeSystemPrompt(
   existingRoadmapBlock: string,
-  slackTranscript: string
+  slackTranscript: string,
+  peopleRosterBlock: string
 ): string {
   const today = new Date().toISOString().slice(0, 10);
   return `You are an executive portfolio assistant. You read recent Slack messages for one company and propose NEW tracker items that are not already captured in the roadmap.
@@ -112,6 +134,9 @@ RULES:
 - Prefer "newProjectOnExistingGoal" when a matching goal already exists.
 - Do not propose edits to existing rows; only new goals and new projects.
 - Top-level Slack messages only were provided; do not assume thread context you cannot see.
+- When someone is clearly responsible (@mention, "X will own", assigned in text), set ownerPersonId on new goals and assigneePersonId on each project using personId values from the PEOPLE section. Match transcript user_or_bot ids to slackUserId.
+
+${peopleRosterBlock}
 
 ${GOAL_FIELDS}
 

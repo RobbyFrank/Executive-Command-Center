@@ -16,8 +16,10 @@ import {
   type SlackChannel,
   type SlackChannelHistoryMessage,
 } from "@/lib/slack";
+import { enrichSlackScrapeSuggestions, mergeMessageAuthorsForChannel } from "@/lib/slackScrapeEnrich";
 import {
   buildExistingRoadmapBlock,
+  buildPeopleRosterBlock,
   buildSlackScrapeSystemPrompt,
   capTranscript,
 } from "@/lib/slackScrapePrompt";
@@ -184,6 +186,7 @@ export async function POST(req: Request) {
         });
 
         const transcriptParts: string[] = [];
+        const messageAuthors = new Map<string, string>();
 
         for (let i = 0; i < channelIds.length; i++) {
           const channelId = channelIds[i]!;
@@ -218,6 +221,7 @@ export async function POST(req: Request) {
           rows[i]!.status = "done";
           rows[i]!.messageCount = hist.messages.length;
           const name = channelNameById.get(channelId) ?? channelId;
+          mergeMessageAuthorsForChannel(messageAuthors, name, hist.messages);
           transcriptParts.push(formatMessagesForChannel(name, hist.messages));
           write({
             type: "progress",
@@ -247,9 +251,11 @@ export async function POST(req: Request) {
         });
 
         const existingBlock = buildExistingRoadmapBlock(data, companyId);
+        const peopleBlock = buildPeopleRosterBlock(data.people);
         const systemPrompt = buildSlackScrapeSystemPrompt(
           existingBlock,
-          slackTranscript
+          slackTranscript,
+          peopleBlock
         );
 
         const anthropic = new Anthropic({ apiKey });
@@ -310,6 +316,12 @@ export async function POST(req: Request) {
           }
           suggestions.push(s);
         }
+
+        enrichSlackScrapeSuggestions(suggestions, {
+          people: data.people,
+          channelNameById,
+          messageAuthors,
+        });
 
         write({ type: "done", suggestions, rejected });
       } catch (e) {

@@ -2,7 +2,7 @@
 
 import { useCallback, useId, useMemo, useState } from "react";
 import type { Priority } from "@/lib/types/tracker";
-import { Check, ChevronDown, Flag, ListOrdered } from "lucide-react";
+import { Check, ChevronDown, Flag } from "lucide-react";
 import {
   PRIORITY_MENU_LABEL,
   priorityFlagIconClass,
@@ -43,8 +43,12 @@ export function PriorityFilterMultiSelect({
   const buttonSummary =
     selectedIds.length === 0 ? (
       <>
-        <ListOrdered className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden />
-        <span className="truncate">All priorities</span>
+        <Flag
+          className="h-3.5 w-3.5 shrink-0 text-zinc-500"
+          strokeWidth={2}
+          aria-hidden
+        />
+        <span className="truncate">Priorities</span>
       </>
     ) : selectedIds.length === 1 ? (
       <>
@@ -62,13 +66,17 @@ export function PriorityFilterMultiSelect({
       </>
     ) : (
       <>
-        <ListOrdered className="h-3.5 w-3.5 text-zinc-400 shrink-0" aria-hidden />
+        <Flag
+          className="h-3.5 w-3.5 shrink-0 text-zinc-400"
+          strokeWidth={2}
+          aria-hidden
+        />
         <span className="truncate">{selectedIds.length} priorities</span>
       </>
     );
 
   return (
-    <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter by goal or project priority (Urgent through Low)
       </span>

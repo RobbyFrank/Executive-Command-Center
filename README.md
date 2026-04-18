@@ -8,7 +8,7 @@ Next.js app for **MLabs portfolio** roadmaps: companies, goals, projects, milest
 - **[docs/environment.md](docs/environment.md)** — Environment variables (Redis, AI, Blob, Slack tokens)
 - **[docs/data-storage.md](docs/data-storage.md)** — Redis key, seed/import, backups, images
 - **[docs/operations.md](docs/operations.md)** — CI, health check, caching, AI rate limits, PII in prompts
-- **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Scan Slack for suggested goals/projects
+- **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Scan Slack for suggested goals/projects (owner/assignee hints, goal Slack channel from evidence)
 - **[docs/design-system.md](docs/design-system.md)** — Brand primitives (glass surfaces, spotlight, buttons) and CSS tokens
 
 ## Design system

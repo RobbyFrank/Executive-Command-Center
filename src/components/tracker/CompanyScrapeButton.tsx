@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { CompanyWithGoals } from "@/lib/types/tracker";
+import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { cn } from "@/lib/utils";
 import { CompanyScrapeDialog } from "./CompanyScrapeDialog";
 import { SlackLogo } from "./SlackLogo";
 
 export function CompanyScrapeButton({
   company,
+  people,
 }: {
   company: CompanyWithGoals;
+  people: Person[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -47,6 +49,7 @@ export function CompanyScrapeButton({
         open={open}
         onClose={() => setOpen(false)}
         company={company}
+        people={people}
       />
     </>
   );

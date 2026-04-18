@@ -87,7 +87,7 @@ export async function importSlackMembers(
       name: label,
       role: "",
       department: "",
-      autonomyScore: 3,
+      autonomyScore: 0,
       slackHandle: slackId,
       profilePicturePath: "",
       joinDate,

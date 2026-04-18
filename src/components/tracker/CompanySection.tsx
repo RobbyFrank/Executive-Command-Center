@@ -292,7 +292,7 @@ export function CompanySection({
         </div>
         </button>
         <div className="flex shrink-0 items-center pr-2">
-          <CompanyScrapeButton company={company} />
+          <CompanyScrapeButton company={company} people={people} />
         </div>
         </div>
         <ContextMenu

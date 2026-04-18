@@ -215,7 +215,7 @@ const PersonInputSchema = z.object({
   role: z.string().default(""),
   /** Team grouping for roster and tracker owner filter, e.g. Sales, Marketing */
   department: z.string().default(""),
-  autonomyScore: z.number().int().min(1).max(5).default(3),
+  autonomyScore: z.number().int().min(0).max(5).default(3),
   slackHandle: z
     .string()
     .default("")
@@ -300,6 +300,13 @@ export const SlackScrapeGoalDraftSchema = z.object({
   impactScore: z.number().int().min(1).max(5).default(3),
   priority: PriorityEnum.default("P2"),
   status: GoalStatusEnum.default("Idea"),
+  /**
+   * Tracker `Person.id` when the model matched an owner from the roster / transcript.
+   * `slackChannel` / `slackChannelId` are filled server-side from evidence channels.
+   */
+  ownerPersonId: z.string().default(""),
+  slackChannel: z.string().default(""),
+  slackChannelId: z.string().default(""),
 });
 
 export const SlackScrapeMilestoneDraftSchema = z.object({
@@ -316,6 +323,8 @@ export const SlackScrapeProjectDraftSchema = z.object({
   complexityScore: z.number().int().min(1).max(5).default(3),
   type: ProjectTypeEnum.default("Engineering"),
   milestones: z.array(SlackScrapeMilestoneDraftSchema).default([]),
+  /** Tracker `Person.id` for the primary assignee (project `assigneeIds`). */
+  assigneePersonId: z.string().default(""),
 });
 
 export const SlackScrapeSuggestionSchema = z.discriminatedUnion("kind", [

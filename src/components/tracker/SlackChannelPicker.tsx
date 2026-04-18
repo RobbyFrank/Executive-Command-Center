@@ -227,9 +227,18 @@ export function SlackChannelPicker({
             setOpen(!open);
           }}
           className={cn(
-            "group/slack relative flex min-h-[28px] min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-6 text-left text-sm transition-colors hover:bg-zinc-800",
-            trackerGridAlign ? "pl-0" : "pl-1.5",
-            variant === "plain" && "hover:bg-zinc-800/60",
+            "group/slack relative flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-7 text-left text-sm transition-colors",
+            hasChannel
+              ? cn(
+                  "hover:bg-zinc-800",
+                  trackerGridAlign ? "pl-0" : "pl-1.5",
+                  variant === "plain" && "hover:bg-zinc-800/60",
+                )
+              : cn(
+                  "rounded-md border border-amber-500/45 bg-amber-950/40 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
+                  trackerGridAlign ? "pl-1.5" : "pl-2",
+                  variant === "plain" && "hover:bg-amber-950/50",
+                ),
           )}
           title={
             hasChannel
@@ -244,10 +253,17 @@ export function SlackChannelPicker({
               {displayHash}
             </span>
           ) : (
-            <span className="italic text-zinc-600">Add channel</span>
+            <span className="min-w-0 text-[11px] font-medium leading-tight text-amber-100">
+              Add channel
+            </span>
           )}
           <ChevronDown
-            className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity motion-reduce:transition-none group-hover/slack:opacity-100"
+            className={cn(
+              "pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 transition-opacity motion-reduce:transition-none group-hover/slack:opacity-100",
+              hasChannel
+                ? "text-zinc-500 opacity-0"
+                : "text-amber-400/90 opacity-100",
+            )}
             aria-hidden
           />
         </button>

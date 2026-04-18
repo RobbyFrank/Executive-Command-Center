@@ -50,6 +50,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
 import { WarningsBadge } from "./WarningsBadge";
@@ -403,7 +404,10 @@ export function GoalSection({
         disabled: goal.projects.length > 0,
         disabledReason: "Delete all projects under this goal first.",
         confirmMessage: `Delete this goal? This can't be undone.`,
-        onClick: () => deleteGoal(goal.id),
+        onClick: async () => {
+          await deleteGoal(goal.id);
+          toast.success(`Goal “${goal.description}” deleted.`);
+        },
       },
     ];
   }, [

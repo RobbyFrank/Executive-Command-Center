@@ -56,10 +56,12 @@ import {
   MessageSquare,
   MessageSquareText,
   MoreHorizontal,
+  MoveRight,
 } from "lucide-react";
 import { SlackCreateThreadDialog } from "./SlackCreateThreadDialog";
 import { StartSlackThreadChip } from "./StartSlackThreadChip";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { CollapsePanel } from "./CollapsePanel";
@@ -75,6 +77,7 @@ import { WarningsBadge } from "./WarningsBadge";
 import { SharedBadge } from "./SharedBadge";
 import { BlockedByProjectHover } from "./BlockedByProjectHover";
 import { MirrorGoalPickerDialog } from "./MirrorGoalPickerDialog";
+import { MoveProjectGoalPickerDialog } from "./MoveProjectGoalPickerDialog";
 import { BlockedByPickerDialog } from "./BlockedByPickerDialog";
 import {
   formatCalendarDateHint,
@@ -150,6 +153,7 @@ export function ProjectRow({
   /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
   const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
   const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
+  const [moveGoalPickerOpen, setMoveGoalPickerOpen] = useState(false);
   const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
   /** When expanded, whether milestone rows (and add-milestone) are shown */
   const [showMilestones, setShowMilestones] = useState(true);
@@ -190,6 +194,18 @@ export function ProjectRow({
     const g = allGoals.find((x) => x.id === goalId);
     return g?.description?.trim() ?? "";
   }, [allGoals, goalId]);
+
+  /** Company of the project's primary goal — move picker lists other goals here only. */
+  const projectCompanyId = useMemo(() => {
+    return allGoals.find((g) => g.id === project.goalId)?.companyId;
+  }, [allGoals, project.goalId]);
+
+  const canMoveToAnotherGoal = useMemo(() => {
+    if (!projectCompanyId) return false;
+    return allGoals.some(
+      (g) => g.companyId === projectCompanyId && g.id !== project.goalId
+    );
+  }, [allGoals, project.goalId, projectCompanyId]);
 
   useEffect(() => {
     if (!focusProjectMode || focusEnforceTick === 0) return;
@@ -623,6 +639,17 @@ export function ProjectRow({
         icon: Pencil,
         onClick: () => setProjectRenameNonce((n) => n + 1),
       },
+      ...(canMoveToAnotherGoal
+        ? ([
+            {
+              type: "item" as const,
+              id: "move-to-goal",
+              label: "Move to goal…",
+              icon: MoveRight,
+              onClick: () => setMoveGoalPickerOpen(true),
+            },
+          ] as ContextMenuEntry[])
+        : []),
       {
         type: "item",
         id: "p-ai-update-fields",
@@ -715,7 +742,10 @@ export function ProjectRow({
         confirmMessage: isMirror
           ? "Delete this project from every goal it appears on? This cannot be undone."
           : `Delete this project? This can't be undone.`,
-        onClick: () => void deleteProject(project.id),
+        onClick: async () => {
+          await deleteProject(project.id);
+          toast.success(`Project “${project.name}” deleted.`);
+        },
       },
     ];
   }, [
@@ -727,6 +757,7 @@ export function ProjectRow({
     project.name,
     project.spotlight,
     project.blockedByProjectId,
+    canMoveToAnotherGoal,
     setProjectRenameNonce,
     showMilestones,
     toggleProjectRow,
@@ -1093,7 +1124,7 @@ export function ProjectRow({
           {showCloseWatch && (
             <span
               className="whitespace-nowrap rounded-md border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200/95"
-              title="P0/P1 with owner autonomy 1–2 — stay closer on delivery"
+              title="P0/P1 with owner autonomy 0–2 — stay closer on delivery"
             >
               Close watch
             </span>
@@ -1183,6 +1214,17 @@ export function ProjectRow({
         primaryGoalId={project.goalId}
         mirroredGoalIds={project.mirroredGoalIds ?? []}
       />
+      {projectCompanyId ? (
+        <MoveProjectGoalPickerDialog
+          open={moveGoalPickerOpen}
+          onClose={() => setMoveGoalPickerOpen(false)}
+          allGoals={allGoals}
+          allCompanies={allCompanies}
+          projectCompanyId={projectCompanyId}
+          projectId={project.id}
+          primaryGoalId={project.goalId}
+        />
+      ) : null}
       <BlockedByPickerDialog
         open={blockedByPickerOpen}
         onClose={() => setBlockedByPickerOpen(false)}

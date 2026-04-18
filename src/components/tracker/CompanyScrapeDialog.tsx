@@ -17,7 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { CompanyWithGoals } from "@/lib/types/tracker";
+import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import type { SlackScrapeSuggestion } from "@/lib/schemas/tracker";
 import {
   resolveCompanyScrapeChannels,
@@ -90,12 +90,14 @@ interface CompanyScrapeDialogProps {
   open: boolean;
   onClose: () => void;
   company: CompanyWithGoals;
+  people: Person[];
 }
 
 export function CompanyScrapeDialog({
   open,
   onClose,
   company,
+  people,
 }: CompanyScrapeDialogProps) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -137,6 +139,14 @@ export function CompanyScrapeDialog({
     () => new Set()
   );
   const [importing, setImporting] = useState(false);
+
+  const personNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of people) {
+      m.set(p.id, p.name);
+    }
+    return m;
+  }, [people]);
 
   const newGoalSuggestions = useMemo(
     () =>
@@ -937,6 +947,27 @@ export function CompanyScrapeDialog({
                                   {s.goal.whyItMatters}
                                 </p>
                               ) : null}
+                              {s.goal.slackChannel || s.goal.ownerPersonId ? (
+                                <p className="text-[11px] text-zinc-500">
+                                  {s.goal.slackChannel ? (
+                                    <span className="text-zinc-400">
+                                      #{s.goal.slackChannel}
+                                    </span>
+                                  ) : null}
+                                  {s.goal.slackChannel && s.goal.ownerPersonId ? (
+                                    <span className="text-zinc-600"> · </span>
+                                  ) : null}
+                                  {s.goal.ownerPersonId ? (
+                                    <span>
+                                      Owner{" "}
+                                      <span className="text-zinc-300">
+                                        {personNameById.get(s.goal.ownerPersonId) ??
+                                          s.goal.ownerPersonId}
+                                      </span>
+                                    </span>
+                                  ) : null}
+                                </p>
+                              ) : null}
                               {s.evidence[0] ? (
                                 <div className="flex items-start gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/40 px-3 py-2">
                                   <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
@@ -949,7 +980,9 @@ export function CompanyScrapeDialog({
                                       ”
                                     </p>
                                     <p className="mt-1 text-[11px] text-zinc-500">
-                                      #{s.evidence[0].channel}
+                                      #
+                                      {s.goal.slackChannel ||
+                                        s.evidence[0].channel}
                                     </p>
                                   </div>
                                 </div>
@@ -1002,6 +1035,15 @@ export function CompanyScrapeDialog({
                                     {p.description ? (
                                       <p className="mt-0.5 pl-[22px] text-xs text-zinc-500">
                                         {p.description}
+                                      </p>
+                                    ) : null}
+                                    {p.assigneePersonId ? (
+                                      <p className="mt-0.5 pl-[22px] text-[11px] text-zinc-500">
+                                        Assignee{" "}
+                                        <span className="text-zinc-400">
+                                          {personNameById.get(p.assigneePersonId) ??
+                                            p.assigneePersonId}
+                                        </span>
                                       </p>
                                     ) : null}
                                   </div>
@@ -1065,6 +1107,15 @@ export function CompanyScrapeDialog({
                             {s.project.description ? (
                               <p className="text-xs text-zinc-500">
                                 {s.project.description}
+                              </p>
+                            ) : null}
+                            {s.project.assigneePersonId ? (
+                              <p className="text-[11px] text-zinc-500">
+                                Assignee{" "}
+                                <span className="text-zinc-400">
+                                  {personNameById.get(s.project.assigneePersonId) ??
+                                    s.project.assigneePersonId}
+                                </span>
                               </p>
                             ) : null}
                           </div>

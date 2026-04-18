@@ -269,19 +269,13 @@ export function MilestoneRow({
     !isDone &&
     !hasSlackThreadUrl;
 
-  /** Amber “Add URL” row spans wider than the fixed Slack icon grid. */
-  const slackAmberNoChannel =
-    slackNeedsAttention && !canCreateSlackThread && !hasSlackThreadUrl;
-
-  /** Roadmap expanded: same column as `MilestoneSlackThreadInline` when the next milestone has no thread yet. */
+  /** Roadmap expanded: align Start Slack thread chip with the collapsed project row (not the old Add URL control). */
   const showSlackStartAlignedInRow =
     alignSlackPreviewToNextMilestoneColumn &&
     slackNeedsAttention &&
-    canCreateSlackThread &&
     !slackUrlEditing;
 
-  const showSlackQuickMenu =
-    !hasSlackThreadUrl && !slackUrlEditing && !slackAmberNoChannel;
+  const showSlackQuickMenu = !hasSlackThreadUrl && !slackUrlEditing;
 
   const slackIconCellClass =
     "inline-flex !h-7 !w-7 !min-w-[1.75rem] !max-w-[1.75rem] shrink-0 items-center justify-center !border-0 !px-0 !py-0 !shadow-none !ring-0 bg-transparent hover:bg-zinc-800/80 rounded-sm";
@@ -506,9 +500,7 @@ export function MilestoneRow({
           "flex min-w-0 items-center gap-1 transition-[min-width,max-width] duration-150 ease-out",
           slackUrlEditing
             ? "relative z-20 min-w-0 max-w-md flex-1 basis-0"
-            : slackAmberNoChannel
-              ? "max-w-[13rem] shrink-0"
-              : "shrink-0"
+            : "shrink-0"
         )}
         onClick={(e) => e.stopPropagation()}
       >
@@ -560,43 +552,6 @@ export function MilestoneRow({
                   : "Add or edit Slack thread link"
               }
             />
-          </div>
-        ) : slackAmberNoChannel ? (
-          <div className="flex w-full min-w-0 items-center gap-1">
-            <div className="min-w-0 flex-1">
-              <InlineEditCell
-                value={milestone.slackUrl}
-                onSave={(slackUrl) =>
-                  updateMilestone(milestone.id, { slackUrl })
-                }
-                placeholder="Paste Slack thread URL"
-                linkBehavior
-                linkBehaviorHideTrailingEdit
-                openEditNonce={slackEditNonce}
-                onEditingChange={setSlackUrlEditing}
-                displayClassName="not-italic"
-                collapsedButtonClassName="min-h-[26px] w-full rounded-md border border-amber-500/40 bg-amber-950/30 px-1.5 ring-1 ring-amber-500/20"
-                formatDisplay={(url) => (
-                  <SlackLogo
-                    className={cn(
-                      "h-3.5 w-3.5",
-                      isValidHttpUrl(url.trim())
-                        ? "opacity-90"
-                        : "opacity-40 grayscale"
-                    )}
-                  />
-                )}
-                emptyLabel={
-                  <span className="inline-flex items-center gap-1.5">
-                    <SlackLogo className="h-3.5 w-3.5" />
-                    <span className="text-[11px] font-medium text-amber-200/90">
-                      Add URL
-                    </span>
-                  </span>
-                }
-                displayTitle="Set a Slack channel on the goal first, or paste a thread URL"
-              />
-            </div>
           </div>
         ) : hasSlackThreadUrl ? (
           <div className="flex w-7 shrink-0 justify-center">

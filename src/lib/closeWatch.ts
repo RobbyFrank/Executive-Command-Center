@@ -1,7 +1,7 @@
 import { clampAutonomy } from "@/lib/autonomyRoster";
 import type { Person, ProjectWithMilestones } from "@/lib/types/tracker";
 
-/** P0/P1 owned by someone with autonomy ≤ 2 — leadership should stay closer. */
+/** P0/P1 owned by someone with autonomy ≤ 2 (includes 0 = not assessed) — stay closer. */
 export function projectMatchesCloseWatch(
   p: ProjectWithMilestones,
   people: Person[]

@@ -91,7 +91,7 @@ export function ownerFilterAutonomyLevel(
   const rest = token.slice(OWNER_FILTER_AUTONOMY_PREFIX.length);
   const n = Number.parseInt(rest, 10);
   if (!Number.isFinite(n)) return null;
-  if (n < 1 || n > 5) return null;
+  if (n < 0 || n > 5) return null;
   return n as AutonomyLevel;
 }
 

@@ -255,6 +255,36 @@ export async function unmirrorProjectFromGoal(
   return updateProject(projectId, { mirroredGoalIds: next });
 }
 
+/** Change the project's primary goal. Only allowed between goals that share the same company. */
+export async function moveProjectToGoal(
+  projectId: string,
+  newGoalId: string
+): Promise<Project> {
+  const project = await repo.getProject(projectId);
+  if (!project) {
+    throw new Error(`Project ${projectId} not found`);
+  }
+  if (newGoalId === project.goalId) {
+    throw new Error("That is already this project's primary goal.");
+  }
+  const currentGoal = await repo.getGoal(project.goalId);
+  const nextGoal = await repo.getGoal(newGoalId);
+  if (!currentGoal || !nextGoal) {
+    throw new Error("Goal not found.");
+  }
+  if (currentGoal.companyId !== nextGoal.companyId) {
+    throw new Error(
+      "Projects can only be moved between goals of the same company."
+    );
+  }
+  const mirrored = project.mirroredGoalIds ?? [];
+  const nextMirrored = mirrored.filter((id) => id !== newGoalId);
+  return updateProject(projectId, {
+    goalId: newGoalId,
+    mirroredGoalIds: nextMirrored,
+  });
+}
+
 // --- Milestones ---
 
 export async function createMilestone(
@@ -315,6 +345,9 @@ export async function createScrapedItems(
     return { ok: false, error: "Company not found" };
   }
 
+  const trackerData = await repo.load();
+  const validPersonIds = new Set(trackerData.people.map((p) => p.id));
+
   const goalIdsForCompany = new Set(
     (await repo.getGoalsByCompany(companyId)).map((g) => g.id)
   );
@@ -326,6 +359,7 @@ export async function createScrapedItems(
 
   for (const bundle of bundles) {
     const goalId = uuid();
+    const ownerPid = bundle.goal.ownerPersonId.trim();
     goals.push({
       id: goalId,
       companyId,
@@ -338,10 +372,10 @@ export async function createScrapedItems(
       impactScore: bundle.goal.impactScore,
       confidenceScore: 0,
       costOfDelay: 3,
-      ownerId: "",
+      ownerId: validPersonIds.has(ownerPid) ? ownerPid : "",
       priority: bundle.goal.priority,
-      slackChannel: "",
-      slackChannelId: "",
+      slackChannel: bundle.goal.slackChannel.trim(),
+      slackChannelId: bundle.goal.slackChannelId.trim(),
       status: bundle.goal.status,
       atRisk: false,
       spotlight: false,
@@ -349,6 +383,7 @@ export async function createScrapedItems(
 
     for (const pd of bundle.projects) {
       const projectId = uuid();
+      const assigneePid = pd.assigneePersonId.trim();
       projects.push({
         id: projectId,
         goalId,
@@ -362,7 +397,7 @@ export async function createScrapedItems(
         type: pd.type,
         status: "Pending",
         ownerId: "",
-        assigneeIds: [],
+        assigneeIds: validPersonIds.has(assigneePid) ? [assigneePid] : [],
         mirroredGoalIds: [],
         slackUrl: "",
         blockedByProjectId: "",
@@ -389,6 +424,7 @@ export async function createScrapedItems(
       return { ok: false, error: "Invalid goal id for this company" };
     }
     const projectId = uuid();
+    const assigneeExisting = row.project.assigneePersonId.trim();
     projects.push({
       id: projectId,
       goalId: row.goalId,
@@ -402,7 +438,9 @@ export async function createScrapedItems(
       type: row.project.type,
       status: "Pending",
       ownerId: "",
-      assigneeIds: [],
+      assigneeIds: validPersonIds.has(assigneeExisting)
+        ? [assigneeExisting]
+        : [],
       mirroredGoalIds: [],
       slackUrl: "",
       blockedByProjectId: "",

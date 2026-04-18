@@ -262,7 +262,7 @@ export function OwnerFilterMultiSelect({
     selectionCount === 0 ? (
       <>
         <Users className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden />
-        <span className="truncate">All owners</span>
+        <span className="truncate">Owners</span>
       </>
     ) : selectionCount === 1 && selectedPeople.length === 1 ? (
       <>
@@ -306,7 +306,7 @@ export function OwnerFilterMultiSelect({
     filteredPeople.length === 0;
 
   return (
-    <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter by employment, autonomy level, department, or owner
       </span>

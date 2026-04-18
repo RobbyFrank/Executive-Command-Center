@@ -1,15 +1,16 @@
 import type { Person, PersonWorkload } from "@/lib/types/tracker";
 
-/** Highest autonomy first (5 → 1), matching “strongest signal at top”. */
-export const AUTONOMY_LEVEL_ORDER_DESC = [5, 4, 3, 2, 1] as const;
+/** Highest autonomy first (5 → 0), matching “strongest signal at top”. */
+export const AUTONOMY_LEVEL_ORDER_DESC = [5, 4, 3, 2, 1, 0] as const;
 
 export type AutonomyLevel = (typeof AUTONOMY_LEVEL_ORDER_DESC)[number];
 
-/** Clamp stored score to 1–5 (used for roster grouping and owner filter). */
+/** Clamp stored score to 0–5 (used for roster grouping and owner filter). */
 export function clampAutonomy(n: number): AutonomyLevel {
   const r = Math.round(Number(n));
+  if (!Number.isFinite(r)) return 3;
   if (r >= 5) return 5;
-  if (r <= 1) return 1;
+  if (r <= 0) return 0;
   return r as AutonomyLevel;
 }
 
@@ -31,6 +32,7 @@ export const AUTONOMY_GROUP_VISUAL: Record<
   3: { header: AUTONOMY_SECTION_HEADER, dataRow: AUTONOMY_SECTION_ROW },
   2: { header: AUTONOMY_SECTION_HEADER, dataRow: AUTONOMY_SECTION_ROW },
   1: { header: AUTONOMY_SECTION_HEADER, dataRow: AUTONOMY_SECTION_ROW },
+  0: { header: AUTONOMY_SECTION_HEADER, dataRow: AUTONOMY_SECTION_ROW },
 };
 
 export const AUTONOMY_GROUP_LABEL: Record<
@@ -57,6 +59,10 @@ export const AUTONOMY_GROUP_LABEL: Record<
     title: "1. Needs every task assigned",
     hint: "",
   },
+  0: {
+    title: "0. Not assessed yet",
+    hint: "New to the roster — ownership level not known",
+  },
 };
 
 /** Team roster autonomy `<select>` option text (5 = highest). */
@@ -66,6 +72,7 @@ export const AUTONOMY_LEVEL_SELECT_LABEL: Record<AutonomyLevel, string> = {
   3: "3. Balanced ownership",
   2: "2. Needs constant steering",
   1: "1. Needs every task assigned",
+  0: "0. Not assessed yet",
 };
 
 export const AUTONOMY_LEVEL_SELECT_OPTIONS: { value: string; label: string }[] =
@@ -335,7 +342,7 @@ export function buildTeamRosterGroups(
   return out;
 }
 
-/** Same person order as Team: founders first, then autonomy 5 → 1, name within each section. */
+/** Same person order as Team: founders first, then autonomy 5 → 0, name within each section. */
 export function sortPeopleLikeTeamRoster(people: Person[]): Person[] {
   return buildTeamRosterDisplayGroups(people).flatMap((g) => g.people);
 }

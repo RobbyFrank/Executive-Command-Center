@@ -93,7 +93,7 @@ export function DueDateFilterSelect({
           className="h-3.5 w-3.5 text-zinc-500 shrink-0"
           aria-hidden
         />
-        <span className="truncate">All dates</span>
+        <span className="truncate">Dates</span>
       </>
     ) : SingleIcon != null && singleSelectedId != null ? (
       <>
@@ -112,12 +112,12 @@ export function DueDateFilterSelect({
           className="h-3.5 w-3.5 text-zinc-400 shrink-0"
           aria-hidden
         />
-        <span className="truncate">{selectedIds.length} date filters</span>
+        <span className="truncate">{selectedIds.length} dates</span>
       </>
     );
 
   return (
-    <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter projects by due date proximity
       </span>

@@ -125,7 +125,7 @@ export function CompanyFilterMultiSelect({
     selectedCompanies.length === 0 ? (
       <>
         <Building2 className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden />
-        <span className="truncate">All companies</span>
+        <span className="truncate">Companies</span>
       </>
     ) : selectedCompanies.length === 1 ? (
       <>
@@ -146,7 +146,7 @@ export function CompanyFilterMultiSelect({
     );
 
   return (
-    <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter tracker by company
       </span>

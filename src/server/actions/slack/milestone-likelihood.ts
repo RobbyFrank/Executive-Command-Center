@@ -20,6 +20,7 @@ import {
   parseMilestoneTargetDate,
   type SlackMemberRosterHint,
 } from "./thread-ai-shared";
+import { clampAutonomy } from "@/lib/autonomyRoster";
 
 export type MilestoneLikelihoodRiskLevel =
   | "low"
@@ -131,7 +132,7 @@ export async function assessMilestoneOnTimeLikelihood(
   const autonomyLabel =
     ownerAutonomy == null
       ? "unknown (no project owner on Team or missing autonomy)"
-      : String(Math.max(1, Math.min(5, Math.round(ownerAutonomy))));
+      : String(clampAutonomy(ownerAutonomy));
   const complexity = Math.max(1, Math.min(5, Math.round(projectComplexity)));
 
   const contextExtra = (roadmapContext ?? "").trim();
@@ -142,7 +143,7 @@ export async function assessMilestoneOnTimeLikelihood(
     `Days remaining until target (local calendar days): ${daysRemaining}`,
     `Thread started (root message date, local): ${threadStartCal.toDateString()}`,
     `Days since thread started (local calendar days): ${daysElapsed}`,
-    `Owner autonomy (1-5, higher = more execution independence): ${autonomyLabel}`,
+    `Owner autonomy (0-5, higher = more execution independence; 0 = not assessed on Team): ${autonomyLabel}`,
     `Project complexity (1-5, higher = harder): ${complexity}`,
     contextExtra ? `Roadmap context:\n${contextExtra}` : "",
     "",
@@ -159,7 +160,7 @@ HARD RULE: If "Days remaining" is negative the deadline has already passed. A mi
 Consider:
 - How much progress is evident in the thread relative to time elapsed vs remaining
 - The pace and recency of activity (stale or quiet threads = higher risk)
-- Owner autonomy (1-5, higher = more capable of independent execution)
+- Owner autonomy (0-5, higher = more capable of independent execution; 0 = not assessed)
 - Project complexity (1-5, higher = harder to finish quickly)
 
 Also include threadSummaryLine: a single plain sentence (max ~180 characters) summarizing what is actually happening in the thread — current work, decisions, blockers, or topic. Neutral tone. Do not repeat the deadline-risk "reasoning" sentence; focus on thread substance.

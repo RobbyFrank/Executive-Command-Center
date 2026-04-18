@@ -98,7 +98,7 @@ export function StatusTagFilterMultiSelect({
     selectedIds.length === 0 ? (
       <>
         <Tags className="h-3.5 w-3.5 text-zinc-500 shrink-0" aria-hidden />
-        <span className="truncate">All signals</span>
+        <span className="truncate">Signals</span>
       </>
     ) : selectedIds.length === 1 ? (
       <>
@@ -119,7 +119,7 @@ export function StatusTagFilterMultiSelect({
     );
 
   return (
-    <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter goals and projects by signals: flagged at risk, spotlighted,
         unassigned, stuck in progress, needs kickoff

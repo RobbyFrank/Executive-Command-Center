@@ -28,6 +28,7 @@ import {
   FilterX,
   Map as MapIcon,
   Search,
+  User,
   X,
 } from "lucide-react";
 import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
@@ -84,6 +85,9 @@ interface TrackerViewProps {
   initialFocus?: { goalId: string; projectId: string };
   /** URL query params: pre-fill Roadmap filters (e.g. bookmarks). */
   initialFilters?: RoadmapInitialFilters;
+  /** Signed-in user — profile shortcut next to Owners filter. */
+  mePersonId?: string;
+  meProfilePicturePath?: string;
 }
 
 export function TrackerView({
@@ -91,6 +95,8 @@ export function TrackerView({
   people,
   initialFocus,
   initialFilters: initialFiltersProp,
+  mePersonId,
+  meProfilePicturePath,
 }: TrackerViewProps) {
   const initialFilters = initialFiltersProp ?? emptyRoadmapFilters();
 
@@ -349,6 +355,50 @@ export function TrackerView({
     () => sortPeopleLikeTeamRoster(people),
     [people]
   );
+
+  const mePerson = useMemo(
+    () => (mePersonId ? people.find((p) => p.id === mePersonId) : undefined),
+    [people, mePersonId]
+  );
+
+  const meAvatarSrc = useMemo(
+    () =>
+      (meProfilePicturePath?.trim() || mePerson?.profilePicturePath?.trim()) ||
+      null,
+    [meProfilePicturePath, mePerson?.profilePicturePath]
+  );
+
+  const myAssignmentsShortcutActive = useMemo(
+    () =>
+      Boolean(
+        mePersonId &&
+          ownerFilterIds.length === 1 &&
+          ownerFilterIds[0] === mePersonId
+      ),
+    [mePersonId, ownerFilterIds]
+  );
+
+  const toggleMyAssignmentsOwnerFilter = useCallback(() => {
+    if (!mePersonId) return;
+    setOwnerFilterIds((prev) => {
+      const onlyMe = prev.length === 1 && prev[0] === mePersonId;
+      return onlyMe ? [] : [mePersonId];
+    });
+  }, [mePersonId]);
+
+  const meInitials = useMemo(() => {
+    const n = mePerson?.name?.trim() ?? "";
+    if (!n) return "";
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (
+      parts.length >= 2 &&
+      parts[0][0] &&
+      parts[1]![0]
+    ) {
+      return (parts[0][0] + parts[1]![0]).toUpperCase();
+    }
+    return n.slice(0, 2).toUpperCase();
+  }, [mePerson?.name]);
 
   const ownerWorkloadMap = useMemo(() => {
     const m = new Map<string, { total: number; p0: number; p1: number }>();
@@ -630,21 +680,14 @@ export function TrackerView({
             </button>
           ) : null}
         </div>
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[20rem]">
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[15rem]">
           <CompanyFilterMultiSelect
             companies={companiesForFilter}
             selectedIds={companyFilterIds}
             onChange={setCompanyFilterIds}
           />
         </div>
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[20rem]">
-          <OwnerFilterMultiSelect
-            people={peopleSorted}
-            selectedIds={ownerFilterIds}
-            onChange={setOwnerFilterIds}
-          />
-        </div>
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12rem]">
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[9.5rem]">
           <PriorityFilterMultiSelect
             selectedIds={priorityFilterIds}
             onChange={setPriorityFilterIds}
@@ -656,18 +699,72 @@ export function TrackerView({
             onChange={setStatusEnumFilterIds}
           />
         </div>
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[18rem]">
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12.5rem]">
           <StatusTagFilterMultiSelect
             selectedIds={statusTagFilterIds}
             onChange={setStatusTagFilterIds}
           />
         </div>
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[18rem]">
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12.5rem]">
           <DueDateFilterSelect
             hierarchy={hierarchyAfterHideDone}
             selectedIds={dueDateFilterIds}
             onChange={setDueDateFilterIds}
           />
+        </div>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:flex-none sm:max-w-[17rem]">
+          <div className="min-w-0 min-h-0 flex-1">
+            <OwnerFilterMultiSelect
+              people={peopleSorted}
+              selectedIds={ownerFilterIds}
+              onChange={setOwnerFilterIds}
+            />
+          </div>
+          {mePersonId ? (
+            <button
+              type="button"
+              onClick={toggleMyAssignmentsOwnerFilter}
+              title={
+                myAssignmentsShortcutActive
+                  ? "Clear owner filter"
+                  : "Show goals and projects assigned to you"
+              }
+              aria-label={
+                myAssignmentsShortcutActive
+                  ? "Clear owner filter for my assignments"
+                  : "Filter owners to my assignments only"
+              }
+              aria-pressed={myAssignmentsShortcutActive}
+              className={cn(
+                "group relative shrink-0 rounded-full p-px transition-[box-shadow,ring-color] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+                myAssignmentsShortcutActive
+                  ? "shadow-[0_0_0_1px_rgba(16,185,129,0.55)] ring-1 ring-emerald-500/45"
+                  : "ring-1 ring-zinc-600 hover:ring-zinc-500 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-zinc-800 text-zinc-400 transition-colors",
+                  "group-hover:bg-zinc-700 group-hover:text-zinc-300"
+                )}
+              >
+                {meAvatarSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={meAvatarSrc}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : meInitials ? (
+                  <span className="text-[9px] font-semibold tabular-nums leading-none text-zinc-300">
+                    {meInitials}
+                  </span>
+                ) : (
+                  <User className="h-3 w-3 opacity-90" aria-hidden />
+                )}
+              </span>
+            </button>
+          ) : null}
         </div>
         {filterActive ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">

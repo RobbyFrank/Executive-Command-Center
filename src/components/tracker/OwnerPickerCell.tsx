@@ -422,7 +422,9 @@ function PersonOption({
                   ? "bg-emerald-500/10 text-emerald-400/80"
                   : autonomy === 3
                     ? "bg-zinc-700/50 text-zinc-400"
-                    : "bg-amber-500/10 text-amber-400/80",
+                    : autonomy === 0
+                      ? "bg-zinc-800/80 text-zinc-500"
+                      : "bg-amber-500/10 text-amber-400/80",
               )}
             >
               A{autonomy}

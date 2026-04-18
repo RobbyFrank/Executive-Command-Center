@@ -61,9 +61,9 @@ export function getTrackerProjectWarnings(
 
 export type GetGoalHeaderWarningsOptions = {
   /**
-   * When false, only goal-level chips are returned (e.g. no goal DRI).
-   * Per-project issues stay on each `ProjectRow` — Roadmap `GoalSection` passes false.
-   * When true, project warnings are rolled onto the goal (multi-project goals prefix with project name).
+   * When false, no goal-header chips are returned — per-project issues stay on each `ProjectRow`
+   * (Roadmap `GoalSection` passes false). When true, project warnings are rolled onto the goal
+   * (multi-project goals prefix with project name).
    * @default true
    */
   includeProjectWarnings?: boolean;
@@ -72,6 +72,7 @@ export type GetGoalHeaderWarningsOptions = {
 /**
  * Goal header warning chips. Roadmap uses `includeProjectWarnings: false` so project
  * warnings appear only on project rows; set true to roll up project issues onto the goal.
+ * Unassigned goal DRI is not surfaced here — the owner control already shows unassigned.
  */
 export function getGoalHeaderWarnings(
   goal: GoalWithProjects,
@@ -80,25 +81,17 @@ export function getGoalHeaderWarnings(
 ): TrackerWarning[] {
   const includeProjectWarnings = options?.includeProjectWarnings !== false;
 
-  const goalUnassigned: TrackerWarning | null = !goal.ownerId
-    ? {
-        label: "No goal DRI",
-        title: "Assign a directly responsible individual (DRI) for this goal",
-      }
-    : null;
-
   if (goal.projects.length === 0) {
     /** No “no projects” chip — Roadmap shows Add project + AI on the goal row instead. */
-    return goalUnassigned ? [goalUnassigned] : [];
+    return [];
   }
 
   if (!includeProjectWarnings) {
-    return goalUnassigned ? [goalUnassigned] : [];
+    return [];
   }
 
   const multi = goal.projects.length > 1;
   const list: TrackerWarning[] = [];
-  if (goalUnassigned) list.push(goalUnassigned);
   for (const p of goal.projects) {
     const pw = getTrackerProjectWarnings(p, goal.costOfDelay, people);
     for (const w of pw) {
