@@ -473,6 +473,16 @@ export function TrackerView({
     [hierarchyAfterPriority, statusEnumFilterIds]
   );
 
+  /** Faceted counts for Signals: same pipeline as the main view but without status-tag filtering. */
+  const hierarchyForStatusTagCounts = useMemo(
+    () =>
+      filterTrackerHierarchyHideDoneProjects(
+        hierarchyAfterStatusEnum,
+        !showCompletedProjects
+      ),
+    [hierarchyAfterStatusEnum, showCompletedProjects]
+  );
+
   const hierarchyAfterStatusTags = useMemo(
     () =>
       filterTrackerHierarchyByStatusTags(
@@ -641,13 +651,10 @@ export function TrackerView({
     <TrackerExpandProvider value={bulkValue}>
       <RoadmapViewProvider>
       <RoadmapStickyToolbar>
-        <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h1 className="text-xl font-bold text-zinc-100">Roadmap</h1>
-          <span className="text-sm font-normal text-zinc-500">
-            Company → Goal → Project → Milestone.
-          </span>
-        </div>
         <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+        <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
+          Roadmap
+        </h1>
         <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
@@ -701,6 +708,7 @@ export function TrackerView({
         </div>
         <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12.5rem]">
           <StatusTagFilterMultiSelect
+            hierarchy={hierarchyForStatusTagCounts}
             selectedIds={statusTagFilterIds}
             onChange={setStatusTagFilterIds}
           />

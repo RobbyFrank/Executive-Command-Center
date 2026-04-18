@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  forwardRef,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -19,13 +18,11 @@ import {
   ChevronDown,
   Plus,
   MessageSquare,
+  Target,
+  Layers,
 } from "lucide-react";
 import { createGoal } from "@/server/actions/tracker";
 import { cn } from "@/lib/utils";
-import {
-  formatCalendarDateHint,
-  formatRelativeCalendarDate,
-} from "@/lib/relativeCalendarDate";
 import { GoalsColumnHeaders } from "./TrackerColumnHeaders";
 import { useRoadmapView } from "./roadmap-view-context";
 import {
@@ -33,20 +30,12 @@ import {
   ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
   TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
 } from "@/lib/tracker-sticky-layout";
-import {
-  TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS,
-  TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS,
-  TRACKER_FOOTER_TEXT_ACTION,
-  TRACKER_INLINE_TEXT_ACTION,
-} from "./tracker-text-actions";
-import { AiCreateButton } from "./AiCreateButton";
+import { CompanyEmptyGoalRowPlaceholder } from "./CompanyEmptyGoalRowPlaceholder";
+import { AddEntityMenuButton } from "./AddEntityMenuButton";
 import { CompanyScrapeButton } from "./CompanyScrapeButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
-import {
-  CompanySectionOverlayProvider,
-  useCompanySectionOverlayOptional,
-} from "./company-section-overlay-context";
+import { CompanySectionOverlayProvider } from "./company-section-overlay-context";
 import { CollapsePanel } from "./CollapsePanel";
 import { useAssistantOptional } from "@/contexts/AssistantContext";
 
@@ -109,6 +98,28 @@ export function CompanySection({
     },
     [company.goals, goalExpandedById]
   );
+
+  const addFirstGoalForCompany = useCallback(async () => {
+    const goal = await createGoal({
+      companyId: company.id,
+      description: "New goal",
+      measurableTarget: "",
+      whyItMatters: "",
+      currentValue: "",
+      impactScore: 3,
+      confidenceScore: 0,
+      costOfDelay: 3,
+      ownerId: "",
+      priority: "P2",
+      slackChannel: "",
+      slackChannelId: "",
+      status: "Not Started",
+      atRisk: false,
+      spotlight: false,
+      reviewLog: [],
+    });
+    handleNewGoalRegistered(goal.id);
+  }, [company.id, handleNewGoalRegistered]);
   const { bulkTick, expandPreset } = useTrackerExpandBulk();
   const { stickyTopPx } = useRoadmapView();
   const toolbarPx =
@@ -221,20 +232,20 @@ export function CompanySection({
     <div className="group/company mb-6 min-w-0 max-w-full">
       <div
         ref={companyHeaderRef}
-        className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"
+        className="sticky z-[29] bg-zinc-950/95 pt-3 backdrop-blur-sm"
         style={{ top: stickyStackBasePx }}
       >
-        <div className="group/companyHeader flex min-w-0 items-stretch overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/60 transition-colors hover:bg-zinc-900/85">
+        <div className="group/companyHeader flex min-w-0 items-stretch">
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
           onContextMenu={companyContext.onContextMenu}
           aria-expanded={expanded}
-          className="group flex min-w-0 flex-1 items-center gap-3 border-0 bg-transparent px-4 py-3 text-left transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-inset rounded-none"
+          className="group flex min-w-0 flex-1 items-center gap-3 border-0 bg-transparent px-1 pb-2 text-left transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-inset rounded-sm"
         >
         <ChevronRight
           className={cn(
-            "h-5 w-5 shrink-0 text-zinc-400 transition-transform motion-reduce:transition-none group-hover:text-zinc-200",
+            "h-4 w-4 shrink-0 text-zinc-500 transition-transform motion-reduce:transition-none group-hover:text-zinc-300",
             expanded && "rotate-90"
           )}
           aria-hidden
@@ -245,53 +256,37 @@ export function CompanySection({
           <img
             src={company.logoPath}
             alt=""
-            className="h-6 w-6 rounded object-cover shrink-0"
+            className="h-7 w-7 rounded-md object-cover shrink-0 ring-1 ring-zinc-800"
           />
         ) : (
-          <Building2 className="h-5 w-5 text-zinc-500 shrink-0" />
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-900 ring-1 ring-zinc-800">
+            <Building2 className="h-4 w-4 text-zinc-500" />
+          </div>
         )}
 
         <div className="flex-1 min-w-0">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-            <h2 className="min-w-0 max-w-full shrink truncate font-semibold text-zinc-100 text-base">
+            <h2 className="min-w-0 max-w-full shrink truncate font-semibold tracking-tight text-zinc-50 text-lg leading-tight">
               {company.name}
             </h2>
             <span
-              className="shrink-0 cursor-default text-xs tabular-nums text-zinc-600 whitespace-nowrap"
+              className="shrink-0 inline-flex cursor-default items-center gap-2 text-xs tabular-nums text-zinc-500 whitespace-nowrap"
               aria-label={statsLabel}
+              title={statsLabel}
             >
-              {goalCount} goal{goalCount !== 1 ? "s" : ""}
-              <span className="text-zinc-500/70" aria-hidden>
-                {" "}
-                ·{" "}
+              <span className="inline-flex items-center gap-1">
+                <Target className="h-3 w-3 text-zinc-600" aria-hidden />
+                {goalCount}
               </span>
-              {projectCount} project{projectCount !== 1 ? "s" : ""}
+              <span className="inline-flex items-center gap-1">
+                <Layers className="h-3 w-3 text-zinc-600" aria-hidden />
+                {projectCount}
+              </span>
             </span>
-            {company.launchDate ? (
-              <span
-                className="shrink-0 text-xs text-zinc-600/70"
-                title={`Launched — ${formatCalendarDateHint(company.launchDate)}`}
-              >
-                Launched{" "}
-                <span className="text-zinc-500">
-                  {formatRelativeCalendarDate(company.launchDate)}
-                </span>
-              </span>
-            ) : company.developmentStartDate ? (
-              <span
-                className="shrink-0 text-xs text-zinc-600/70"
-                title={`Started — ${formatCalendarDateHint(company.developmentStartDate)}`}
-              >
-                Dev started{" "}
-                <span className="text-zinc-500">
-                  {formatRelativeCalendarDate(company.developmentStartDate)}
-                </span>
-              </span>
-            ) : null}
           </div>
         </div>
         </button>
-        <div className="flex shrink-0 items-center pr-2">
+        <div className="flex shrink-0 items-center pb-2 pl-2">
           <CompanyScrapeButton company={company} people={people} />
         </div>
         </div>
@@ -316,52 +311,20 @@ export function CompanySection({
       >
         <div className="mt-1">
           {company.goals.length === 0 ? (
-            <div
-              className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 sm:pl-8"
-            >
-              <div
-                className={cn(
-                  "w-full min-w-0",
-                  TRACKER_EMPTY_HINT_COPY_COMPANY_CLASS
-                )}
-              >
-                No goals yet.&nbsp;
-                <button
-                  type="button"
-                  title="Add a new goal for this company"
-                  onClick={async () => {
-                    const goal = await createGoal({
-                      companyId: company.id,
-                      description: "New goal",
-                      measurableTarget: "",
-                      whyItMatters: "",
-                      currentValue: "",
-                      impactScore: 3,
-                      confidenceScore: 0,
-                      costOfDelay: 3,
-                      ownerId: "",
-                      priority: "P2",
-                      slackChannel: "",
-                      slackChannelId: "",
-                      status: "Not Started",
-                      atRisk: false,
-                      spotlight: false,
-                      reviewLog: [],
-                    });
-                    handleNewGoalRegistered(goal.id);
-                  }}
-                  className={TRACKER_INLINE_TEXT_ACTION}
-                >
-                  Add goal
-                </button>
-                <AiCreateButton
-                  type="goal"
-                  companyId={company.id}
-                  onCreated={(id) => handleNewGoalRegistered(id)}
-                  inline
-                />
-              </div>
-            </div>
+            <>
+              <GoalsColumnHeaders
+                stackTopPx={goalsColumnStackTopPx}
+                stickyZClass="z-[28]"
+              />
+              <CompanyEmptyGoalRowPlaceholder
+                roadmapGoalRowStickyTopPx={roadmapGoalRowStickyTopPx}
+                companyId={company.id}
+                onManualAdd={() => {
+                  void addFirstGoalForCompany();
+                }}
+                onGoalCreated={handleNewGoalRegistered}
+              />
+            </>
           ) : (
             <>
               <GoalsColumnHeaders
@@ -400,10 +363,12 @@ export function CompanySection({
               <CompanyAddGoalFooterRow
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-6 pr-4 py-1.5"
               >
-                <button
-                  type="button"
-                  title="Add another goal under this company"
-                  onClick={async () => {
+                <AddEntityMenuButton
+                  kind="goal"
+                  companyId={company.id}
+                  label="Add goal"
+                  buttonTitle="Add another goal under this company"
+                  onManualAdd={async () => {
                     const g = await createGoal({
                       companyId: company.id,
                       description: "New goal",
@@ -424,14 +389,7 @@ export function CompanySection({
                     });
                     handleNewGoalRegistered(g.id);
                   }}
-                  className={TRACKER_FOOTER_TEXT_ACTION}
-                >
-                  Add goal
-                </button>
-                <AiCreateButton
-                  type="goal"
-                  companyId={company.id}
-                  onCreated={(id) => handleNewGoalRegistered(id)}
+                  onAiCreated={(id) => handleNewGoalRegistered(id)}
                 />
               </CompanyAddGoalFooterRow>
             </>
@@ -443,23 +401,12 @@ export function CompanySection({
   );
 }
 
-/** Keeps footer legible while portaled cell preview panels are open (pointer leaves `group/company`). */
-const CompanyAddGoalFooterRow = forwardRef<
-  HTMLDivElement,
-  { className?: string; children: ReactNode }
->(function CompanyAddGoalFooterRow({ className, children }, ref) {
-  const overlay = useCompanySectionOverlayOptional();
-  const portaledActive = (overlay?.overlayCount ?? 0) > 0;
-  return (
-    <div
-      ref={ref}
-      className={cn(
-        className,
-        TRACKER_COMPANY_ADD_GOAL_ROW_VISIBILITY_CLASS,
-        portaledActive && "opacity-100"
-      )}
-    >
-      {children}
-    </div>
-  );
-});
+function CompanyAddGoalFooterRow({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return <div className={className}>{children}</div>;
+}

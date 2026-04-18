@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useId, useMemo, useState } from "react";
-import type { TrackerStatusTagId } from "@/lib/tracker-search-filter";
+import type { CompanyWithGoals } from "@/lib/types/tracker";
+import {
+  countProjectsByStatusTagBucket,
+  type TrackerStatusTagId,
+} from "@/lib/tracker-search-filter";
 import {
   ChevronDown,
   Flag,
@@ -65,17 +69,25 @@ const OPTIONS: {
 ];
 
 interface StatusTagFilterMultiSelectProps {
+  /** Hierarchy after other filters but before the Signals filter (for faceted counts). */
+  hierarchy: CompanyWithGoals[];
   selectedIds: TrackerStatusTagId[];
   onChange: (ids: TrackerStatusTagId[]) => void;
 }
 
 export function StatusTagFilterMultiSelect({
+  hierarchy,
   selectedIds,
   onChange,
 }: StatusTagFilterMultiSelectProps) {
   const [open, setOpen] = useState(false);
   const listId = useId();
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const counts = useMemo(
+    () => countProjectsByStatusTagBucket(hierarchy),
+    [hierarchy]
+  );
 
   const toggle = useCallback(
     (id: TrackerStatusTagId) => {
@@ -174,6 +186,7 @@ export function StatusTagFilterMultiSelect({
                   >
                     {groupOptions.map(({ id, label, hint, Icon }) => {
                       const selected = selectedSet.has(id);
+                      const count = counts[id];
                       return (
                         <button
                           key={id}
@@ -192,7 +205,17 @@ export function StatusTagFilterMultiSelect({
                             className="h-3.5 w-3.5 shrink-0 text-zinc-400"
                             aria-hidden
                           />
-                          <span>{label}</span>
+                          <span className="flex-1">{label}</span>
+                          <span
+                            className={cn(
+                              "ml-2 min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-medium leading-none",
+                              count > 0
+                                ? "bg-zinc-800 text-zinc-300"
+                                : "bg-zinc-800/50 text-zinc-600"
+                            )}
+                          >
+                            {count}
+                          </span>
                         </button>
                       );
                     })}

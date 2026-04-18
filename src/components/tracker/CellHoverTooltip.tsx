@@ -46,6 +46,11 @@ type CellHoverTooltipProps = {
   alwaysHoverReadonly?: boolean;
   /** Merged into the one-line trigger `span` (e.g. group-hover for subdued previews). */
   triggerClassName?: string;
+  /**
+   * When true, the one-line trigger hugs text width (up to the cell max) instead of stretching full
+   * cell width — use for roadmap milestone names so short titles don’t create a row-wide hit area.
+   */
+  shrinkTriggerWidth?: boolean;
 };
 
 /**
@@ -64,6 +69,7 @@ export const CellHoverTooltip = forwardRef<
     editExtras,
     alwaysHoverReadonly = false,
     triggerClassName,
+    shrinkTriggerWidth = false,
   },
   ref
 ) {
@@ -260,7 +266,10 @@ export const CellHoverTooltip = forwardRef<
       <span
         ref={triggerRef}
         className={cn(
-          "block min-w-0 w-full truncate text-left transition-[opacity,color] duration-150 ease-out",
+          "min-w-0 truncate text-left transition-[opacity,color] duration-150 ease-out",
+          shrinkTriggerWidth
+            ? "inline-block w-max max-w-full"
+            : "block w-full",
           triggerClassName,
           showDimmedTrigger && "text-zinc-500 opacity-40"
         )}

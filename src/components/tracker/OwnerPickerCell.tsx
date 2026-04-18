@@ -21,6 +21,7 @@ import {
   type AutonomyLevel,
 } from "@/lib/autonomyRoster";
 import { cn } from "@/lib/utils";
+import { OwnerAutonomyBadge } from "./OwnerAutonomyBadge";
 
 export interface OwnerWorkload {
   total: number;
@@ -198,15 +199,18 @@ export function OwnerPickerCell({
               compactAvatar ? "justify-start" : "gap-1.5",
             )}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={photo}
-              alt=""
-              className={cn(
-                "h-6 w-6 shrink-0 rounded-full object-cover ring-2",
-                autonomyRing ? "ring-amber-500/75" : "ring-zinc-700",
-              )}
-            />
+            <span className="relative inline-flex shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photo}
+                alt=""
+                className={cn(
+                  "h-6 w-6 shrink-0 rounded-full object-cover ring-2",
+                  autonomyRing ? "ring-amber-500/75" : "ring-zinc-700",
+                )}
+              />
+              {avatarOnly ? <OwnerAutonomyBadge person={person} /> : null}
+            </span>
             {!compactAvatar && displayName ? (
               <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-100">
                 {displayName}
@@ -215,13 +219,8 @@ export function OwnerPickerCell({
           </span>
         ) : compactAvatar ? (
           <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-zinc-200 ring-2 ring-zinc-700">
-            {autonomyRing ? (
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500/90 ring-1 ring-amber-400/50"
-                aria-hidden
-              />
-            ) : null}
             {((displayName ?? person.name).trim().charAt(0) || "?").toUpperCase()}
+            <OwnerAutonomyBadge person={person} />
           </span>
         ) : (
           <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">

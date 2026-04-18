@@ -11,6 +11,7 @@ import type { Milestone, Person } from "@/lib/types/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { updateMilestone, deleteMilestone } from "@/server/actions/tracker";
 import {
+  CalendarPlus,
   Check,
   Circle,
   ExternalLink,
@@ -48,47 +49,19 @@ import {
   type MilestoneDueHorizon,
 } from "@/lib/relativeCalendarDate";
 
-/** Horizontal heatmap + inset accent for milestone target dates (open milestones). */
-const DUE_ROW_BY_HORIZON: Partial<Record<MilestoneDueHorizon, string>> = {
-  overdue:
-    "bg-gradient-to-r from-rose-950/55 via-rose-950/28 to-transparent shadow-[inset_4px_0_0_0_rgba(244,63,94,0.78)] hover:from-rose-950/68 hover:via-rose-950/34",
-  today:
-    "bg-gradient-to-r from-orange-950/55 via-orange-950/24 to-transparent shadow-[inset_4px_0_0_0_rgba(249,115,22,0.78)] hover:from-orange-950/68 hover:via-orange-950/30",
-  soon:
-    "bg-gradient-to-r from-yellow-950/50 via-amber-950/18 to-transparent shadow-[inset_4px_0_0_0_rgba(234,179,8,0.72)] hover:from-yellow-950/62 hover:via-amber-950/24",
-  this_week:
-    "bg-gradient-to-r from-amber-950/42 via-amber-950/12 to-transparent shadow-[inset_4px_0_0_0_rgba(245,158,11,0.55)] hover:from-amber-950/52 hover:via-amber-950/18",
-};
-
 function milestoneDateDisplayClass(
   horizon: MilestoneDueHorizon
 ): string | undefined {
   switch (horizon) {
     case "overdue":
-      return "font-semibold text-rose-200";
-    case "today":
-      return "font-semibold text-orange-200";
+      return "font-semibold text-rose-400";
+    case "within24h":
+    case "tomorrow":
+      return "font-semibold text-orange-400";
     case "soon":
-      return "font-semibold text-yellow-200";
+      return "font-semibold text-yellow-300";
     case "this_week":
-      return "font-medium text-amber-200/95";
-    default:
-      return undefined;
-  }
-}
-
-function milestoneTitleDisplayClass(
-  horizon: MilestoneDueHorizon
-): string | undefined {
-  switch (horizon) {
-    case "overdue":
-      return "font-semibold text-rose-50";
-    case "today":
-      return "font-semibold text-orange-50";
-    case "soon":
-      return "font-semibold text-yellow-50";
-    case "this_week":
-      return "font-semibold text-amber-50";
+      return "font-semibold text-amber-400";
     default:
       return undefined;
   }
@@ -97,15 +70,16 @@ function milestoneTitleDisplayClass(
 function nextMilestoneChipClass(horizon: MilestoneDueHorizon): string {
   switch (horizon) {
     case "overdue":
-      return "text-rose-50 ring-rose-400/55 bg-rose-600/30";
-    case "today":
-      return "text-orange-50 ring-orange-400/60 bg-orange-600/25";
+      return "text-rose-50 ring-rose-400/60";
+    case "within24h":
+    case "tomorrow":
+      return "text-orange-50 ring-orange-400/62";
     case "soon":
-      return "text-yellow-50 ring-yellow-400/50 bg-yellow-600/20";
+      return "text-yellow-50 ring-yellow-400/55";
     case "this_week":
-      return "text-amber-50 ring-amber-400/50 bg-amber-600/22";
+      return "text-amber-50 ring-amber-400/55";
     default:
-      return "text-violet-200/95 ring-violet-500/35 bg-violet-500/15";
+      return "text-violet-200/95 ring-violet-500/35";
   }
 }
 
@@ -167,15 +141,6 @@ export function MilestoneRow({
     if (isDone) return "none";
     return getMilestoneDueHorizon(milestone.targetDate);
   }, [isDone, milestone.targetDate]);
-
-  /** Due-date gradient + accents only on the next open milestone — not on queued/future rows. */
-  const showNextDueHeatmap =
-    isNextPendingMilestone &&
-    !isDone &&
-    (dueHorizon === "overdue" ||
-      dueHorizon === "today" ||
-      dueHorizon === "soon" ||
-      dueHorizon === "this_week");
 
   const assistant = useAssistantOptional();
   const milestoneContext = useContextMenu();
@@ -278,6 +243,10 @@ export function MilestoneRow({
     !slackUrlEditing;
 
   const showSlackQuickMenu = !hasSlackThreadUrl && !slackUrlEditing;
+
+  /** Same absolute `left` as thread strip / Start Slack chip — reserve title width so neither overlaps. */
+  const reserveTitleSpaceForRoadmapSlackStrip =
+    showSlackInlineBesideTitle || showSlackStartAlignedInRow;
 
   const slackIconCellClass =
     "inline-flex !h-7 !w-7 !min-w-[1.75rem] !max-w-[1.75rem] shrink-0 items-center justify-center !border-0 !px-0 !py-0 !shadow-none !ring-0 bg-transparent hover:bg-zinc-800/80 rounded-sm";
@@ -405,16 +374,17 @@ export function MilestoneRow({
     <div
       ref={slackThreadSpotlightRef}
       className={cn(
-        "group/milestone relative flex min-h-[28px] min-w-0 items-center gap-2 border-b border-zinc-900/70 py-1 transition-colors",
+        "group/milestone relative flex min-h-[28px] min-w-0 items-center gap-2 py-1 transition-colors",
         ROADMAP_MILESTONE_GRID_PADDING_CLASS,
-        showNextDueHeatmap && DUE_ROW_BY_HORIZON[dueHorizon],
         isNextPendingMilestone &&
           !isDone &&
           (dueHorizon === "none" || dueHorizon === "later") &&
           "bg-violet-950/20 hover:bg-violet-950/30",
-        (!isNextPendingMilestone || isDone) &&
-          !showNextDueHeatmap &&
-          "hover:bg-zinc-900/60",
+        !(
+          isNextPendingMilestone &&
+          !isDone &&
+          (dueHorizon === "none" || dueHorizon === "later")
+        ) && "hover:bg-zinc-900/60",
         isQueuedPendingMilestone && !isDone && "opacity-[0.78]"
       )}
       onContextMenuCapture={milestoneContext.onContextMenuCapture}
@@ -447,6 +417,18 @@ export function MilestoneRow({
             updateMilestone(milestone.id, { targetDate })
           }
           type="date"
+          emptyLabel={
+            <span
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors not-italic hover:bg-zinc-800/55 hover:text-zinc-300"
+              aria-hidden
+            >
+              <CalendarPlus
+                className="h-3.5 w-3.5 shrink-0"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+            </span>
+          }
           displayClassName={
             isNextPendingMilestone && !isDone
               ? milestoneDateDisplayClass(dueHorizon)
@@ -472,13 +454,9 @@ export function MilestoneRow({
         </div>
         <div
           className={cn(
-            "min-h-[1.5rem] min-w-0 shrink overflow-hidden",
-            showSlackInlineBesideTitle
-              ? cn("flex-1", ROADMAP_MILESTONE_TITLE_MAX_WHEN_SLACK_THREAD_STRIP_CLASS)
-              : cn(
-                  "flex-1",
-                  showSlackStartAlignedInRow && "max-w-[min(36rem,52%)]"
-                )
+            "min-h-[1.5rem] min-w-0 shrink overflow-hidden flex-1",
+            reserveTitleSpaceForRoadmapSlackStrip &&
+              ROADMAP_MILESTONE_TITLE_MAX_WHEN_SLACK_THREAD_STRIP_CLASS
           )}
         >
           <InlineEditCell
@@ -486,12 +464,8 @@ export function MilestoneRow({
             onSave={(name) => updateMilestone(milestone.id, { name })}
             displayClassName={cn(
               ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
-              isDone && "line-through text-zinc-500",
-              !isDone &&
-                isNextPendingMilestone &&
-                milestoneTitleDisplayClass(dueHorizon)
+              isDone && "line-through text-zinc-500"
             )}
-            displayTruncateSingleLine
             startInEditMode={startNameInEditMode}
           />
         </div>

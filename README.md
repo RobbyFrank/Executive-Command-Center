@@ -45,7 +45,7 @@ Shared UI lives under **`src/components/brand/`**: `Logo`, `PageHeader`, `GlassS
 
 5. Open [http://localhost:3000](http://localhost:3000) and sign in. Use the sidebar for **Roadmap**, **Companies**, and **Team**.
 
-**Roadmap UI:** goal rows use a darker band than the nested project list; project rows and column labels are indented vs goals; milestones use a nested strip with compact rows; owner cells are compact avatars; goal Slack uses a compact channel chip (hash + add icon when unset). Goal **Due date** / **Progress** are rollups (latest milestone due date across projects; milestone completion across projects). See [docs/strategic-tracker-roadmap-ui.md](docs/strategic-tracker-roadmap-ui.md).
+**Roadmap UI:** goal rows use a darker band than the project list; each project is a bordered card under the goal; milestones sit on a light shelf under the project bar (compact rows); project rows are indented vs goals; owner cells are compact avatars; goal Slack uses a compact channel chip (hash + add icon when unset). Goal **Due date** / **Progress** are rollups (latest milestone due date across projects; milestone completion across projects). See [docs/strategic-tracker-roadmap-ui.md](docs/strategic-tracker-roadmap-ui.md).
 
 ## Data
 

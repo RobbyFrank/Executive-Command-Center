@@ -53,19 +53,23 @@ export function isCalendarDatePastDue(ymd: string, now = new Date()): boolean {
   return calendarDaysBetween(target, today) < 0;
 }
 
+const MS_HOUR = 60 * 60 * 1000;
+
 /**
- * Target-date urgency for open milestones (local calendar days until due).
+ * Target-date urgency for open milestones (local calendar + time until end of due day).
  * - `none`: empty or invalid date
- * - `overdue`: before today
- * - `today`: due today
- * - `soon`: due in 1–3 days
- * - `this_week`: due in 4–7 days
- * - `later`: due in 8+ days
+ * - `overdue`: after end of the due calendar day
+ * - `within24h`: not overdue, but time until end of the due day ≤ 24 hours
+ * - `tomorrow`: calendar due **tomorrow** when still more than 24h until end of that day (otherwise `within24h`)
+ * - `soon`: due in 2–3 calendar days
+ * - `this_week`: due in 4–7 calendar days
+ * - `later`: due in 8+ calendar days
  */
 export type MilestoneDueHorizon =
   | "none"
   | "overdue"
-  | "today"
+  | "within24h"
+  | "tomorrow"
   | "soon"
   | "this_week"
   | "later";
@@ -78,8 +82,24 @@ export function getMilestoneDueHorizon(
   if (!target) return "none";
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const diff = calendarDaysBetween(target, today);
-  if (diff < 0) return "overdue";
-  if (diff === 0) return "today";
+
+  const endOfDueDay = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+  const t = now.getTime();
+  if (t > endOfDueDay.getTime()) return "overdue";
+
+  const msRemaining = endOfDueDay.getTime() - t;
+  if (msRemaining <= 24 * MS_HOUR) return "within24h";
+
+  if (diff === 1) return "tomorrow";
+
   if (diff <= 3) return "soon";
   if (diff <= 7) return "this_week";
   return "later";
@@ -98,8 +118,6 @@ export function calendarDaysFromTodayYmd(
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return calendarDaysBetween(target, today);
 }
-
-const MS_HOUR = 60 * 60 * 1000;
 
 /**
  * Urgency for a project due date (`YYYY-MM-DD`) vs `now`, using local **end of the due

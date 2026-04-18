@@ -187,7 +187,7 @@ Everything grouped by Company → Goal → Project, with collapsible sections.
 
 ### Resource Bottleneck View
 
-The **Team** page aggregates workload per person across all companies. The toolbar supports **search** (name, role, department, Slack ID) and multi-select filters: **department** (including no department), **employment type**, **workload** bands (idle through heavy, plus “has P0”), **companies** where the person owns projects, and **missing profile fields** (e.g. no photo). Options show **counts** for the current facet; **Reset filters** clears everything.
+The **Team** page uses the same sticky header layout as **Roadmap** (page title and filters in one row). It aggregates workload per person across all companies. The toolbar supports **search** (name, role, department, Slack ID) and multi-select filters: **department** (including no department), **employment type**, **workload** bands (idle through heavy, plus “has P0”), **companies** where the person owns projects, and **missing profile fields** (e.g. no photo). Options show **counts** for the current facet; **Reset filters** clears everything.
 
 Each row includes a **workload bar**: length is relative to the busiest teammate so you can compare load at a glance; color segments show P0, P1, and other priorities, with the total count at the end of the bar. Company logos still show which companies their projects span, alongside autonomy for context.
 

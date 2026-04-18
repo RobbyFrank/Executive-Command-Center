@@ -116,11 +116,48 @@ export function Sidebar({
         collapsed ? "w-16" : "w-56"
       )}
     >
-      <div className="relative shrink-0 border-b border-zinc-800/80 px-2 py-2.5">
+      {/* Keep vertical padding + border in sync with {@link RoadmapStickyToolbar} so the rule lines up with the main sticky header */}
+      <div
+        className={cn(
+          "shrink-0 border-b border-zinc-800/70 bg-zinc-950/95 px-2 pt-6 pb-3 backdrop-blur-md",
+          collapsed
+            ? "relative flex min-h-0 flex-col items-center"
+            : "flex min-h-0 items-center justify-between gap-2"
+        )}
+      >
+        <div
+          className={cn(
+            "flex min-h-[2.25rem] min-w-0 items-center gap-2.5",
+            collapsed
+              ? "flex-col justify-center px-0.5"
+              : "min-w-0 flex-1"
+          )}
+        >
+          <div
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/85 to-emerald-700 shadow-[0_0_0_1px_rgba(16,185,129,0.25)_inset,0_6px_16px_-8px_rgba(16,185,129,0.45)]"
+            aria-hidden
+          >
+            <Sparkles className="h-4 w-4 text-white" strokeWidth={2.25} />
+          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1 leading-none">
+              <p className="truncate text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                MLabs
+              </p>
+              <p className="mt-0.5 truncate text-xs font-medium leading-tight text-zinc-300">
+                Command Center
+              </p>
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={toggleCollapsed}
-          className="absolute right-1.5 top-1.5 z-10 shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/30"
+          className={cn(
+            "shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/30",
+            collapsed &&
+              "absolute right-1.5 top-1/2 z-10 -translate-y-1/2"
+          )}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -131,31 +168,6 @@ export function Sidebar({
             <ChevronLeft className="h-4 w-4" aria-hidden />
           )}
         </button>
-        <div
-          className={cn(
-            "flex min-w-0 items-center gap-2.5",
-            collapsed
-              ? "flex-col justify-center px-0.5 pt-1"
-              : "pr-10"
-          )}
-        >
-          <div
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/85 to-emerald-700 shadow-[0_0_0_1px_rgba(16,185,129,0.25)_inset,0_6px_16px_-8px_rgba(16,185,129,0.45)]"
-            aria-hidden
-          >
-            <Sparkles className="h-4 w-4 text-white" strokeWidth={2.25} />
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                MLabs
-              </p>
-              <p className="truncate text-xs font-medium leading-tight text-zinc-300">
-                Command Center
-              </p>
-            </div>
-          )}
-        </div>
       </div>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
@@ -163,7 +175,7 @@ export function Sidebar({
           <div
             key={group.title}
             className={cn(
-              groupIndex > 0 && "pt-3 mt-1 border-t border-zinc-800"
+              groupIndex > 0 && "pt-3"
             )}
           >
             <h2

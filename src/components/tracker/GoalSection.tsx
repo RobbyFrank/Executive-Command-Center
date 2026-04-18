@@ -3,11 +3,13 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import type {
   Company,
   CompanyWithGoals,
@@ -32,6 +34,7 @@ import { costOfDelayFormatDisplay } from "./CostOfDelayDisplay";
 import { ProjectRow } from "./ProjectRow";
 import {
   updateGoal,
+  updateMilestone,
   deleteGoal,
   createProject,
   appendGoalReviewNote,
@@ -53,26 +56,29 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
-import { ProjectsColumnHeaders } from "./TrackerColumnHeaders";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
 import { SlackChannelPicker } from "./SlackChannelPicker";
 
 import { CollapsePanel } from "./CollapsePanel";
-import {
-  ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
-  TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
-} from "@/lib/tracker-sticky-layout";
+import { ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX } from "@/lib/tracker-sticky-layout";
 import {
   ROADMAP_DATA_COL_CLASS,
+  ROADMAP_DELAY_COMPLEXITY_COL_CLASS,
   ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
   ROADMAP_GOAL_GRID_PADDING_CLASS,
   ROADMAP_GOAL_TITLE_COL_CLASS,
   ROADMAP_GRID_GAP_CLASS,
   ROADMAP_NEXT_MILESTONE_COL_CLASS,
   ROADMAP_OWNER_COL_CLASS,
+  ROADMAP_PROJECT_CARD_INDENT_PX,
+  ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS,
+  ROADMAP_GOAL_SLACK_COL_CLASS,
 } from "@/lib/tracker-roadmap-columns";
-import { goalLatestMilestoneDueDateYmd } from "@/lib/goal-milestone-aggregates";
+import {
+  goalLatestMilestoneDueDateYmd,
+  milestoneForGoalDueDateShortcut,
+} from "@/lib/goal-milestone-aggregates";
 import { milestoneProgressPercent } from "@/lib/milestone-progress";
 import {
   formatCalendarDateHint,
@@ -81,12 +87,8 @@ import {
   parseCalendarDateString,
 } from "@/lib/relativeCalendarDate";
 import { ProgressBar } from "./ProgressBar";
-import {
-  TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
-  TRACKER_FOOTER_TEXT_ACTION,
-  TRACKER_INLINE_TEXT_ACTION,
-} from "./tracker-text-actions";
-import { AiCreateButton } from "./AiCreateButton";
+import { TRACKER_EMPTY_HINT_COPY_GOAL_CLASS } from "./tracker-text-actions";
+import { AddEntityMenuButton } from "./AddEntityMenuButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { AiContextInfoIcon } from "./AiContextInfoIcon";
@@ -94,9 +96,20 @@ import { AiUpdateDialog } from "./AiUpdateDialog";
 import { ReviewNotesPopover } from "./ReviewNotesPopover";
 import { RowActionIcons } from "./RowActionIcons";
 import { useAssistantOptional } from "@/contexts/AssistantContext";
+import { useCompanySectionOverlayOptional } from "./company-section-overlay-context";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
+
+/** Hover panel when the goal has no milestones yet (due column is rollup-only). Same delay/behavior as {@link AutoConfidencePercent}. */
+const GOAL_EMPTY_DUE_EXPLAIN =
+  "This column shows the latest milestone due date automatically. Add a project and milestones with target dates first.";
+
+const GOAL_EMPTY_DUE_TIP_MAX_W_PX = 320;
+const EMPTY_DUE_EXPLAIN_CLOSE_DELAY_MS = 200;
+
+/** Distance from each project tree row wrapper top to the horizontal stub (project bar centerline). */
+const GOAL_PROJECT_TREE_STUB_TOP_PX = 18;
 
 interface GoalSectionProps {
   goal: GoalWithProjects;
@@ -158,6 +171,143 @@ export function GoalSection({
   const goalContext = useContextMenu();
   const goalActionsRef = useRef<HTMLButtonElement>(null);
   const [goalReviewNotesNonce, setGoalReviewNotesNonce] = useState(0);
+
+  /** Pixel height of the goal→project tree spine — ends at the last project’s horizontal stub. */
+  const [projectTreeSpineHeightPx, setProjectTreeSpineHeightPx] = useState<
+    number | null
+  >(null);
+  const projectTreeRootRef = useRef<HTMLDivElement>(null);
+  const lastProjectTreeRowRef = useRef<HTMLDivElement>(null);
+
+  const emptyDueExplainPanelId = useId();
+  const emptyDueExplainBtnRef = useRef<HTMLButtonElement>(null);
+  const emptyDueExplainCloseTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const [emptyDueExplainPanelOpen, setEmptyDueExplainPanelOpen] =
+    useState(false);
+  const [emptyDueExplainPlacement, setEmptyDueExplainPlacement] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+
+  const { incrementOverlay, decrementOverlay } =
+    useCompanySectionOverlayOptional() ?? {};
+
+  const clearEmptyDueExplainCloseTimer = useCallback(() => {
+    if (emptyDueExplainCloseTimerRef.current != null) {
+      clearTimeout(emptyDueExplainCloseTimerRef.current);
+      emptyDueExplainCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const refreshEmptyDueExplainPlacement = useCallback(() => {
+    const el = emptyDueExplainBtnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const margin = 6;
+    const maxW = GOAL_EMPTY_DUE_TIP_MAX_W_PX;
+    let left = r.left;
+    const top = r.bottom + margin;
+    if (left + maxW > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - 8 - maxW);
+    }
+    setEmptyDueExplainPlacement({ top, left });
+  }, []);
+
+  const openEmptyDueExplainPanel = useCallback(() => {
+    clearEmptyDueExplainCloseTimer();
+    refreshEmptyDueExplainPlacement();
+    setEmptyDueExplainPanelOpen(true);
+  }, [clearEmptyDueExplainCloseTimer, refreshEmptyDueExplainPlacement]);
+
+  const scheduleCloseEmptyDueExplain = useCallback(() => {
+    clearEmptyDueExplainCloseTimer();
+    emptyDueExplainCloseTimerRef.current = setTimeout(() => {
+      setEmptyDueExplainPanelOpen(false);
+      emptyDueExplainCloseTimerRef.current = null;
+    }, EMPTY_DUE_EXPLAIN_CLOSE_DELAY_MS);
+  }, [clearEmptyDueExplainCloseTimer]);
+
+  const cancelCloseEmptyDueExplain = useCallback(() => {
+    clearEmptyDueExplainCloseTimer();
+  }, [clearEmptyDueExplainCloseTimer]);
+
+  useLayoutEffect(() => {
+    if (!emptyDueExplainPanelOpen) return;
+    refreshEmptyDueExplainPlacement();
+  }, [emptyDueExplainPanelOpen, refreshEmptyDueExplainPlacement]);
+
+  useEffect(() => {
+    if (!emptyDueExplainPanelOpen) return;
+    const onScroll = () => setEmptyDueExplainPanelOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [emptyDueExplainPanelOpen]);
+
+  useEffect(() => {
+    if (!emptyDueExplainPanelOpen) return;
+    const onResize = () => refreshEmptyDueExplainPlacement();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [emptyDueExplainPanelOpen, refreshEmptyDueExplainPlacement]);
+
+  useEffect(() => {
+    if (!emptyDueExplainPanelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEmptyDueExplainPanelOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [emptyDueExplainPanelOpen]);
+
+  useEffect(() => {
+    if (!emptyDueExplainPanelOpen || !incrementOverlay || !decrementOverlay)
+      return;
+    incrementOverlay();
+    return () => decrementOverlay();
+  }, [emptyDueExplainPanelOpen, incrementOverlay, decrementOverlay]);
+
+  const projectTreeLayoutKey = useMemo(
+    () => goal.projects.map((p) => p.id).join(","),
+    [goal.projects]
+  );
+
+  const measureProjectTreeSpine = useCallback(() => {
+    const root = projectTreeRootRef.current;
+    const last = lastProjectTreeRowRef.current;
+    if (!root || !last) {
+      setProjectTreeSpineHeightPx(null);
+      return;
+    }
+    const rootRect = root.getBoundingClientRect();
+    const lastRect = last.getBoundingClientRect();
+    const stubY = lastRect.top + GOAL_PROJECT_TREE_STUB_TOP_PX;
+    const h = stubY - rootRect.top;
+    setProjectTreeSpineHeightPx(Math.max(0, Math.round(h)));
+  }, [goal.projects.length, projectTreeLayoutKey]);
+
+  useLayoutEffect(() => {
+    if (!expanded) {
+      setProjectTreeSpineHeightPx(null);
+      return;
+    }
+    measureProjectTreeSpine();
+    const root = projectTreeRootRef.current;
+    if (!root) return;
+    const ro = new ResizeObserver(() => {
+      measureProjectTreeSpine();
+    });
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [
+    bulkTick,
+    expanded,
+    measureProjectTreeSpine,
+    projectTreeLayoutKey,
+    showCompletedProjects,
+    expandForSearch,
+  ]);
 
   useEffect(() => {
     onExpandedChange?.(goal.id, expanded);
@@ -276,6 +426,10 @@ export function GoalSection({
   );
   const goalLatestDueYmd = useMemo(
     () => goalLatestMilestoneDueDateYmd(goal),
+    [goal]
+  );
+  const goalDueDateShortcutMilestone = useMemo(
+    () => milestoneForGoalDueDateShortcut(goal),
     [goal]
   );
   const goalMilestonesDoneCount = useMemo(
@@ -464,30 +618,8 @@ export function GoalSection({
     setGoalRenameNonce,
   ]);
 
-  const goalHeaderRef = useRef<HTMLDivElement>(null);
-  const [goalHeaderPx, setGoalHeaderPx] = useState(
-    TRACKER_GOAL_HEADER_ROW_FALLBACK_PX
-  );
-
-  useLayoutEffect(() => {
-    const el = goalHeaderRef.current;
-    if (!el) return;
-    const apply = () =>
-      setGoalHeaderPx(Math.round(el.getBoundingClientRect().height));
-    apply();
-    const ro = new ResizeObserver(apply);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [
-    goal.description,
-    goal.atRisk,
-    goal.spotlight,
-    expanded,
-  ]);
-
   const goalStickyTopPx =
     roadmapGoalRowStickyTopPx - ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX;
-  const projectsColumnStackTopPx = goalStickyTopPx + goalHeaderPx;
 
   const headerTopRounded =
     stackPosition === "only" || stackPosition === "first";
@@ -504,29 +636,30 @@ export function GoalSection({
         stackPosition === "first" && "rounded-t-md border-b border-zinc-800/45",
         stackPosition === "middle" && "border-b border-zinc-800/45",
         stackPosition === "last" && "mb-2 rounded-b-md",
-        !goal.atRisk &&
-          !goal.spotlight &&
-          "hover:bg-zinc-900/30",
         goal.atRisk &&
-          "border-l-2 border-amber-400 bg-amber-950/45 hover:bg-amber-950/55",
+          "border-l-2 border-amber-400 bg-amber-950/45",
         !goal.atRisk &&
           goal.spotlight &&
-          "border-l-2 border-emerald-400/85 bg-emerald-950/40 hover:bg-emerald-950/48"
+          "border-l-2 border-emerald-400/85 bg-emerald-950/40"
       )}
     >
       {/* Goal header — click row (not inline controls) to expand/collapse; AI context via info icon */}
       <div
-        ref={goalHeaderRef}
         style={{ top: goalStickyTopPx }}
         onContextMenuCapture={goalContext.onContextMenuCapture}
         className={cn(
-          "sticky z-[27] w-full min-w-0 max-w-full border-b border-zinc-800/60 shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
+          // Hover lives on this sticky bar (visible when collapsed); outer wrapper hover was covered
+          // by opaque bg and also fired over the whole project list when expanded.
+          "sticky z-[27] w-full min-w-0 max-w-full backdrop-blur-sm transition-colors duration-150 motion-reduce:transition-none",
+          expanded
+            ? "border-b-0 shadow-none"
+            : "border-b border-zinc-800/60 shadow-[0_1px_0_rgba(0,0,0,0.2)]",
           headerTopRounded ? "rounded-t-md" : "rounded-t-none",
           goal.atRisk
-            ? "bg-amber-950/85"
+            ? "bg-amber-950/85 hover:bg-amber-900/78"
             : goal.spotlight
-              ? "bg-emerald-950/80"
-              : "bg-zinc-950/95"
+              ? "bg-emerald-950/80 hover:bg-emerald-900/72"
+              : "bg-zinc-950/95 hover:bg-zinc-900/85"
         )}
       >
         <div
@@ -584,22 +717,15 @@ export function GoalSection({
                     )}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      title="Add a new project to this goal"
-                      onClick={(e) => {
-                        e.stopPropagation();
+                    <AddEntityMenuButton
+                      kind="project"
+                      goalId={goal.id}
+                      label="Add project"
+                      buttonTitle="Add a new project to this goal"
+                      onManualAdd={() => {
                         void addProjectToGoal();
                       }}
-                      className={TRACKER_FOOTER_TEXT_ACTION}
-                    >
-                      Add project
-                    </button>
-                    <AiCreateButton
-                      type="project"
-                      goalId={goal.id}
-                      onCreated={onNewProjectCreated}
-                      inline
+                      onAiCreated={onNewProjectCreated}
                     />
                   </div>
                 )}
@@ -661,7 +787,7 @@ export function GoalSection({
         </div>
 
         {/* Delay cost — aligns above project Complexity */}
-        <div className={ROADMAP_DATA_COL_CLASS}>
+        <div className={ROADMAP_DELAY_COMPLEXITY_COL_CLASS}>
           <InlineEditCell
             {...GRID_ALIGN}
             className="group/status"
@@ -690,24 +816,13 @@ export function GoalSection({
           />
         </div>
 
-        {/* Slack channel name (always visible; column header shows Slack mark) */}
-        <div className={ROADMAP_DATA_COL_CLASS}>
-          <SlackChannelPicker
-            channelName={goal.slackChannel}
-            channelId={goal.slackChannelId ?? ""}
-            onSave={({ name, id }) =>
-              updateGoal(goal.id, { slackChannel: name, slackChannelId: id })
-            }
-            companyName={companyForSlackPicker?.name}
-            companyShortName={companyForSlackPicker?.shortName}
-            trackerGridAlign
-            variant="plain"
-          />
-        </div>
-
         {/* Due date — latest milestone target date across all projects in this goal */}
         <div
-          className={ROADMAP_DATA_COL_CLASS}
+          className={cn(
+            ROADMAP_DATA_COL_CLASS,
+            !goalLatestDueYmd.trim() &&
+              "flex items-center justify-start pl-2"
+          )}
           title={
             goalLatestDueYmd.trim()
               ? [
@@ -741,13 +856,49 @@ export function GoalSection({
                 omitFuturePreposition: true,
               })}
             </span>
+          ) : goalDueDateShortcutMilestone ? (
+            <InlineEditCell
+              {...GRID_ALIGN}
+              key={goalDueDateShortcutMilestone.id}
+              type="date"
+              value={goalDueDateShortcutMilestone.targetDate}
+              onSave={(targetDate) =>
+                void updateMilestone(goalDueDateShortcutMilestone.id, {
+                  targetDate,
+                })
+              }
+              displayTitle="Set milestone due date (goal column shows the latest date in this goal)"
+              emptyLabel={
+                <span
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 not-italic transition-colors hover:bg-zinc-800/55 hover:text-zinc-300"
+                  aria-hidden
+                >
+                  <CalendarPlus
+                    className="h-3.5 w-3.5 shrink-0"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                </span>
+              }
+            />
           ) : (
-            <span
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800/55 hover:text-zinc-300"
-              aria-label="No milestone due date yet — add a target date on a milestone under this goal"
+            <button
+              ref={emptyDueExplainBtnRef}
+              type="button"
+              aria-expanded={emptyDueExplainPanelOpen}
+              aria-describedby={
+                emptyDueExplainPanelOpen ? emptyDueExplainPanelId : undefined
+              }
+              onClick={(e) => e.stopPropagation()}
+              onMouseEnter={openEmptyDueExplainPanel}
+              onMouseLeave={scheduleCloseEmptyDueExplain}
+              onFocus={openEmptyDueExplainPanel}
+              onBlur={scheduleCloseEmptyDueExplain}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800/55 hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/45"
+              aria-label="No milestone due date yet — add projects and milestones with target dates; latest shows here automatically"
             >
               <CalendarPlus className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-            </span>
+            </button>
           )}
         </div>
 
@@ -757,6 +908,21 @@ export function GoalSection({
             percent={goalMilestoneProgressPercent}
             label={`${goalMilestonesDoneCount}/${goalMilestonesFlat.length}`}
             title={`${goalMilestonesDoneCount} of ${goalMilestonesFlat.length} milestones complete in this goal (${goalMilestoneProgressPercent}%)`}
+          />
+        </div>
+
+        {/* Slack channel name (always visible; column header shows Slack mark) — after Progress */}
+        <div className={ROADMAP_GOAL_SLACK_COL_CLASS}>
+          <SlackChannelPicker
+            channelName={goal.slackChannel}
+            channelId={goal.slackChannelId ?? ""}
+            onSave={({ name, id }) =>
+              updateGoal(goal.id, { slackChannel: name, slackChannelId: id })
+            }
+            companyName={companyForSlackPicker?.name}
+            companyShortName={companyForSlackPicker?.shortName}
+            trackerGridAlign
+            variant="plain"
           />
         </div>
 
@@ -815,18 +981,6 @@ export function GoalSection({
 
         <RowActionIcons rowGroup="goal" forceVisible={goal.atRisk || goal.spotlight}>
           <button
-            type="button"
-            title="Add a new project to this goal"
-            aria-label={`Add project to ${goal.description}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              void addProjectToGoal();
-            }}
-            className="rounded p-0.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-          </button>
-          <button
             ref={goalActionsRef}
             type="button"
             title="Goal actions"
@@ -867,65 +1021,103 @@ export function GoalSection({
         )}
       >
         <div className="group/project-area">
-          {goal.projects.length > 0 && (
-            <div className="rounded-r-md border-l-[3px] border-zinc-600/60 bg-zinc-900/45">
-              <ProjectsColumnHeaders
-                stackTopPx={projectsColumnStackTopPx}
-                stickyZClass="z-[26]"
-              />
-
-              {goal.projects.map((project) => (
-                <div key={project.id}>
-                  <ProjectRow
-                    goalId={goal.id}
-                    project={project}
-                    people={people}
-                    expandForSearch={expandForSearch}
-                    goalCostOfDelay={goal.costOfDelay}
-                    ownerWorkloadMap={ownerWorkloadMap}
-                    focusProjectNameEditId={newProjectNameFocusId}
-                    allGoals={allGoals}
-                    allCompanies={allCompanies}
-                    mirrorPickerHierarchy={mirrorPickerHierarchy}
-                    showCompletedProjects={showCompletedProjects}
-                    goalSlackChannelId={goal.slackChannelId ?? ""}
-                    goalSlackChannelName={goal.slackChannel ?? ""}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {goal.projects.length === 0 && (
-            <div className="pl-12 pr-3 py-1.5">
+          {/* Tree: spine at x=32px; stubs at x=33px; project cards from x=56px — same for real projects and empty placeholder. */}
+          <div className="pb-3">
+            <div ref={projectTreeRootRef} className="relative pt-3">
               <div
-                className={cn(
-                  "m-0 w-full min-w-0",
-                  TRACKER_EMPTY_HINT_COPY_GOAL_CLASS
-                )}
-              >
-                No projects yet.&nbsp;
-                <button
-                  type="button"
-                  title="Add a new project to this goal"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void addProjectToGoal();
-                  }}
-                  className={TRACKER_INLINE_TEXT_ACTION}
-                >
-                  Add project
-                </button>
-                <AiCreateButton
-                  type="project"
-                  goalId={goal.id}
-                  onCreated={onNewProjectCreated}
-                  inline
-                />
+                aria-hidden
+                className="pointer-events-none absolute left-[32px] top-0 w-px bg-zinc-700/55"
+                style={
+                  projectTreeSpineHeightPx != null
+                    ? { height: projectTreeSpineHeightPx }
+                    : undefined
+                }
+              />
+              <div className="relative flex flex-col gap-3">
+                {goal.projects.length > 0
+                  ? goal.projects.map((project, idx) => (
+                      <div
+                        key={project.id}
+                        ref={
+                          idx === goal.projects.length - 1
+                            ? lastProjectTreeRowRef
+                            : undefined
+                        }
+                        className="relative"
+                      >
+                        <div
+                          aria-hidden
+                          className="pointer-events-none absolute left-[33px] h-px w-[23px] bg-zinc-700/55"
+                          style={{ top: GOAL_PROJECT_TREE_STUB_TOP_PX }}
+                        />
+                        <div
+                          style={{ marginLeft: ROADMAP_PROJECT_CARD_INDENT_PX }}
+                        >
+                          <ProjectRow
+                            goalId={goal.id}
+                            project={project}
+                            people={people}
+                            expandForSearch={expandForSearch}
+                            goalCostOfDelay={goal.costOfDelay}
+                            ownerWorkloadMap={ownerWorkloadMap}
+                            focusProjectNameEditId={newProjectNameFocusId}
+                            allGoals={allGoals}
+                            allCompanies={allCompanies}
+                            mirrorPickerHierarchy={mirrorPickerHierarchy}
+                            showCompletedProjects={showCompletedProjects}
+                            goalSlackChannelId={goal.slackChannelId ?? ""}
+                            goalSlackChannelName={goal.slackChannel ?? ""}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  : (
+                      <div ref={lastProjectTreeRowRef} className="relative">
+                        <div
+                          aria-hidden
+                          className="pointer-events-none absolute left-[33px] h-px w-[23px] bg-zinc-700/55"
+                          style={{ top: GOAL_PROJECT_TREE_STUB_TOP_PX }}
+                        />
+                        <div
+                          style={{ marginLeft: ROADMAP_PROJECT_CARD_INDENT_PX }}
+                        >
+                          <div className={ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS}>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-zinc-900 bg-zinc-950/55 px-3 py-2">
+                              <AddEntityMenuButton
+                                kind="project"
+                                goalId={goal.id}
+                                label="Add project"
+                                buttonTitle="Add a new project to this goal"
+                                onManualAdd={() => {
+                                  void addProjectToGoal();
+                                }}
+                                onAiCreated={onNewProjectCreated}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
               </div>
             </div>
-          )}
-
+            {goal.projects.length > 0 ? (
+              <div
+                className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 pr-3 pt-0.5"
+                style={{ paddingLeft: ROADMAP_PROJECT_CARD_INDENT_PX }}
+              >
+                <AddEntityMenuButton
+                  kind="project"
+                  goalId={goal.id}
+                  label="Add project"
+                  buttonTitle="Add another project to this goal"
+                  onManualAdd={() => {
+                    void addProjectToGoal();
+                  }}
+                  onAiCreated={onNewProjectCreated}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
       </CollapsePanel>
 
@@ -939,6 +1131,26 @@ export function GoalSection({
           onClose={() => setAiUpdateOpen(false)}
         />
       )}
+
+      {emptyDueExplainPanelOpen &&
+        emptyDueExplainPlacement &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            id={emptyDueExplainPanelId}
+            role="tooltip"
+            className="pointer-events-auto fixed z-[200] w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-zinc-600/90 bg-zinc-900 px-3 py-2.5 text-[11px] leading-relaxed text-zinc-300 shadow-xl"
+            style={{
+              top: emptyDueExplainPlacement.top,
+              left: emptyDueExplainPlacement.left,
+            }}
+            onMouseEnter={cancelCloseEmptyDueExplain}
+            onMouseLeave={scheduleCloseEmptyDueExplain}
+          >
+            {GOAL_EMPTY_DUE_EXPLAIN}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

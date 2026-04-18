@@ -84,6 +84,11 @@ interface InlineEditCellProps {
    * when truncated. Only applies to default variant text/date cells (not select/link).
    */
   displayTruncateSingleLine?: boolean;
+  /**
+   * With `displayTruncateSingleLine`: size the collapsed control to the text (up to max width) instead
+   * of stretching across the full cell — avoids a wide empty hit/hover target for short values.
+   */
+  displayShrinkToContent?: boolean;
   /** Tooltip body when `displayTruncateSingleLine`; defaults to raw `value`. */
   tooltipLabel?: string;
   /** Extra controls in the floating edit panel (Companies description: generate from websites). */
@@ -158,6 +163,7 @@ export function InlineEditCell({
   onEditingChange,
   selectPresentation = "always",
   displayTruncateSingleLine = false,
+  displayShrinkToContent = false,
   tooltipLabel,
   truncateTooltipEditExtras,
   truncateTooltipAlwaysHover = false,
@@ -535,7 +541,6 @@ export function InlineEditCell({
             "flex min-h-[28px] w-full max-w-full items-center rounded py-0.5 text-left text-sm",
             cellPadX,
             "border-0 bg-transparent transition-colors cursor-pointer",
-            "hover:bg-zinc-800",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-600",
             !value.trim() && !emptyAttention && "text-zinc-600 italic",
             emptyAttention &&
@@ -605,8 +610,11 @@ export function InlineEditCell({
             "focus-visible:outline-none focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:cursor-text focus-visible:ring-1 focus-visible:ring-zinc-500/35"
           )
         : cn(
-            "text-left w-full py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm cursor-pointer",
-            cellPadX
+            "text-left py-0.5 rounded hover:bg-zinc-800 transition-colors min-h-[28px] text-sm cursor-pointer",
+            cellPadX,
+            displayTruncateSingleLine && displayShrinkToContent
+              ? "inline-block w-max max-w-full min-w-0"
+              : "w-full"
           );
 
     const trimmed = value.trim();
@@ -686,7 +694,8 @@ export function InlineEditCell({
 
     const collapsedClassName = cn(
       collapsedLayout,
-      useTruncateTooltip && "min-w-0 w-full",
+      useTruncateTooltip &&
+        (displayShrinkToContent ? "min-w-0" : "min-w-0 w-full"),
       !value &&
         (variant === "plain"
           ? "text-zinc-500 italic"
@@ -726,6 +735,7 @@ export function InlineEditCell({
             placeholder={placeholder}
             editExtras={truncateTooltipEditExtras}
             alwaysHoverReadonly={truncateTooltipAlwaysHover}
+            shrinkTriggerWidth={displayShrinkToContent}
             triggerClassName={
               truncateSubduedPreview
                 ? "transition-colors group-hover/trigger:text-zinc-200"

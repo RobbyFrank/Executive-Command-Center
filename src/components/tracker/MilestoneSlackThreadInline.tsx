@@ -11,7 +11,7 @@ const BODY_PREVIEW_MAX_CHARS_COMPACT = 110;
 
 /** Reserve width ≥ two digits + % so on-time / progress don’t shift; `4.5ch` fits `100%` in tabular nums. */
 const PERCENT_SPAN_CLASS =
-  "inline-block min-w-[4.5ch] text-end tabular-nums font-semibold";
+  "inline-block min-w-[4.5ch] text-start tabular-nums font-semibold";
 
 function truncateBody(s: string, maxChars: number): string {
   const t = s.trim();
@@ -273,12 +273,12 @@ export const MilestoneSlackThreadInline = forwardRef<
             className={cn("shrink-0 text-zinc-600", compact ? "text-[10px]" : "text-[11px]")}
             aria-hidden
           >
-            —
+            ·
           </span>
           <span
             className={cn(
               "flex min-w-0 flex-1 items-center",
-              compact ? "gap-1" : "gap-1.5"
+              compact ? "gap-1.5 pl-1" : "gap-2 pl-1.5"
             )}
           >
             {lastMsg.avatarSrc ? (
@@ -330,7 +330,7 @@ export const MilestoneSlackThreadInline = forwardRef<
             className={cn("shrink-0 text-zinc-600", compact ? "text-[10px]" : "text-[11px]")}
             aria-hidden
           >
-            —
+            ·
           </span>
           <span
             className={cn(

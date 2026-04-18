@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Hash, Loader2, Plus, X } from "lucide-react";
+import { Hash, Loader2, Pencil, Plus, X } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
 import {
   channelMatchesCompanyTerms,
@@ -34,7 +34,7 @@ interface SlackChannelPickerProps {
   companyShortName?: string;
   /** Roadmap grid alignment. */
   trackerGridAlign?: boolean;
-  /** "plain" variant omits pill background on the resting label. */
+  /** "plain" uses roadmap-style chip (sky-tint border); "default" uses neutral zinc. */
   variant?: "default" | "plain";
 }
 
@@ -58,7 +58,7 @@ export function SlackChannelPicker({
   const [search, setSearch] = useState("");
   /** When true, narrow the list to channels matching company name / short name (default each open). */
   const [relevantOnly, setRelevantOnly] = useState(true);
-  const anchorRef = useRef<HTMLButtonElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -179,19 +179,52 @@ export function SlackChannelPicker({
   const displayHash = hasChannel ? formatSlackChannelHash(channelName || channelId) : "";
   const linkUrl = channelId.trim() ? slackChannelUrl(channelId) : "";
 
-  /** Roadmap goal row: match project Due date / Status (`text-xs font-medium leading-tight`). */
-  const channelLabelClasses = cn(
-    "flex min-w-0 flex-1 items-center rounded py-0.5 text-left transition-colors",
-    trackerGridAlign
-      ? "pl-0 text-xs font-medium leading-tight text-zinc-300"
-      : "min-h-[24px] pl-1.5 text-sm text-zinc-300",
-    variant === "plain" && "hover:bg-zinc-800/60",
+  /** Roadmap goal row: full channel width, pencil inline and only on hover (or focus). */
+  const isRoadmapGoal = trackerGridAlign && variant === "plain";
+
+  /** Channel name segment inside the unified chip (roadmap: match Due / Status typography). */
+  const labelInChipClass = cn(
+    "flex items-center py-0.5 text-left text-zinc-300",
+    isRoadmapGoal
+      ? "shrink-0 pl-1.5 pr-0 text-xs font-medium leading-tight"
+      : cn(
+          "min-w-0 flex-1",
+          trackerGridAlign
+            ? "pl-1.5 pr-0.5 text-xs font-medium leading-tight"
+            : "min-h-[24px] pl-2 pr-1 text-sm",
+        ),
+  );
+
+  /** Unified chip: roadmap goal row has no hover frame (border reads noisy next to the hash). */
+  const channelChipClass = cn(
+    "group/slack-value flex items-stretch rounded-md border-0 bg-transparent",
+    isRoadmapGoal
+      ? "inline-flex w-max max-w-none min-w-0 gap-0.5 overflow-visible"
+      : "min-w-0 max-w-full flex-1 gap-1 overflow-hidden transition-[background-color,border-color,box-shadow] duration-150",
+    variant === "plain"
+      ? isRoadmapGoal
+        ? ""
+        : "hover:border hover:border-sky-500/45 hover:bg-zinc-800/40 hover:shadow-sm hover:shadow-black/15"
+      : "hover:border hover:border-zinc-600/50 hover:bg-zinc-800/45",
+  );
+
+  const pencilButtonClass = cn(
+    "flex shrink-0 items-center px-0.5 py-0.5 outline-none transition-[opacity,color] duration-150",
+    "rounded-r-[5px] text-zinc-500/90 hover:text-zinc-50 focus-visible:text-zinc-50",
+    isRoadmapGoal &&
+      "opacity-0 group-hover/slack-value:opacity-100 focus-visible:opacity-100",
+    !isRoadmapGoal && "text-zinc-500/45 hover:text-zinc-50",
   );
 
   const collapsed = (
-    <div className="group/channel flex w-full min-w-0 items-center gap-0.5">
+    <div
+      className={cn(
+        "flex min-w-0 items-center",
+        isRoadmapGoal ? "w-max" : "w-full",
+      )}
+    >
       {hasChannel ? (
-        <>
+        <div ref={anchorRef} className={channelChipClass}>
           {linkUrl ? (
             <a
               href={linkUrl}
@@ -199,57 +232,73 @@ export function SlackChannelPicker({
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                channelLabelClasses,
-                "cursor-pointer hover:bg-zinc-800",
-                variant === "plain" && "hover:bg-zinc-800/60",
+                labelInChipClass,
+                "group/slack-link cursor-pointer rounded-l-[5px] outline-offset-2 transition-colors hover:bg-transparent hover:text-sky-300 focus-visible:text-sky-300 focus-visible:ring-2",
+                variant === "plain"
+                  ? "focus-visible:ring-sky-500/45"
+                  : "focus-visible:ring-zinc-500/50",
               )}
-              title={`Open ${displayHash} in Slack`}
+              title={`Open ${displayHash} in Slack — opens in a new tab`}
             >
-              <span className="min-w-0 truncate">{displayHash}</span>
+              <span
+                className={cn(
+                  "transition-[font-weight,text-decoration-color] duration-150 motion-reduce:transition-none",
+                  "underline decoration-transparent decoration-dotted underline-offset-[3px]",
+                  "group-hover/slack-link:font-semibold group-hover/slack-link:decoration-sky-400/80",
+                  "group-focus-visible/slack-link:font-semibold group-focus-visible/slack-link:decoration-sky-400/80",
+                  isRoadmapGoal ? "whitespace-nowrap" : "min-w-0 truncate",
+                )}
+              >
+                {displayHash}
+              </span>
             </a>
           ) : (
             <span
-              className={cn(channelLabelClasses, "cursor-default")}
+              className={cn(labelInChipClass, "cursor-default rounded-l-[5px]")}
               title={`Slack channel: ${displayHash}`}
             >
-              <span className="min-w-0 truncate">{displayHash}</span>
+              <span
+                className={cn(isRoadmapGoal ? "whitespace-nowrap" : "min-w-0 truncate")}
+              >
+                {displayHash}
+              </span>
             </span>
           )}
           <button
-            ref={anchorRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               setOpen(!open);
             }}
-            className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 opacity-0 transition-[opacity,colors] group-hover/channel:opacity-100 hover:bg-zinc-800 hover:text-zinc-300"
+            className={pencilButtonClass}
             title="Change Slack channel"
             aria-expanded={open}
             aria-haspopup="listbox"
           >
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
           </button>
-        </>
+        </div>
       ) : (
-        <button
-          ref={anchorRef}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpen(!open);
-          }}
-          className={cn(
-            "group/slack flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-700/60 bg-transparent text-zinc-600 transition-colors hover:bg-zinc-900/80 hover:text-zinc-300",
-          )}
-          title="Click to set Slack channel"
-          aria-expanded={open}
-          aria-haspopup="listbox"
-        >
-          <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden>
-            <Hash className="h-3.5 w-3.5" />
-            <Plus className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5" />
-          </span>
-        </button>
+        <div ref={anchorRef} className="inline-flex shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(!open);
+            }}
+            className={cn(
+              "group/slack flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-700/60 bg-transparent text-zinc-600 transition-colors hover:bg-zinc-900/80 hover:text-zinc-300",
+            )}
+            title="Click to set Slack channel"
+            aria-expanded={open}
+            aria-haspopup="listbox"
+          >
+            <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden>
+              <Hash className="h-3.5 w-3.5" />
+              <Plus className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5" />
+            </span>
+          </button>
+        </div>
       )}
     </div>
   );
@@ -385,7 +434,10 @@ export function SlackChannelPicker({
     ) : null;
 
   return (
-    <div className="w-full min-w-0" onClick={(e) => e.stopPropagation()}>
+    <div
+      className={cn("min-w-0", isRoadmapGoal ? "w-max" : "w-full")}
+      onClick={(e) => e.stopPropagation()}
+    >
       {collapsed}
       {mounted && overlay ? createPortal(overlay, document.body) : null}
     </div>

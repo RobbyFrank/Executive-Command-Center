@@ -17,6 +17,7 @@ import {
   ExternalLink,
   MessageCircleQuestion,
   Reply,
+  X,
 } from "lucide-react";
 import {
   type SlackMemberRosterHint,
@@ -573,23 +574,35 @@ export function SlackThreadPopover({
         >
           {/* Header */}
           <div className="shrink-0 px-4 pt-3.5 pb-2.5">
-            <div className="flex items-center gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <SlackLogo className="h-3.5 w-3.5 opacity-95" />
-                <p className="text-[13px] font-semibold tracking-tight text-zinc-100">
-                  Slack thread
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <SlackLogo className="h-3.5 w-3.5 shrink-0 opacity-95" />
+                    <p className="text-[13px] font-semibold tracking-tight text-zinc-100">
+                      Slack thread
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  {milestoneName}
+                  {status ? (
+                    <>
+                      {" · "}
+                      {status.replyCount} msg{status.replyCount === 1 ? "" : "s"}
+                    </>
+                  ) : null}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="-mr-1 -mt-0.5 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
             </div>
-            <p className="mt-0.5 text-[11px] text-zinc-500">
-              {milestoneName}
-              {status ? (
-                <>
-                  {" · "}
-                  {status.replyCount} msg{status.replyCount === 1 ? "" : "s"}
-                </>
-              ) : null}
-            </p>
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col border-t border-zinc-800/90 lg:flex-row lg:items-stretch">

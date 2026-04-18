@@ -163,11 +163,10 @@ export function CompaniesManager({
     return (
       <RoadmapViewProvider>
         <RoadmapStickyToolbar>
-          <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-            <h1 className="text-xl font-bold text-zinc-100">Companies</h1>
-            <span className="text-sm font-normal text-zinc-500">
-              Directory · names, sites, logos, dates, and momentum.
-            </span>
+          <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+            <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
+              Companies
+            </h1>
           </div>
         </RoadmapStickyToolbar>
         <div className="min-w-0 max-w-full px-6 pb-6">
@@ -196,13 +195,10 @@ export function CompaniesManager({
   return (
     <RoadmapViewProvider>
       <RoadmapStickyToolbar>
-        <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h1 className="text-xl font-bold text-zinc-100">Companies</h1>
-          <span className="text-sm font-normal text-zinc-500">
-            Directory · names, sites, logos, dates, and momentum.
-          </span>
-        </div>
         <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+          <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
+            Companies
+          </h1>
           <div className="min-w-0">
             <label htmlFor="companies-view-mode" className="sr-only">
               Group companies by MRR tier or momentum

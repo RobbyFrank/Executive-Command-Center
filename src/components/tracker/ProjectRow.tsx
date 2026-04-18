@@ -88,7 +88,9 @@ import {
 } from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS_EDITABLE } from "@/lib/projectStatus";
 import { ProjectStatusPill } from "./ProjectStatusPill";
+import { ProjectStatusIconButton } from "./ProjectStatusIconButton";
 import {
+  TRACKER_ADD_ROW_ACTION_BUTTON_CLASS,
   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
   TRACKER_INLINE_TEXT_ACTION,
 } from "./tracker-text-actions";
@@ -109,12 +111,14 @@ import {
 import { isValidHttpUrl } from "@/lib/httpUrl";
 import {
   ROADMAP_DATA_COL_CLASS,
+  ROADMAP_DELAY_COMPLEXITY_COL_CLASS,
   ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
   ROADMAP_GRID_GAP_CLASS,
-  ROADMAP_MILESTONE_BAND_CLASS,
+  ROADMAP_MILESTONE_LIST_SHELF_CLASS,
   ROADMAP_MILESTONE_GRID_PADDING_CLASS,
   ROADMAP_NEXT_MILESTONE_COL_CLASS,
   ROADMAP_OWNER_COL_CLASS,
+  ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS,
   ROADMAP_PROJECT_GRID_PADDING_CLASS,
   ROADMAP_PROJECT_TITLE_COL_CLASS,
 } from "@/lib/tracker-roadmap-columns";
@@ -189,6 +193,7 @@ export function ProjectRow({
   const projectContext = useContextMenu();
   const nextMsSlackConnectMenu = useContextMenu();
   const projectActionsRef = useRef<HTMLButtonElement>(null);
+  const statusCellRef = useRef<HTMLDivElement>(null);
   const nextMilestoneSlackAnchorRef = useRef<HTMLButtonElement>(null);
   /** Slack thread spotlight: full project header row (not just the Slack strip). */
   const nextMilestoneSlackSpotlightRef = useRef<HTMLDivElement>(null);
@@ -426,6 +431,8 @@ export function ProjectRow({
   );
 
   const onAddMilestoneClick = useCallback(async () => {
+    // Reveal future milestones first so a new milestone appended to the list (4th+ pending, etc.) is visible.
+    setFutureMilestonesOpen(true);
     const ms = await createMilestone({
       projectId: project.id,
       name: "New milestone",
@@ -493,12 +500,14 @@ export function ProjectRow({
   });
 
   const milestonesVisible = expanded && showMilestones;
+  /** Popovers anchor to the inline control — only when the summary column is interactable. */
   const showNextMilestoneSlackInline =
     !milestonesVisible && nextMilestoneSlackFetchUrl != null;
-  const showNextMilestoneSlackConnect =
-    !milestonesVisible &&
-    nextPendingMilestone != null &&
-    nextMilestoneSlackFetchUrl == null;
+  /** Render targets stay mounted while fading; visibility is CSS-driven via `milestonesVisible`. */
+  const renderNextMilestoneSlackInline =
+    nextMilestoneSlackFetchUrl != null;
+  const renderNextMilestoneSlackConnect =
+    nextPendingMilestone != null && nextMilestoneSlackFetchUrl == null;
 
   const goalChannelIdTrimmed = goalSlackChannelId.trim();
   const canCreateSlackThread = Boolean(goalChannelIdTrimmed);
@@ -638,6 +647,7 @@ export function ProjectRow({
         label: "Add milestone",
         icon: Plus,
         onClick: async () => {
+          setFutureMilestonesOpen(true);
           const ms = await createMilestone({
             projectId: project.id,
             name: "New milestone",
@@ -784,12 +794,12 @@ export function ProjectRow({
   return (
     <div
       className={cn(
-        "max-w-full min-w-0",
         project.atRisk &&
-          "rounded-md border-l-2 border-amber-400 bg-amber-950/45",
+          "max-w-full min-w-0 overflow-hidden rounded-md transition-colors duration-150 motion-reduce:transition-none border border-amber-500/40 bg-amber-950/45 shadow-sm ring-1 ring-amber-950/35 border-l-[3px] border-l-amber-400 hover:bg-amber-950/55 hover:border-amber-500/50",
         !project.atRisk &&
           project.spotlight &&
-          "rounded-md border-l-2 border-emerald-400/85 bg-emerald-950/40"
+          "max-w-full min-w-0 overflow-hidden rounded-md transition-colors duration-150 motion-reduce:transition-none border border-emerald-500/35 bg-emerald-950/40 shadow-sm ring-1 ring-emerald-950/30 border-l-[3px] border-l-emerald-400/85 hover:bg-emerald-950/52 hover:border-emerald-500/45",
+        !project.atRisk && !project.spotlight && ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS
       )}
     >
       <div
@@ -809,7 +819,7 @@ export function ProjectRow({
           ROADMAP_PROJECT_GRID_PADDING_CLASS,
           !project.atRisk &&
             !project.spotlight &&
-            "hover:bg-zinc-900/60"
+            "bg-zinc-950/55"
         )}
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -826,13 +836,64 @@ export function ProjectRow({
         <div
           className={cn(
             ROADMAP_PROJECT_TITLE_COL_CLASS,
-            "flex items-center gap-1.5"
+            "flex items-center gap-2.5"
           )}
           onClick={(e) => {
             const t = e.target as HTMLElement;
             if (t.closest("[data-shared-badge-root]")) e.stopPropagation();
+            if (t.closest("[data-status-icon-button]")) e.stopPropagation();
           }}
         >
+          {project.isBlocked === true &&
+          project.blockedByProjectName !== undefined ? (
+            <BlockedByProjectHover
+              blockedByProjectName={project.blockedByProjectName}
+              className="shrink-0"
+            >
+              <span
+                className="relative -ml-2 block h-[21.6px] w-[21.6px] shrink-0 pr-1.5"
+                data-status-icon-button
+              >
+                <ProjectStatusIconButton
+                  status="Blocked"
+                  disabled
+                  titleSuffix={`blocked by ${project.blockedByProjectName}`}
+                />
+              </span>
+            </BlockedByProjectHover>
+          ) : (
+            <span
+              className="relative -ml-2 block h-[21.6px] w-[21.6px] shrink-0 pr-1.5"
+              data-status-icon-button
+            >
+              <div
+                ref={statusCellRef}
+                className={cn(
+                  "absolute inset-0 z-[15] min-w-0 overflow-hidden opacity-0",
+                  "[&>div>svg:last-child]:hidden",
+                  "[&_button]:!h-[21.6px] [&_button]:!min-h-[21.6px] [&_button]:!max-h-[21.6px] [&_button]:!justify-center [&_button]:!px-0 [&_button]:!pr-0"
+                )}
+              >
+                <InlineEditCell
+                  {...GRID_ALIGN}
+                  className="group/status !h-[21.6px] !min-h-0 !min-w-0 !w-[21.6px]"
+                  overlaySelectQuiet
+                  value={project.status}
+                  onSave={(status) =>
+                    updateProject(project.id, { status: status as ProjectStatus })
+                  }
+                  type="select"
+                  options={PROJECT_STATUS_SELECT_OPTIONS_EDITABLE}
+                  formatDisplay={(v) => (
+                    <ProjectStatusPill status={v} variant="inline" />
+                  )}
+                  selectPresentation="always"
+                  displayTitle={`Status — ${project.status}`}
+                />
+              </div>
+              <ProjectStatusIconButton status={project.status} />
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <InlineEditCell
               {...GRID_ALIGN}
@@ -908,9 +969,9 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Complexity — matches ProjectsColumnHeaders; before Confidence */}
+        {/* Complexity — before Confidence; grid matches goal column order */}
         <div
-          className={ROADMAP_DATA_COL_CLASS}
+          className={ROADMAP_DELAY_COMPLEXITY_COL_CLASS}
           onClick={(e) => e.stopPropagation()}
         >
           <InlineEditCell
@@ -941,40 +1002,6 @@ export function ProjectRow({
             score={projectConfidenceAuto}
             explanation={projectConfidenceExplain}
           />
-        </div>
-
-        {/* Status — dependency-blocked rows show a read-only Blocked pill */}
-        <div
-          className={ROADMAP_DATA_COL_CLASS}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {project.isBlocked === true &&
-          project.blockedByProjectName !== undefined ? (
-            <BlockedByProjectHover
-              blockedByProjectName={project.blockedByProjectName}
-              className="w-full"
-            >
-              <div className="group/status flex min-w-0">
-                <ProjectStatusPill status="Blocked" variant="inline" />
-              </div>
-            </BlockedByProjectHover>
-          ) : (
-            <InlineEditCell
-              {...GRID_ALIGN}
-              className="group/status"
-              overlaySelectQuiet
-              value={project.status}
-              onSave={(status) =>
-                updateProject(project.id, { status: status as ProjectStatus })
-              }
-              type="select"
-              options={PROJECT_STATUS_SELECT_OPTIONS_EDITABLE}
-              formatDisplay={(v) => (
-                <ProjectStatusPill status={v} variant="inline" />
-              )}
-              selectPresentation="always"
-            />
-          )}
         </div>
 
         {/* Due date — derived from last milestone with a target date (same relative label as milestone dates).
@@ -1030,118 +1057,145 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Next milestone — horizon + name; hidden when milestones are expanded inline */}
-        <div
-          className={cn(
-            ROADMAP_NEXT_MILESTONE_COL_CLASS,
-            "overflow-hidden",
-            milestonesVisible && "invisible"
-          )}
-        >
+        {/* Next milestone — horizon + name; fades when milestones are expanded inline */}
+        <div className={cn(ROADMAP_NEXT_MILESTONE_COL_CLASS, "overflow-hidden")}>
           {project.milestones.length === 0 ? (
-            <button
-              type="button"
-              title="Click to add a milestone"
-              className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
-              onClick={async (e) => {
-                e.stopPropagation();
-                const ms = await createMilestone({
-                  projectId: project.id,
-                  name: "New milestone",
-                  status: "Not Done",
-                  targetDate: "",
-                });
-                setNewMilestoneNameFocusId(ms.id);
-                setExpanded(true);
-                setShowMilestones(true);
-              }}
+            <div
+              className={cn(
+                "transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:duration-0",
+                milestonesVisible &&
+                  "pointer-events-none opacity-0 motion-reduce:opacity-0"
+              )}
+              inert={milestonesVisible ? true : undefined}
+              aria-hidden={milestonesVisible}
             >
-              <Plus
-                className="h-3 w-3 shrink-0 text-amber-300/90"
-                aria-hidden
-              />
-              <span className="min-w-0 truncate">Create milestone</span>
-            </button>
+              <button
+                type="button"
+                title="Click to add a milestone"
+                className="inline-flex w-full max-w-full items-center gap-0.5 truncate rounded border border-amber-500/45 bg-amber-950/40 px-1 py-0.5 text-left text-xs font-medium leading-tight text-amber-100 ring-1 ring-amber-500/25 cursor-pointer transition-colors hover:bg-amber-950/55 hover:border-amber-400/55"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const ms = await createMilestone({
+                    projectId: project.id,
+                    name: "New milestone",
+                    status: "Not Done",
+                    targetDate: "",
+                  });
+                  setNewMilestoneNameFocusId(ms.id);
+                  setExpanded(true);
+                  setShowMilestones(true);
+                }}
+              >
+                <Plus
+                  className="h-3 w-3 shrink-0 text-amber-300/90"
+                  aria-hidden
+                />
+                <span className="min-w-0 truncate">Create milestone</span>
+              </button>
+            </div>
           ) : nextPendingMilestone && nextMilestoneUi ? (
             <div
-              className="flex min-w-0 items-center gap-2 px-1.5 py-1"
+              className="flex min-w-0 items-center gap-6 px-1.5 py-1"
               title={nextMilestoneUi.title}
+              inert={milestonesVisible ? true : undefined}
+              aria-hidden={milestonesVisible}
             >
-              <span
+              <div
                 className={cn(
-                  "shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
-                  nextMilestoneUi.chipLabel === "—"
-                    ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
-                    : nextMilestoneUi.isOverdueHorizon
-                      ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
-                      : "text-violet-200/95 bg-violet-500/15"
+                  "flex min-w-0 flex-1 items-center gap-2 overflow-hidden transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:duration-0",
+                  milestonesVisible && "opacity-0 motion-reduce:opacity-0"
                 )}
               >
-                {nextMilestoneUi.chipLabel}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-6 overflow-hidden">
+                <span
+                  className={cn(
+                    "shrink-0 rounded px-1 py-px font-mono text-[10px] font-semibold tabular-nums ring-1 ring-violet-500/35",
+                    nextMilestoneUi.chipLabel === "—"
+                      ? "text-zinc-400 ring-zinc-600/40 bg-zinc-800/40"
+                      : nextMilestoneUi.isOverdueHorizon
+                        ? "text-rose-300/95 bg-rose-950/35 ring-rose-500/35"
+                        : "text-violet-200/95 bg-violet-500/15"
+                  )}
+                >
+                  {nextMilestoneUi.chipLabel}
+                </span>
                 <p className="min-w-0 flex-1 truncate text-left text-xs font-medium leading-snug text-zinc-100">
                   {nextPendingMilestone.name}
                 </p>
-                {showNextMilestoneSlackInline ? (
-                  <div
-                    className="min-w-0 max-w-[min(28rem,58%)] shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MilestoneSlackThreadInline
-                      ref={nextMilestoneSlackAnchorRef}
-                      compact
-                      status={nextMilestoneSlackThread.status}
-                      loading={nextMilestoneSlackThread.loading}
-                      error={nextMilestoneSlackThread.error}
-                      onOpen={() => setNextMsThreadPopoverOpen(true)}
-                      likelihood={
-                        nextMilestoneLikelihood.result &&
-                        nextPendingMilestone?.targetDate?.trim()
-                          ? {
-                              likelihood: nextMilestoneLikelihood.result.likelihood,
-                              progressEstimate:
-                                nextMilestoneLikelihood.result.progressEstimate,
-                              riskLevel: nextMilestoneLikelihood.result.riskLevel,
-                            }
-                          : null
-                      }
-                      likelihoodLoading={
-                        Boolean(nextPendingMilestone?.targetDate?.trim()) &&
-                        nextMilestoneLikelihood.loading
-                      }
-                    />
-                  </div>
-                ) : showNextMilestoneSlackConnect ? (
-                  <div
-                    className="w-fit shrink-0"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <StartSlackThreadChip
-                      menuOpen={nextMsSlackConnectMenu.open}
-                      onMenuTrigger={nextMsSlackConnectMenu.openFromTrigger}
-                      ariaLabel="Start Slack thread for next milestone"
-                    />
-                    <ContextMenu
-                      open={nextMsSlackConnectMenu.open}
-                      x={nextMsSlackConnectMenu.x}
-                      y={nextMsSlackConnectMenu.y}
-                      onClose={nextMsSlackConnectMenu.close}
-                      scope="milestone"
-                      ariaLabel="Slack thread for next milestone"
-                      entries={nextMilestoneSlackConnectMenuEntries}
-                    />
-                  </div>
-                ) : null}
               </div>
+              {renderNextMilestoneSlackInline ? (
+                <div
+                  className={cn(
+                    "min-w-0 max-w-[min(28rem,58%)] shrink-0 transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
+                    milestonesVisible && "opacity-0 motion-reduce:opacity-0"
+                  )}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MilestoneSlackThreadInline
+                    ref={nextMilestoneSlackAnchorRef}
+                    compact
+                    status={nextMilestoneSlackThread.status}
+                    loading={nextMilestoneSlackThread.loading}
+                    error={nextMilestoneSlackThread.error}
+                    onOpen={() => setNextMsThreadPopoverOpen(true)}
+                    likelihood={
+                      nextMilestoneLikelihood.result &&
+                      nextPendingMilestone?.targetDate?.trim()
+                        ? {
+                            likelihood: nextMilestoneLikelihood.result.likelihood,
+                            progressEstimate:
+                              nextMilestoneLikelihood.result.progressEstimate,
+                            riskLevel: nextMilestoneLikelihood.result.riskLevel,
+                          }
+                        : null
+                    }
+                    likelihoodLoading={
+                      Boolean(nextPendingMilestone?.targetDate?.trim()) &&
+                      nextMilestoneLikelihood.loading
+                    }
+                  />
+                </div>
+              ) : renderNextMilestoneSlackConnect ? (
+                <div
+                  className={cn(
+                    "w-fit shrink-0 transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
+                    milestonesVisible && "opacity-0 motion-reduce:opacity-0"
+                  )}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <StartSlackThreadChip
+                    menuOpen={nextMsSlackConnectMenu.open}
+                    onMenuTrigger={nextMsSlackConnectMenu.openFromTrigger}
+                    ariaLabel="Start Slack thread for next milestone"
+                  />
+                  <ContextMenu
+                    open={nextMsSlackConnectMenu.open}
+                    x={nextMsSlackConnectMenu.x}
+                    y={nextMsSlackConnectMenu.y}
+                    onClose={nextMsSlackConnectMenu.close}
+                    scope="milestone"
+                    ariaLabel="Slack thread for next milestone"
+                    entries={nextMilestoneSlackConnectMenuEntries}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : (
-            <p
-              className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
-              title="All milestones are done"
+            <div
+              className={cn(
+                "transition-opacity duration-200 ease-out motion-reduce:transition-none motion-reduce:duration-0",
+                milestonesVisible &&
+                  "pointer-events-none opacity-0 motion-reduce:opacity-0"
+              )}
+              inert={milestonesVisible ? true : undefined}
+              aria-hidden={milestonesVisible}
             >
-              All milestones done
-            </p>
+              <p
+                className="truncate text-left text-xs font-medium leading-tight text-zinc-400"
+                title="All milestones are done"
+              >
+                All milestones done
+              </p>
+            </div>
           )}
         </div>
 
@@ -1279,10 +1333,11 @@ export function ProjectRow({
         currentProjectId={project.id}
       />
 
-      {/* Milestones — group/milestones so “Add milestone” row shows only when hovering this list */}
+      {/* Milestones — footer row matches whether future milestones exist (no hover-only row; avoids layout shift). */}
       <CollapsePanel open={expanded && showMilestones}>
-        <div className="group/milestones border-t border-zinc-800/50">
-          <div className={ROADMAP_MILESTONE_BAND_CLASS}>
+        <div
+          className={cn("group/milestones", ROADMAP_MILESTONE_LIST_SHELF_CLASS)}
+        >
           {lowAutonomyOwnerHint ? (
             <div
               className={cn(
@@ -1356,81 +1411,61 @@ export function ProjectRow({
               )}
 
               {milestoneRunway.futureMilestones.length > 0 ? (
-                <>
-                  <CollapsePanel
-                    open={futureMilestonesOpen}
-                    fadeContent
-                    transitionClassName="duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none"
-                  >
-                    {milestoneRunway.futureMilestones.map((ms) =>
-                      renderMilestoneRow(ms)
-                    )}
-                  </CollapsePanel>
-                  <div
-                    className={cn(
-                      "flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800/60 py-1.5",
-                      ROADMAP_MILESTONE_GRID_PADDING_CLASS
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setFutureMilestonesOpen((open) => !open)}
-                      className="inline-flex w-fit max-w-full shrink-0 items-center gap-2 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300 rounded-sm py-0.5 -my-0.5 pl-0 pr-2"
-                      aria-expanded={futureMilestonesOpen}
-                    >
-                      {futureMilestonesOpen ? (
-                        <ChevronDown
-                          className="h-3.5 w-3.5 shrink-0"
-                          aria-hidden
-                        />
-                      ) : (
-                        <ChevronRight
-                          className="h-3.5 w-3.5 shrink-0"
-                          aria-hidden
-                        />
-                      )}
-                      <span className="min-w-0">
-                        {futureMilestonesOpen ? "Hide" : "Show"}{" "}
-                        {milestoneRunway.futureMilestones.length === 1
-                          ? "1 future milestone"
-                          : `${milestoneRunway.futureMilestones.length} future milestones`}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onAddMilestoneClick}
-                      title="Add a new milestone to this project"
-                      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Add milestone
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div
-                  className={cn(
-                    "overflow-hidden",
-                    ROADMAP_MILESTONE_GRID_PADDING_CLASS,
-                    "max-h-0 py-0 opacity-0 pointer-events-none",
-                    "transition-[max-height,padding,opacity] duration-150 ease-out",
-                    "group-hover/milestones:max-h-14 group-hover/milestones:py-1.5 group-hover/milestones:opacity-100 group-hover/milestones:pointer-events-auto",
-                    "focus-within:max-h-14 focus-within:py-1.5 focus-within:opacity-100 focus-within:pointer-events-auto"
-                  )}
+                <CollapsePanel
+                  open={futureMilestonesOpen}
+                  fadeContent
+                  transitionClassName="duration-[280ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:duration-150 motion-reduce:transition-none"
                 >
+                  {milestoneRunway.futureMilestones.map((ms) =>
+                    renderMilestoneRow(ms)
+                  )}
+                </CollapsePanel>
+              ) : null}
+
+              <div
+                className={cn(
+                  "flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-900/70 py-1.5",
+                  ROADMAP_MILESTONE_GRID_PADDING_CLASS
+                )}
+              >
+                {milestoneRunway.futureMilestones.length > 0 ? (
                   <button
                     type="button"
-                    onClick={onAddMilestoneClick}
-                    className="inline-flex w-fit cursor-pointer items-center gap-2 rounded text-xs text-zinc-600 transition-colors hover:text-zinc-400 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
+                    onClick={() => setFutureMilestonesOpen((open) => !open)}
+                    className="inline-flex w-fit max-w-full shrink-0 items-center gap-2 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800/40 hover:text-zinc-300 rounded-sm py-0.5 -my-0.5 pl-0 pr-2"
+                    aria-expanded={futureMilestonesOpen}
                   >
-                    <Plus className="h-3 w-3" />
-                    Add milestone
+                    {futureMilestonesOpen ? (
+                      <ChevronDown
+                        className="h-3.5 w-3.5 shrink-0"
+                        aria-hidden
+                      />
+                    ) : (
+                      <ChevronRight
+                        className="h-3.5 w-3.5 shrink-0"
+                        aria-hidden
+                      />
+                    )}
+                    <span className="min-w-0">
+                      {futureMilestonesOpen ? "Hide" : "Show"}{" "}
+                      {milestoneRunway.futureMilestones.length === 1
+                        ? "1 future milestone"
+                        : `${milestoneRunway.futureMilestones.length} future milestones`}
+                    </span>
                   </button>
-                </div>
-              )}
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onAddMilestoneClick}
+                  title="Add a new milestone to this project"
+                  className={TRACKER_ADD_ROW_ACTION_BUTTON_CLASS}
+                >
+                  <Plus className="h-3 w-3 shrink-0" aria-hidden />
+                  Add milestone
+                </button>
+              </div>
             </>
           )}
-          </div>
         </div>
       </CollapsePanel>
 

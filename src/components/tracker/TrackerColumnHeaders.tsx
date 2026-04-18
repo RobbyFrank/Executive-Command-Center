@@ -1,6 +1,6 @@
 "use client";
 
-/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow. Goal title uses ROADMAP_GOAL_TITLE_COL_CLASS; project uses ROADMAP_PROJECT_TITLE_COL_CLASS. Owner uses ROADMAP_OWNER_COL_CLASS; other data columns use ROADMAP_DATA_COL_CLASS + ROADMAP_GRID_GAP_CLASS. */
+/** Column label rows for Roadmap — widths must match GoalSection / ProjectRow. Goal title uses ROADMAP_GOAL_TITLE_COL_CLASS; project uses ROADMAP_PROJECT_TITLE_COL_CLASS. Owner uses ROADMAP_OWNER_COL_CLASS; most data columns use ROADMAP_DATA_COL_CLASS. Goal Slack uses ROADMAP_GOAL_SLACK_COL_CLASS (content-sized). Delay cost / Complexity use ROADMAP_DELAY_COMPLEXITY_COL_CLASS. */
 
 import { SlackLogo } from "./SlackLogo";
 import { RoadmapColumnHeader } from "./RoadmapColumnHeader";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { ROADMAP_TOOLBAR_STICKY_FALLBACK_PX } from "@/lib/tracker-sticky-layout";
 import {
   ROADMAP_DATA_COL_CLASS,
+  ROADMAP_DELAY_COMPLEXITY_COL_CLASS,
   ROADMAP_GOAL_GRID_PADDING_CLASS,
   ROADMAP_GOAL_TITLE_COL_CLASS,
   ROADMAP_GRID_GAP_CLASS,
@@ -16,6 +17,7 @@ import {
   ROADMAP_OWNER_COL_CLASS,
   ROADMAP_PROJECT_GRID_PADDING_CLASS,
   ROADMAP_PROJECT_TITLE_COL_CLASS,
+  ROADMAP_GOAL_SLACK_COL_CLASS,
 } from "@/lib/tracker-roadmap-columns";
 
 /** Used until the toolbar height is measured (avoids a flash of wrong offset). */
@@ -43,7 +45,7 @@ export function GoalsColumnHeaders({
   return (
     <div
       className={cn(
-        "sticky max-w-full min-w-0 border-b border-zinc-800/90",
+        "sticky max-w-full min-w-0 border-0 border-b border-zinc-800/90",
         stickyZClass ?? "z-20",
         "bg-zinc-950/95 backdrop-blur-sm"
       )}
@@ -82,7 +84,7 @@ export function GoalsColumnHeaders({
           Priority
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className={cn(ROADMAP_DATA_COL_CLASS)}
+          className={cn(ROADMAP_DELAY_COMPLEXITY_COL_CLASS)}
           tooltip="Delay cost — how costly it is to wait; higher means more urgency. Aligns above project Complexity."
         >
           Delay cost
@@ -92,12 +94,6 @@ export function GoalsColumnHeaders({
           tooltip="Confidence (0–100%). Hover or focus a cell: project autonomy vs complexity, then goal cost of delay weights higher-autonomy project owners when delay is costly."
         >
           Confidence
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className={cn(ROADMAP_DATA_COL_CLASS, "flex items-center")}
-          tooltip="Slack channel for this goal (name or link)."
-        >
-          <SlackLogo className="h-3.5 w-3.5 opacity-80" />
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className={cn(ROADMAP_DATA_COL_CLASS)}
@@ -111,6 +107,15 @@ export function GoalsColumnHeaders({
         >
           Progress
         </RoadmapColumnHeader>
+        <RoadmapColumnHeader
+          className={cn(
+            ROADMAP_GOAL_SLACK_COL_CLASS,
+            "flex items-center",
+          )}
+          tooltip="Slack channel for this goal (name or link)."
+        >
+          <SlackLogo className="h-3.5 w-3.5 opacity-80" />
+        </RoadmapColumnHeader>
         <div className={ROADMAP_NEXT_MILESTONE_COL_CLASS} aria-hidden />
         <div className="min-w-2 flex-1 shrink" aria-hidden />
       </div>
@@ -118,6 +123,10 @@ export function GoalsColumnHeaders({
   );
 }
 
+/**
+ * Sticky project column labels (matches {@link ROADMAP_PROJECT_GRID_PADDING_CLASS} / {@link ProjectRow}).
+ * Not currently rendered on Roadmap — kept here as layout reference if we restore the row.
+ */
 export function ProjectsColumnHeaders({
   stackTopPx: stackTopPxProp,
   stickyZClass,
@@ -153,18 +162,12 @@ export function ProjectsColumnHeaders({
         <div className={ROADMAP_OWNER_COL_CLASS} aria-hidden />
         <div className={ROADMAP_DATA_COL_CLASS} aria-hidden />
         <RoadmapColumnHeader
-          className={cn(ROADMAP_DATA_COL_CLASS)}
+          className={cn(ROADMAP_DELAY_COMPLEXITY_COL_CLASS)}
           tooltip="Complexity — scope and difficulty of the work (Very high → Minimal)."
         >
           Complexity
         </RoadmapColumnHeader>
         <div className={ROADMAP_DATA_COL_CLASS} aria-hidden />
-        <RoadmapColumnHeader
-          className={cn(ROADMAP_DATA_COL_CLASS)}
-          tooltip="Project workflow: Idea → Pending → In Progress → Stuck → For Review → Done."
-        >
-          Status
-        </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className={cn(ROADMAP_DATA_COL_CLASS)}
           tooltip="Due date — same date as the last milestone with a target date; shown as a relative label (e.g. in 2 months) like milestone dates. Hover for the full date."

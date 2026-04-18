@@ -405,6 +405,46 @@ export function filterTrackerHierarchyByStatusTags(
     .filter((c): c is CompanyWithGoals => c !== null);
 }
 
+/**
+ * Projects that would remain if only `tagId` were selected (same OR semantics as
+ * {@link filterTrackerHierarchyByStatusTags}). Use with a hierarchy that already has
+ * other tracker filters applied but **not** the status-tag filter (faceted counts).
+ */
+function countProjectsMatchingSingleStatusTag(
+  hierarchy: CompanyWithGoals[],
+  tagId: TrackerStatusTagId
+): number {
+  const tags = new Set<TrackerStatusTagId>([tagId]);
+  let n = 0;
+  for (const c of hierarchy) {
+    for (const g of c.goals) {
+      const goalMatches = goalMatchesStatusTags(g, tags);
+      for (const p of g.projects) {
+        if (goalMatches || projectMatchesStatusTags(p, tags)) {
+          n++;
+        }
+      }
+    }
+  }
+  return n;
+}
+
+/**
+ * Per-option project counts for the Signals filter (same shape as
+ * {@link countProjectsByDueDateBucket}).
+ */
+export function countProjectsByStatusTagBucket(
+  hierarchy: CompanyWithGoals[]
+): Record<TrackerStatusTagId, number> {
+  return {
+    at_risk: countProjectsMatchingSingleStatusTag(hierarchy, "at_risk"),
+    spotlight: countProjectsMatchingSingleStatusTag(hierarchy, "spotlight"),
+    unassigned: countProjectsMatchingSingleStatusTag(hierarchy, "unassigned"),
+    zombie: countProjectsMatchingSingleStatusTag(hierarchy, "zombie"),
+    stalled: countProjectsMatchingSingleStatusTag(hierarchy, "stalled"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Due-date proximity filter
 // ---------------------------------------------------------------------------

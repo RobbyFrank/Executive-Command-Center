@@ -146,11 +146,11 @@ interface TeamRosterManagerProps {
   canManageLoginPasswords: boolean;
 }
 
-/** Same shell as Roadmap’s sticky toolbar (border, blur, shadow, padding). */
+/** Same shell as {@link RoadmapStickyToolbar} (border, blur, shadow, padding). */
 const TEAM_PAGE_STICKY_TOOLBAR_CLASS =
   "sticky top-0 z-30 min-w-0 max-w-full border-b border-zinc-800/70 " +
-  "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-6 " +
-  "shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)]";
+  "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-3 " +
+  "shadow-[0_10px_28px_-10px_rgba(0,0,0,0.5)] motion-reduce:shadow-none";
 
 /** Shared chrome for **Import from Slack** and **Refresh all from Slack** (toolbar). */
 const TEAM_SLACK_ACTION_BUTTON_CLASS =
@@ -496,11 +496,10 @@ export function TeamRosterManager({
           existingSlackIds={existingSlackIds}
         />
         <div className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
-          <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-            <h1 className="text-xl font-bold text-zinc-100">Team</h1>
-            <span className="text-sm font-normal text-zinc-500">
-              Roster, roles, workloads, and Slack IDs.
-            </span>
+          <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+            <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
+              Team
+            </h1>
           </div>
         </div>
         <div className="min-w-0 max-w-full px-6 pb-6">
@@ -570,13 +569,10 @@ export function TeamRosterManager({
       ) : null}
       <div className="min-w-0 min-h-0 max-w-full">
       <div ref={teamStickyToolbarRef} className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
-        <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <h1 className="text-xl font-bold text-zinc-100">Team</h1>
-          <span className="text-sm font-normal text-zinc-500">
-            Roster, roles, workloads, and Slack IDs.
-          </span>
-        </div>
       <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
+        <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
+          Team
+        </h1>
         <div
           className={cn(
             "relative flex-1 min-w-0 transition-[max-width] duration-200 ease-out",

@@ -21,5 +21,6 @@ export const TRACKER_GOAL_HEADER_ROW_FALLBACK_PX = 38;
 /**
  * Subtracted from the computed sticky `top` for goal rows so they tuck under the
  * goals column label row (constant header height can sit a few px low vs paint).
+ * Increase if a hairline gap appears between the sticky labels and the goal row.
  */
-export const ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX = 8;
+export const ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX = 11;
