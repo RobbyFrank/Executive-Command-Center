@@ -8,7 +8,11 @@ import {
   ChevronDown,
   ChevronRight,
   Circle,
+  Folder,
   Loader2,
+  Quote,
+  Sparkles,
+  Target,
   X,
   XCircle,
 } from "lucide-react";
@@ -34,6 +38,27 @@ import type {
 } from "@/lib/slack-scrape-stream-types";
 import { SlackLogo } from "./SlackLogo";
 import { cn } from "@/lib/utils";
+
+function PriorityPill({ priority }: { priority: string }) {
+  const color =
+    priority === "P0"
+      ? "border-red-900/60 bg-red-950/50 text-red-200"
+      : priority === "P1"
+        ? "border-amber-900/60 bg-amber-950/40 text-amber-200"
+        : priority === "P2"
+          ? "border-sky-900/60 bg-sky-950/40 text-sky-200"
+          : "border-zinc-700 bg-zinc-900 text-zinc-300";
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold tracking-wide",
+        color
+      )}
+    >
+      {priority}
+    </span>
+  );
+}
 
 function ScanEntryStatusIcon({ status }: { status: SlackChannelHistoryEntryStatus }) {
   switch (status) {
@@ -97,7 +122,9 @@ export function CompanyScrapeDialog({
   >([]);
   const [scanPhaseMessage, setScanPhaseMessage] = useState("");
   const [scanBarFraction, setScanBarFraction] = useState(0);
+  const [scanModelText, setScanModelText] = useState("");
   const scanAbortRef = useRef<AbortController | null>(null);
+  const modelStreamRef = useRef<HTMLDivElement | null>(null);
   const [suggestions, setSuggestions] = useState<SlackScrapeSuggestion[]>([]);
   const [rejectedCount, setRejectedCount] = useState(0);
 
@@ -138,6 +165,12 @@ export function CompanyScrapeDialog({
   }, []);
 
   useEffect(() => {
+    const el = modelStreamRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [scanModelText]);
+
+  useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
@@ -164,6 +197,7 @@ export function CompanyScrapeDialog({
     setScanProgressEntries([]);
     setScanPhaseMessage("");
     setScanBarFraction(0);
+    setScanModelText("");
     scanAbortRef.current = null;
     setSuggestions([]);
     setRejectedCount(0);
@@ -249,6 +283,7 @@ export function CompanyScrapeDialog({
     setScanProgressEntries([]);
     setScanPhaseMessage("Starting…");
     setScanBarFraction(0.02);
+    setScanModelText("");
 
     try {
       const r = await fetch("/api/companies/scrape-slack/run", {
@@ -294,8 +329,13 @@ export function CompanyScrapeDialog({
                 : "Finishing…"
             );
           } else if (p.type === "progress" && p.phase === "model") {
-            setScanBarFraction(0.92);
-            setScanPhaseMessage(p.message);
+            if ("chunk" in p) {
+              setScanBarFraction((prev) => Math.min(0.98, Math.max(prev, 0.94)));
+              setScanModelText((prev) => prev + p.chunk);
+            } else {
+              setScanBarFraction(0.92);
+              setScanPhaseMessage(p.message);
+            }
           } else if (p.type === "done") {
             terminal = true;
             const sug = p.suggestions ?? [];
@@ -355,6 +395,7 @@ export function CompanyScrapeDialog({
       setScanPhaseMessage("");
       setScanBarFraction(0);
       setScanProgressEntries([]);
+      setScanModelText("");
     }
   }, [company.id, days, selectedChannelIds]);
 
@@ -527,158 +568,241 @@ export function CompanyScrapeDialog({
 
         {stage === "config" ? (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-6 py-5">
-              <div className="flex flex-wrap items-center gap-4">
-                <label className="flex items-center gap-2 text-sm text-zinc-300">
-                  <span className="text-zinc-500">Days of history</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={90}
-                    value={days}
-                    onChange={(e) =>
-                      setDays(
-                        Math.min(
-                          90,
-                          Math.max(1, Number(e.target.value) || 14)
-                        )
-                      )
-                    }
-                    className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={selectAllChannels}
-                  className="text-sm text-blue-400 hover:underline"
-                >
-                  Select all channels
-                </button>
-                <button
-                  type="button"
-                  onClick={clearChannels}
-                  className="text-sm text-zinc-500 hover:underline"
-                >
-                  Clear
-                </button>
-              </div>
-              {channelsNotice ? (
-                <p className="text-xs text-amber-200/90">{channelsNotice}</p>
-              ) : null}
-              {channelsLoading ? (
-                <div className="flex items-center gap-2 text-zinc-400">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  Loading channels…
-                </div>
-              ) : channelsError ? (
-                <p className="text-sm text-red-400">{channelsError}</p>
-              ) : channelRows.length === 0 ? (
-                <p className="text-sm text-zinc-500">
-                  No channels matched this company (name/shortName) and no goals
-                  link a Slack channel. Add a Slack channel on a goal or widen
-                  naming.
-                </p>
-              ) : (
-                <ul className="space-y-2 pr-1">
-                  {channelRows.map((ch) => (
-                    <li key={ch.id}>
-                      <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm hover:bg-zinc-900/80">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600"
-                          checked={selectedChannelIds.has(ch.id)}
-                          onChange={() => toggleChannel(ch.id)}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="font-medium text-zinc-200">
-                            #{ch.name}
-                          </span>
-                          <span className="ml-2 text-xs text-zinc-500">
-                            {ch.matchedByName ? "Name match" : ""}
-                            {ch.linkedToGoalIds.length > 0 ? (
-                              <>
-                                {ch.matchedByName ? " · " : ""}
-                                Linked to {ch.linkedToGoalIds.length} goal
-                                {ch.linkedToGoalIds.length !== 1 ? "s" : ""}
-                              </>
-                            ) : null}
-                          </span>
-                        </span>
-                        <a
-                          href={slackChannelUrl(ch.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="shrink-0 text-xs text-blue-400 hover:underline"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Open
-                        </a>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
+            <div
+              className={cn(
+                "min-h-0 flex-1 px-6 py-5",
+                scanLoading
+                  ? "flex min-h-0 flex-col overflow-hidden"
+                  : "space-y-4 overflow-y-auto overscroll-contain"
               )}
-              {scanLoading && scanProgressEntries.length > 0 ? (
-                <div className="flex min-h-0 flex-col gap-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
-                  <div className="h-2 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out motion-reduce:transition-none"
-                      style={{
-                        width: `${Math.round(scanBarFraction * 100)}%`,
-                      }}
-                    />
+            >
+              {!scanLoading ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm text-zinc-300">
+                      <span className="text-zinc-500">Days of history</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={days}
+                        onChange={(e) =>
+                          setDays(
+                            Math.min(
+                              90,
+                              Math.max(1, Number(e.target.value) || 14)
+                            )
+                          )
+                        }
+                        className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={selectAllChannels}
+                      className="text-sm text-blue-400 hover:underline"
+                    >
+                      Select all channels
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearChannels}
+                      className="text-sm text-zinc-500 hover:underline"
+                    >
+                      Clear
+                    </button>
                   </div>
-                  {scanPhaseMessage ? (
-                    <p className="text-xs text-zinc-400">{scanPhaseMessage}</p>
+                  {channelsNotice ? (
+                    <p className="text-xs text-amber-200/90">
+                      {channelsNotice}
+                    </p>
                   ) : null}
-                  <ul
-                    className="max-h-48 min-h-0 overflow-y-auto rounded-md border border-zinc-800/60 bg-zinc-950/50 py-1 text-xs"
-                    aria-live="polite"
-                  >
-                    {scanProgressEntries.map((e) => (
-                      <li
-                        key={e.id}
-                        className="flex items-start gap-2 px-2 py-1.5 text-zinc-300"
-                      >
-                        <span className="mt-0.5">
-                          <ScanEntryStatusIcon status={e.status} />
-                        </span>
-                        <span className="min-w-0 flex-1 leading-snug">
-                          <span className="font-medium text-zinc-200">
-                            #{e.name}
-                          </span>
-                          {e.status === "done" &&
-                          typeof e.messageCount === "number" ? (
-                            <span className="ml-2 text-zinc-500">
-                              {e.messageCount} msg
-                              {e.messageCount !== 1 ? "s" : ""}
+                  {channelsLoading ? (
+                    <div className="space-y-2 pr-1">
+                      <div className="flex items-center gap-2 text-xs text-zinc-500">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading channels…
+                      </div>
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2.5"
+                        >
+                          <div className="h-4 w-4 shrink-0 rounded border border-zinc-700 bg-zinc-900" />
+                          <div
+                            className="h-3 animate-pulse rounded bg-zinc-800"
+                            style={{ width: `${30 + ((i * 13) % 45)}%` }}
+                          />
+                          <div className="ml-auto h-3 w-10 animate-pulse rounded bg-zinc-900" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : channelsError ? (
+                    <p className="text-sm text-red-400">{channelsError}</p>
+                  ) : channelRows.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                      No channels matched this company (name/shortName) and no
+                      goals link a Slack channel. Add a Slack channel on a goal
+                      or widen naming.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2 pr-1">
+                      {channelRows.map((ch) => (
+                        <li key={ch.id}>
+                          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm hover:bg-zinc-900/80">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600"
+                              checked={selectedChannelIds.has(ch.id)}
+                              onChange={() => toggleChannel(ch.id)}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="font-medium text-zinc-200">
+                                #{ch.name}
+                              </span>
+                              <span className="ml-2 text-xs text-zinc-500">
+                                {ch.matchedByName ? "Name match" : ""}
+                                {ch.linkedToGoalIds.length > 0 ? (
+                                  <>
+                                    {ch.matchedByName ? " · " : ""}
+                                    Linked to {ch.linkedToGoalIds.length} goal
+                                    {ch.linkedToGoalIds.length !== 1
+                                      ? "s"
+                                      : ""}
+                                  </>
+                                ) : null}
+                              </span>
                             </span>
-                          ) : null}
-                          {e.status === "failed" && e.detail ? (
-                            <span className="mt-0.5 block text-amber-200/90">
-                              {e.detail}
-                            </span>
-                          ) : null}
+                            <a
+                              href={slackChannelUrl(ch.id)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="shrink-0 text-xs text-blue-400 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Open
+                            </a>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : null}
+              {scanLoading ? (
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                  <div className="shrink-0 space-y-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2 text-sm text-zinc-200">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-sky-400" />
+                        <span className="truncate">
+                          {scanPhaseMessage || "Working…"}
                         </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : scanLoading ? (
-                <div className="space-y-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-                    <div
-                      className="h-full rounded-full bg-blue-600 transition-[width] duration-200"
-                      style={{
-                        width: `${Math.round(scanBarFraction * 100)}%`,
-                      }}
-                    />
+                      </div>
+                      <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+                        {Math.round(scanBarFraction * 100)}%
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                        style={{
+                          width: `${Math.max(2, Math.round(scanBarFraction * 100))}%`,
+                        }}
+                      />
+                    </div>
                   </div>
-                  <p className="text-xs text-zinc-400">{scanPhaseMessage}</p>
+
+                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-5">
+                    {scanProgressEntries.length > 0 ? (
+                      <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/40 md:col-span-2">
+                        <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                          <span>Channels</span>
+                          <span className="text-zinc-600">
+                            {
+                              scanProgressEntries.filter(
+                                (e) => e.status === "done"
+                              ).length
+                            }
+                            /{scanProgressEntries.length}
+                          </span>
+                        </div>
+                        <ul
+                          className="min-h-0 flex-1 overflow-y-auto py-1 text-xs"
+                          aria-live="polite"
+                        >
+                          {scanProgressEntries.map((e) => (
+                            <li
+                              key={e.id}
+                              className="flex items-start gap-2 px-3 py-1.5 text-zinc-300"
+                            >
+                              <span className="mt-0.5">
+                                <ScanEntryStatusIcon status={e.status} />
+                              </span>
+                              <span className="min-w-0 flex-1 leading-snug">
+                                <span className="font-medium text-zinc-200">
+                                  #{e.name}
+                                </span>
+                                {e.status === "done" &&
+                                typeof e.messageCount === "number" ? (
+                                  <span className="ml-2 text-zinc-500">
+                                    {e.messageCount} msg
+                                    {e.messageCount !== 1 ? "s" : ""}
+                                  </span>
+                                ) : null}
+                                {e.status === "failed" && e.detail ? (
+                                  <span className="mt-0.5 block text-amber-200/90">
+                                    {e.detail}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    <div
+                      className={cn(
+                        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/40",
+                        scanProgressEntries.length > 0
+                          ? "md:col-span-3"
+                          : "md:col-span-5"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 border-b border-zinc-800/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                        <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" />
+                        <span>Analyzing</span>
+                      </div>
+                      <div
+                        ref={modelStreamRef}
+                        className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400"
+                      >
+                        {scanModelText ? (
+                          <>
+                            <span className="whitespace-pre-wrap break-words">
+                              {scanModelText}
+                            </span>
+                            <span
+                              className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-sky-400 align-[-1px]"
+                              aria-hidden
+                            />
+                          </>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <div className="h-2 w-5/6 animate-pulse rounded bg-zinc-800" />
+                            <div className="h-2 w-2/3 animate-pulse rounded bg-zinc-800" />
+                            <div className="h-2 w-4/5 animate-pulse rounded bg-zinc-800" />
+                            <div className="h-2 w-1/2 animate-pulse rounded bg-zinc-800" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : null}
               {scanError ? (
-                <p className="text-sm text-red-400">{scanError}</p>
+                <p className="shrink-0 text-sm text-red-400">{scanError}</p>
               ) : null}
             </div>
             <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
@@ -725,103 +849,177 @@ export function CompanyScrapeDialog({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-6 py-5">
-              {rejectedCount > 0 ? (
-                <p className="text-xs text-zinc-500">
-                  {rejectedCount} suggestion(s) did not pass validation and were
-                  skipped.
-                </p>
-              ) : null}
               {newGoalSuggestions.length === 0 &&
               existingProjectSuggestions.length === 0 ? (
-                <p className="text-sm text-zinc-500">
-                  No new goals or projects suggested. Try more channels or a
-                  longer time window.
-                </p>
-              ) : null}
+                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 px-6 py-10 text-center">
+                  <Sparkles className="h-6 w-6 text-zinc-600" />
+                  <p className="text-sm font-medium text-zinc-300">
+                    Nothing new to add
+                  </p>
+                  <p className="max-w-sm text-xs text-zinc-500">
+                    The scan didn&apos;t find goals or projects that
+                    aren&apos;t already on the roadmap. Try more channels or a
+                    longer time window.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
+                  <Sparkles className="h-4 w-4 text-sky-400" />
+                  <p className="text-sm text-zinc-300">
+                    <span className="font-semibold text-zinc-100">
+                      {newGoalSuggestions.length}
+                    </span>{" "}
+                    new goal{newGoalSuggestions.length === 1 ? "" : "s"}
+                    {" · "}
+                    <span className="font-semibold text-zinc-100">
+                      {existingProjectSuggestions.length}
+                    </span>{" "}
+                    project
+                    {existingProjectSuggestions.length === 1 ? "" : "s"} on
+                    existing goals
+                  </p>
+                  {rejectedCount > 0 ? (
+                    <span className="ml-auto text-xs text-zinc-500">
+                      {rejectedCount} skipped (invalid)
+                    </span>
+                  ) : null}
+                </div>
+              )}
 
               {newGoalSuggestions.length > 0 ? (
                 <section>
-                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                  <h3 className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <Target className="h-3.5 w-3.5" />
                     New goals
                   </h3>
-                  <ul className="space-y-2">
-                    {newGoalSuggestions.map((s, i) => (
-                      <li
-                        key={`ng-${i}`}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950/40"
-                      >
-                        <div className="flex items-start gap-3 p-3">
-                          <input
-                            type="checkbox"
-                            className="mt-1 h-4 w-4 shrink-0 rounded border-zinc-600"
-                            checked={goalChecked[i] ?? false}
-                            onChange={(e) =>
-                              setGoalCheckAt(i, e.target.checked)
-                            }
-                          />
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleGoalExpand(i)}
-                                className="flex items-center gap-1 text-left text-sm font-medium text-zinc-100 hover:underline"
-                              >
-                                {expandedGoalIdx.has(i) ? (
-                                  <ChevronDown className="h-4 w-4 shrink-0" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4 shrink-0" />
-                                )}
-                                {s.goal.description}
-                              </button>
+                  <ul className="space-y-3">
+                    {newGoalSuggestions.map((s, i) => {
+                      const isSelected = goalChecked[i] ?? false;
+                      const projectRow = projectChecked[i] ?? [];
+                      const projectsPicked = projectRow.filter(Boolean).length;
+                      const isExpanded = expandedGoalIdx.has(i);
+                      return (
+                        <li
+                          key={`ng-${i}`}
+                          className={cn(
+                            "overflow-hidden rounded-xl border transition-colors",
+                            isSelected
+                              ? "border-sky-900/60 bg-sky-950/10"
+                              : "border-zinc-800 bg-zinc-950/40"
+                          )}
+                        >
+                          <div className="flex items-start gap-3 p-4">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 shrink-0 rounded border-zinc-600"
+                              checked={isSelected}
+                              onChange={(e) =>
+                                setGoalCheckAt(i, e.target.checked)
+                              }
+                            />
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-start gap-2">
+                                <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-zinc-100">
+                                  {s.goal.description}
+                                </p>
+                                <PriorityPill priority={s.goal.priority} />
+                              </div>
+                              {s.goal.measurableTarget ? (
+                                <p className="text-xs text-zinc-400">
+                                  <span className="text-zinc-500">
+                                    Target:{" "}
+                                  </span>
+                                  {s.goal.measurableTarget}
+                                </p>
+                              ) : null}
+                              {s.goal.whyItMatters ? (
+                                <p className="text-xs text-zinc-500">
+                                  {s.goal.whyItMatters}
+                                </p>
+                              ) : null}
+                              {s.evidence[0] ? (
+                                <div className="flex items-start gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/40 px-3 py-2">
+                                  <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs italic leading-snug text-zinc-300">
+                                      “{s.evidence[0].quote.slice(0, 180)}
+                                      {s.evidence[0].quote.length > 180
+                                        ? "…"
+                                        : ""}
+                                      ”
+                                    </p>
+                                    <p className="mt-1 text-[11px] text-zinc-500">
+                                      #{s.evidence[0].channel}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : null}
+                              {s.projects.length > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleGoalExpand(i)}
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5" />
+                                  )}
+                                  {projectsPicked} of {s.projects.length}{" "}
+                                  project
+                                  {s.projects.length === 1 ? "" : "s"} selected
+                                </button>
+                              ) : null}
                             </div>
-                            <p className="text-xs text-zinc-500">
-                              {s.goal.measurableTarget ||
-                                s.goal.whyItMatters ||
-                                "—"}
-                            </p>
-                            {s.evidence[0] ? (
-                              <p className="text-xs text-zinc-600">
-                                Evidence: #{s.evidence[0].channel}{" "}
-                                <span className="tabular-nums">
-                                  {s.evidence[0].ts}
-                                </span>{" "}
-                                — “{s.evidence[0].quote.slice(0, 120)}
-                                {s.evidence[0].quote.length > 120 ? "…" : ""}”
-                              </p>
-                            ) : null}
                           </div>
-                        </div>
-                        {expandedGoalIdx.has(i) && s.projects.length > 0 ? (
-                          <ul className="border-t border-zinc-800/80 px-3 pb-3 pl-10">
-                            {s.projects.map((p, j) => (
-                              <li
-                                key={`${i}-p-${j}`}
-                                className="flex items-start gap-2 pt-2"
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600"
-                                  checked={projectChecked[i]?.[j] ?? false}
-                                  onChange={(e) =>
-                                    setProjectCheckAt(i, j, e.target.checked)
-                                  }
-                                />
-                                <span className="text-sm text-zinc-300">
-                                  {p.name}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </li>
-                    ))}
+                          {isExpanded && s.projects.length > 0 ? (
+                            <ul className="space-y-1.5 border-t border-zinc-800/80 bg-zinc-950/40 px-4 py-3 pl-11">
+                              {s.projects.map((p, j) => (
+                                <li
+                                  key={`${i}-p-${j}`}
+                                  className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-zinc-900/60"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600"
+                                    checked={projectChecked[i]?.[j] ?? false}
+                                    onChange={(e) =>
+                                      setProjectCheckAt(
+                                        i,
+                                        j,
+                                        e.target.checked
+                                      )
+                                    }
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                      <span className="truncate text-sm text-zinc-200">
+                                        {p.name}
+                                      </span>
+                                      <PriorityPill priority={p.priority} />
+                                    </div>
+                                    {p.description ? (
+                                      <p className="mt-0.5 pl-[22px] text-xs text-zinc-500">
+                                        {p.description}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </section>
               ) : null}
 
               {existingProjectSuggestions.length > 0 ? (
                 <section>
-                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                  <h3 className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <Folder className="h-3.5 w-3.5" />
                     New projects on existing goals
                   </h3>
                   <ul className="space-y-2">
@@ -829,15 +1027,21 @@ export function CompanyScrapeDialog({
                       const goalLabel =
                         company.goals.find((g) => g.id === s.existingGoalId)
                           ?.description ?? s.existingGoalId;
+                      const isSelected = existingProjChecked[k] ?? false;
                       return (
                         <li
                           key={`ex-${k}`}
-                          className="flex items-start gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
+                          className={cn(
+                            "flex items-start gap-3 rounded-xl border p-4 transition-colors",
+                            isSelected
+                              ? "border-sky-900/60 bg-sky-950/10"
+                              : "border-zinc-800 bg-zinc-950/40"
+                          )}
                         >
                           <input
                             type="checkbox"
                             className="mt-1 h-4 w-4 shrink-0 rounded border-zinc-600"
-                            checked={existingProjChecked[k] ?? false}
+                            checked={isSelected}
                             onChange={(e) => {
                               const v = e.target.checked;
                               setExistingProjChecked((prev) => {
@@ -847,16 +1051,22 @@ export function CompanyScrapeDialog({
                               });
                             }}
                           />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium text-zinc-500">
-                              Goal: {goalLabel}
-                            </p>
-                            <p className="text-sm font-medium text-zinc-100">
-                              {s.project.name}
-                            </p>
-                            <p className="text-xs text-zinc-500">
-                              {s.project.description}
-                            </p>
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                              <Target className="h-3 w-3" />
+                              <span className="truncate">{goalLabel}</span>
+                            </div>
+                            <div className="flex flex-wrap items-start gap-2">
+                              <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-zinc-100">
+                                {s.project.name}
+                              </p>
+                              <PriorityPill priority={s.project.priority} />
+                            </div>
+                            {s.project.description ? (
+                              <p className="text-xs text-zinc-500">
+                                {s.project.description}
+                              </p>
+                            ) : null}
                           </div>
                         </li>
                       );

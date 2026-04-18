@@ -10,7 +10,6 @@ import {
 import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { parseSlackThreadUrl } from "@/lib/slack";
 import {
   generateDeadlineNudgeMessage,
   generateThreadPingMessage,
@@ -20,9 +19,9 @@ import {
   type DeadlineNudgeLikelihoodContext,
   type SlackMemberRosterHint,
 } from "@/server/actions/slack";
+import { useResolvedSlackChannelLabel } from "@/hooks/useResolvedSlackChannelLabel";
 import { invalidateSlackThreadStatusCache } from "@/lib/slackThreadStatusCache";
 import { formatCalendarDateHint } from "@/lib/relativeCalendarDate";
-import { formatSlackChannelHash } from "@/lib/slackDisplay";
 import type { Person } from "@/lib/types/tracker";
 import { cn } from "@/lib/utils";
 import { SlackDraftMessagePreview } from "./SlackDraftMessagePreview";
@@ -101,14 +100,11 @@ export function SlackPingDialog({
     vh: number;
   } | null>(null);
 
-  const parsedUrl = useMemo(
-    () => parseSlackThreadUrl(slackUrl),
-    [slackUrl]
-  );
-  const channelLabel = formatSlackChannelHash(
-    channelName.trim() ||
-      channelId.trim() ||
-      (parsedUrl?.channelId ? parsedUrl.channelId : "")
+  const channelLabel = useResolvedSlackChannelLabel(
+    open,
+    channelName,
+    channelId,
+    slackUrl
   );
 
   useEffect(() => {
@@ -259,6 +255,18 @@ export function SlackPingDialog({
     assigneeName,
   ]);
 
+  const contextCrumbs = useMemo(() => {
+    const parts: string[] = [];
+    const g = goalDescription.trim();
+    const ms = milestoneName.trim();
+    const p = projectName.trim();
+    if (g) parts.push(g);
+    if (ms) parts.push(ms);
+    if (p) parts.push(p);
+    if (parts.length === 0) return ["Milestone"];
+    return parts;
+  }, [goalDescription, milestoneName, projectName]);
+
   if (!open) return null;
 
   const tryDismissBackdrop = () => {
@@ -395,32 +403,22 @@ export function SlackPingDialog({
           </div>
 
           <p
-            className="mt-2.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-xs leading-relaxed text-zinc-300"
-            title="Goal / milestone / project"
+            className="mt-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm font-medium leading-snug text-zinc-200"
+            title="Slack channel, then goal / milestone / project context"
           >
-            <span className="min-w-0 max-w-full break-words font-medium">
-              {goalDescription.trim() || "—"}
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <SlackLogo className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+              <span className="min-w-0 break-words">
+                {channelLabel.trim() || "—"}
+              </span>
             </span>
-            <span className="shrink-0 text-zinc-600" aria-hidden>
-              /
+            <span className="shrink-0 select-none font-normal text-zinc-500" aria-hidden>
+              {" -> "}
             </span>
-            <span className="min-w-0 max-w-full break-words font-medium">
-              {milestoneName}
-            </span>
-            <span className="shrink-0 text-zinc-600" aria-hidden>
-              /
-            </span>
-            <span className="min-w-0 max-w-full break-words font-medium">
-              {projectName.trim() || "—"}
+            <span className="min-w-0 max-w-full break-words">
+              {contextCrumbs.join(" · ")}
             </span>
           </p>
-
-          <div className="mt-2.5 flex items-center gap-2 text-zinc-300">
-            <SlackLogo className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-            <span className="font-mono text-sm text-zinc-400">
-              {channelLabel || "—"}
-            </span>
-          </div>
 
           <p className="mt-2.5 text-xs leading-relaxed text-zinc-400">
             {mode === "nudge" && dueHint ? (
@@ -525,6 +523,7 @@ export function SlackPingDialog({
                 <SlackDraftMessagePreview
                   text={draft}
                   people={people}
+                  rosterHints={rosterHints}
                   posterDisplayName={poster?.displayName ?? "You"}
                   posterAvatarSrc={poster?.avatarSrc ?? null}
                   postedAt={previewAt}

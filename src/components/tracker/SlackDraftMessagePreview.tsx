@@ -1,21 +1,63 @@
 "use client";
 
-import { Fragment, useMemo, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import type { Person } from "@/lib/types/tracker";
 import { displayInitials } from "@/lib/displayInitials";
 import {
+  collectSlackUserIdsFromMessageText,
   expandSlackEmojiShortcodes,
   slackInlineMrkdwnForPreviewPlain,
 } from "@/lib/slackDisplay";
+import {
+  resolveSlackMentionPreviewDisplays,
+  type SlackMemberRosterHint,
+  type SlackMentionPreviewDisplay,
+} from "@/server/actions/slack";
 import { cn } from "@/lib/utils";
 
-function buildSlackIdMap(people: Person[]): Map<string, Person> {
-  const m = new Map<string, Person>();
+function buildLocalRosterDisplayMap(
+  people: Person[],
+  rosterHints: SlackMemberRosterHint[]
+): Map<string, { name: string; avatarSrc: string | null }> {
+  const m = new Map<string, { name: string; avatarSrc: string | null }>();
   for (const p of people) {
     const id = p.slackHandle?.trim().toUpperCase();
-    if (id) m.set(id, p);
+    if (!id) continue;
+    m.set(id, {
+      name: p.name,
+      avatarSrc: p.profilePicturePath?.trim() || null,
+    });
+  }
+  for (const h of rosterHints) {
+    const id = h.slackUserId.trim().toUpperCase();
+    if (!id) continue;
+    if (m.has(id)) continue;
+    m.set(id, {
+      name: h.name,
+      avatarSrc: h.profilePicturePath?.trim() || null,
+    });
   }
   return m;
+}
+
+function resolveMentionDisplay(
+  slackUserId: string,
+  embedded: string | undefined,
+  localById: Map<string, { name: string; avatarSrc: string | null }>,
+  remoteById: Record<string, SlackMentionPreviewDisplay>
+): { name: string; avatarSrc: string | null } {
+  const emb = embedded?.trim();
+  const loc = localById.get(slackUserId);
+  const rem = remoteById[slackUserId];
+  const name = emb || loc?.name || rem?.name || slackUserId;
+  const avatarSrc = loc?.avatarSrc ?? rem?.avatarSrc ?? null;
+  return { name, avatarSrc };
 }
 
 function formatSlackStyleTimestamp(d: Date): string {
@@ -44,15 +86,42 @@ function formatSlackStyleTimestamp(d: Date): string {
   );
 }
 
-/** Slack dark-theme @mention (desktop): navy pill + bright blue text */
-function SlackStyleUserMention({ displayName }: { displayName: string }) {
+/**
+ * Slack dark-theme user mention with optional avatar — same palette as `SlackThreadPopover`
+ * (`.c-mrkdwn__mention`-style blue wash + `#1d9bd1` label).
+ */
+function SlackStyleUserMention({
+  displayName,
+  avatarSrc,
+}: {
+  displayName: string;
+  avatarSrc?: string | null;
+}) {
   const label = displayName.replace(/^@+/, "").trim() || "?";
+  const photo = avatarSrc?.trim();
   return (
     <span
-      className="mx-0.5 inline-block max-w-full rounded-[3px] bg-[#1d364a] px-[5px] py-px align-baseline text-[13px] font-semibold leading-snug text-[#1294dd]"
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-[3px] bg-[rgba(29,155,209,0.16)] py-px pl-0.5 pr-[6px] align-baseline text-[16px] leading-snug"
       title={`@${label}`}
     >
-      @{label}
+      {photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={photo}
+          alt=""
+          className="h-4 w-4 shrink-0 rounded-[2px] object-cover"
+        />
+      ) : (
+        <span
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] bg-[rgba(29,155,209,0.22)] text-[9px] font-bold leading-none text-[#1d9bd1]"
+          aria-hidden
+        >
+          {displayInitials(label)}
+        </span>
+      )}
+      <span className="min-w-0 font-semibold text-[#1d9bd1]">
+        @{label}
+      </span>
     </span>
   );
 }
@@ -72,7 +141,7 @@ function renderBoldPlain(processed: string, keyBase: string): ReactNode[] {
     out.push(
       <strong
         key={`${keyBase}-b-${i++}`}
-        className="font-semibold text-[#f3f4f4]"
+        className="font-semibold text-[#f8f8f8]"
       >
         {m[1]}
       </strong>
@@ -102,7 +171,7 @@ function renderMrkdwnFragment(raw: string, keyBase: string): ReactNode[] {
     out.push(
       <code
         key={`${keyBase}-c-${idx++}`}
-        className="mx-0.5 rounded border border-[#c87f2a]/40 bg-[#35373b] px-[3px] py-px font-mono text-[12.5px] font-normal leading-snug text-[#e8912d]"
+        className="mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[13px] font-normal leading-snug text-[#e8912d] ring-1 ring-white/10"
       >
         {expandSlackEmojiShortcodes(m[1])}
       </code>
@@ -119,6 +188,7 @@ function renderMrkdwnFragment(raw: string, keyBase: string): ReactNode[] {
 export function SlackDraftMessagePreview({
   text,
   people,
+  rosterHints = [],
   posterDisplayName,
   posterAvatarSrc,
   postedAt,
@@ -126,6 +196,8 @@ export function SlackDraftMessagePreview({
 }: {
   text: string;
   people: Person[];
+  /** Same roster hints as thread AI (Slack user id + name + optional photo path). */
+  rosterHints?: SlackMemberRosterHint[];
   /** Name shown in the Slack-style header (token / roster user). */
   posterDisplayName: string;
   /** Local public path or https Slack avatar URL */
@@ -133,7 +205,42 @@ export function SlackDraftMessagePreview({
   postedAt: Date;
   className?: string;
 }) {
-  const bySlackId = useMemo(() => buildSlackIdMap(people), [people]);
+  const localById = useMemo(
+    () => buildLocalRosterDisplayMap(people, rosterHints),
+    [people, rosterHints]
+  );
+
+  const mentionIds = useMemo(
+    () => [...new Set(collectSlackUserIdsFromMessageText(text))],
+    [text]
+  );
+
+  const rosterHintsSerialized = useMemo(
+    () => JSON.stringify(rosterHints),
+    [rosterHints]
+  );
+
+  const [remoteDisplays, setRemoteDisplays] = useState<
+    Record<string, SlackMentionPreviewDisplay>
+  >({});
+
+  useEffect(() => {
+    if (mentionIds.length === 0) {
+      setRemoteDisplays({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const r = await resolveSlackMentionPreviewDisplays(
+        mentionIds,
+        rosterHints
+      );
+      if (!cancelled) setRemoteDisplays(r);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mentionIds, rosterHintsSerialized]);
 
   const nodes = useMemo(() => {
     const re = /<@(U[A-Z0-9]+)(?:\|([^>]*))?>/gi;
@@ -152,21 +259,20 @@ export function SlackDraftMessagePreview({
       }
       const id = m[1].toUpperCase();
       const embedded = m[2]?.trim();
-      const person = bySlackId.get(id);
       const nodeKey = `m-${m.index}-${id}`;
-      if (person) {
-        out.push(
-          <SlackStyleUserMention key={nodeKey} displayName={person.name} />
-        );
-      } else if (embedded) {
-        out.push(
-          <SlackStyleUserMention key={nodeKey} displayName={embedded} />
-        );
-      } else {
-        out.push(
-          <SlackStyleUserMention key={nodeKey} displayName={id} />
-        );
-      }
+      const disp = resolveMentionDisplay(
+        id,
+        embedded,
+        localById,
+        remoteDisplays
+      );
+      out.push(
+        <SlackStyleUserMention
+          key={nodeKey}
+          displayName={disp.name}
+          avatarSrc={disp.avatarSrc}
+        />
+      );
       last = re.lastIndex;
     }
     if (last < text.length) {
@@ -177,7 +283,7 @@ export function SlackDraftMessagePreview({
       );
     }
     return out;
-  }, [text, bySlackId]);
+  }, [text, localById, remoteDisplays]);
 
   const empty = text.trim() === "";
   const timeLabel = formatSlackStyleTimestamp(postedAt);
@@ -186,7 +292,7 @@ export function SlackDraftMessagePreview({
   return (
     <div
       className={cn(
-        "slack-draft-preview rounded-md border border-[#35373b] bg-[#1a1d21] px-3 py-2 font-sans text-[15px] leading-[1.466] text-[#d1d2d3] shadow-inner shadow-black/20",
+        "slack-draft-preview rounded-md border border-[#35373b] bg-[#1a1d21] px-3 py-2.5 font-sans text-[16px] leading-[1.5] text-[#f8f8f8]",
         className
       )}
     >
@@ -200,11 +306,11 @@ export function SlackDraftMessagePreview({
               <img
                 src={posterAvatarSrc!}
                 alt=""
-                className="h-9 w-9 rounded-[3px] object-cover ring-1 ring-black/30"
+                className="h-9 w-9 rounded-[3px] object-cover"
               />
             ) : (
               <span
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] bg-[#3f4147] text-[11px] font-bold text-[#e8e8e8] ring-1 ring-black/30"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] bg-[#363636] text-[11px] font-bold text-[#e0e0e0]"
                 aria-hidden
               >
                 {displayInitials(posterDisplayName)}
@@ -213,14 +319,14 @@ export function SlackDraftMessagePreview({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span className="font-bold text-[#f3f4f4]">
+              <span className="text-[16px] font-bold leading-tight text-[#f8f8f8]">
                 {posterDisplayName}
               </span>
-              <span className="text-[12px] font-normal leading-none text-[#ababad]">
+              <span className="text-[12px] font-normal leading-none text-[#ababab]">
                 {timeLabel}
               </span>
             </div>
-            <div className="mt-0.5 min-w-0 whitespace-pre-wrap break-words text-[15px] leading-[1.466] text-[#d1d2d3]">
+            <div className="mt-0.5 min-w-0 whitespace-pre-wrap break-words [word-break:break-word] text-[16px] leading-[1.5] text-[#f8f8f8]">
               {nodes}
             </div>
           </div>

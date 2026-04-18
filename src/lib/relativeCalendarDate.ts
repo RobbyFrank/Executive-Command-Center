@@ -85,6 +85,20 @@ export function getMilestoneDueHorizon(
   return "later";
 }
 
+/**
+ * Whole calendar days from today to a `YYYY-MM-DD` target (local dates).
+ * Negative = overdue, 0 = due today, positive = days until due. Invalid input → null.
+ */
+export function calendarDaysFromTodayYmd(
+  ymd: string,
+  now = new Date()
+): number | null {
+  const target = parseCalendarDateString(ymd);
+  if (!target) return null;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return calendarDaysBetween(target, today);
+}
+
 export interface FormatRelativeCalendarDateOptions {
   /**
    * When true, drop the leading "in " from future labels so the result reads as a bare

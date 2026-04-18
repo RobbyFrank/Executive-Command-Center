@@ -687,6 +687,68 @@ async function fetchSlackChannelsFromApi(): Promise<FetchSlackChannelsResult> {
 }
 
 /**
+ * Resolves a channel id to its workspace name via `conversations.info` (requires `channels:read`
+ * on the same token used for {@link fetchSlackChannels}).
+ */
+export async function fetchSlackChannelNameById(
+  channelId: string
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const token = slackTokenForConversationsList();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack is not configured. Set SLACK_BOT_USER_OAUTH_TOKEN, or a user token (SLACK_CHANNEL_LIST_USER_TOKEN or SLACK_BILLING_USER_TOKEN).",
+    };
+  }
+  const id = channelId.trim();
+  if (!id) {
+    return { ok: false, error: "Channel id is empty." };
+  }
+
+  const params = new URLSearchParams();
+  params.set("channel", id);
+
+  const res = await fetch(
+    `https://slack.com/api/conversations.info?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    }
+  );
+
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: `Slack API request failed (${res.status}).`,
+    };
+  }
+
+  const data = (await res.json()) as {
+    ok?: boolean;
+    error?: string;
+    channel?: { name?: string };
+  };
+
+  if (!data.ok) {
+    return {
+      ok: false,
+      error: data.error
+        ? `Slack API error: ${data.error}`
+        : "Slack API returned an error.",
+    };
+  }
+
+  const name = (data.channel?.name ?? "").trim();
+  if (!name) {
+    return { ok: false, error: "Channel has no name in Slack response." };
+  }
+
+  return { ok: true, name };
+}
+
+/**
  * Lists human workspace members shown as **Active** or **Active guest** in Slack billing:
  * `billing_active` from `team.billableInfo`, **or** signed-in workspace guests (`is_restricted` /
  * `is_ultra_restricted`, excluding pending invites via `is_invited_user`).

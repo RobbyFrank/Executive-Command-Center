@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { logoutAction } from "@/server/actions/auth";
 import {
   LayoutDashboard,
@@ -11,10 +11,12 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   SIDEBAR_COLLAPSED_PREF_KEY,
+  readSidebarCollapsedLocalStorage,
   setSidebarCollapsedCookie,
 } from "@/lib/sidebar-prefs";
 
@@ -40,25 +42,51 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 
 export function Sidebar({
   displayName,
+  profilePicturePath,
   initialCollapsed = false,
 }: {
   displayName: string;
+  /** Same source as Team roster (`/uploads/…` or remote blob URL). */
+  profilePicturePath?: string;
   /** From HTTP cookie so the first paint matches the user's last choice (see `sidebar-prefs`). */
   initialCollapsed?: boolean;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const [profilePhotoBroken, setProfilePhotoBroken] = useState(false);
 
-  useEffect(() => {
+  // Apply browser preference before paint (localStorage wins; seed from server cookie if unset).
+  // Keeps cookie aligned so the next full reload matches without a flash.
+  useLayoutEffect(() => {
     try {
-      const ls = localStorage.getItem(SIDEBAR_COLLAPSED_PREF_KEY);
-      if (ls !== null) {
-        setCollapsed(ls === "true");
+      let raw = readSidebarCollapsedLocalStorage();
+      if (raw === null) {
+        raw = initialCollapsed ? "true" : "false";
+        localStorage.setItem(SIDEBAR_COLLAPSED_PREF_KEY, raw);
       }
+      const v = raw === "true";
+      setCollapsed(v);
+      setSidebarCollapsedCookie(v);
     } catch {
       /* ignore */
     }
+  }, [initialCollapsed]);
+
+  // Other tabs / windows: stay in sync when preference changes there.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== SIDEBAR_COLLAPSED_PREF_KEY || e.newValue === null) return;
+      const next = e.newValue === "true";
+      setCollapsed(next);
+      setSidebarCollapsedCookie(next);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  useEffect(() => {
+    setProfilePhotoBroken(false);
+  }, [profilePicturePath]);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -76,14 +104,61 @@ export function Sidebar({
     });
   }, []);
 
+  const initial = (displayName.trim().charAt(0) || "?").toUpperCase();
+  const profilePhotoSrc = profilePicturePath?.trim();
+  const showProfilePhoto = Boolean(profilePhotoSrc) && !profilePhotoBroken;
+
   return (
     <aside
       className={cn(
-        "border-r border-zinc-800 bg-zinc-950 flex min-h-0 flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        "relative flex min-h-0 shrink-0 flex-col overflow-x-hidden border-r border-zinc-800/90 bg-zinc-950 transition-[width] duration-200 ease-out motion-reduce:transition-none",
+        "before:pointer-events-none before:absolute before:inset-y-8 before:right-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-emerald-500/25 before:to-transparent before:opacity-70",
         collapsed ? "w-16" : "w-56"
       )}
     >
-      <nav className="min-h-0 flex-1 overflow-y-auto p-3 flex flex-col gap-0">
+      <div className="relative shrink-0 border-b border-zinc-800/80 px-2 py-2.5">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="absolute right-1.5 top-1.5 z-10 shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/30"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          ) : (
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          )}
+        </button>
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-2.5",
+            collapsed
+              ? "flex-col justify-center px-0.5 pt-1"
+              : "pr-10"
+          )}
+        >
+          <div
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/85 to-emerald-700 shadow-[0_0_0_1px_rgba(16,185,129,0.25)_inset,0_6px_16px_-8px_rgba(16,185,129,0.45)]"
+            aria-hidden
+          >
+            <Sparkles className="h-4 w-4 text-white" strokeWidth={2.25} />
+          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                MLabs
+              </p>
+              <p className="truncate text-xs font-medium leading-tight text-zinc-300">
+                Command Center
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <nav className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
         {NAV_GROUPS.map((group, groupIndex) => (
           <div
             key={group.title}
@@ -117,10 +192,10 @@ export function Sidebar({
                       "flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
                       collapsed
                         ? "justify-center px-2 py-2"
-                        : "gap-3 pl-2.5 pr-3 py-2",
+                        : "gap-3 px-3 py-2",
                       isActive
-                        ? "border-l-2 border-emerald-500/90 bg-zinc-900/80 text-zinc-100"
-                        : "border-l-2 border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/70"
+                        ? "bg-zinc-900/90 text-zinc-100"
+                        : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
                     )}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -143,36 +218,51 @@ export function Sidebar({
       >
         <div
           className={cn(
-            "flex items-center gap-2 min-w-0",
+            "flex min-w-0 items-center gap-2",
             collapsed && "flex-col"
           )}
         >
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className="shrink-0 rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/50"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <ChevronRight className="h-4 w-4" aria-hidden />
-            ) : (
-              <ChevronLeft className="h-4 w-4" aria-hidden />
-            )}
-          </button>
-          <span
+          <div
             className={cn(
-              "text-sm text-zinc-400 truncate min-w-0 flex-1",
-              collapsed && "sr-only"
+              "flex min-w-0 flex-1 items-center gap-2",
+              collapsed && "flex-none flex-col gap-1.5"
             )}
           >
-            {displayName}
-          </span>
+            {showProfilePhoto && profilePhotoSrc ? (
+              // eslint-disable-next-line @next/next/no-img-element -- local /uploads and blob URLs (same as Team roster / AssistantPersonInline)
+              <img
+                src={profilePhotoSrc}
+                alt=""
+                className={cn(
+                  "h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-emerald-500/20",
+                  collapsed && "h-6 w-6"
+                )}
+                onError={() => setProfilePhotoBroken(true)}
+              />
+            ) : (
+              <span
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-[11px] font-semibold text-zinc-300 ring-1 ring-emerald-500/15",
+                  collapsed && "h-6 w-6 text-[10px]"
+                )}
+                aria-hidden
+              >
+                {initial}
+              </span>
+            )}
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-sm text-zinc-400",
+                collapsed && "sr-only"
+              )}
+            >
+              {displayName}
+            </span>
+          </div>
           <form action={logoutAction} className="shrink-0">
             <button
               type="submit"
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800/80 hover:text-zinc-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/30"
               title="Sign out"
               aria-label="Sign out"
             >

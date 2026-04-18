@@ -7,6 +7,7 @@ import {
   Flag,
   Ghost,
   Hourglass,
+  Sparkles,
   Tags,
   UserRound,
   type LucideIcon,
@@ -17,34 +18,48 @@ import {
   filterSelectTriggerButtonClass,
 } from "./filter-select-trigger";
 
+type SignalGroup = "flagged" | "auto";
+
 const OPTIONS: {
   id: TrackerStatusTagId;
   label: string;
   hint: string;
+  group: SignalGroup;
   Icon: LucideIcon;
 }[] = [
   {
     id: "at_risk",
-    label: "At risk",
-    hint: "Needs attention — goal or project marked at risk",
+    label: "Flagged at risk",
+    hint: "Someone marked this goal or project at risk",
+    group: "flagged",
     Icon: Flag,
+  },
+  {
+    id: "spotlight",
+    label: "Spotlighted",
+    hint: "Marked as a win, positive momentum, or exec highlight",
+    group: "flagged",
+    Icon: Sparkles,
   },
   {
     id: "unassigned",
     label: "Unassigned",
     hint: "No DRI on the goal or owner on the project",
+    group: "auto",
     Icon: UserRound,
   },
   {
     id: "zombie",
-    label: "Zombie",
-    hint: "In progress but no milestone progress yet",
+    label: "Stuck in progress",
+    hint: "Project is In Progress but no milestones completed yet",
+    group: "auto",
     Icon: Ghost,
   },
   {
     id: "stalled",
-    label: "Stalled",
-    hint: "High cost of delay (≥4) but goal not In Progress",
+    label: "Needs kickoff",
+    hint: "Goal has high cost of delay (≥4) but isn't yet In Progress",
+    group: "auto",
     Icon: Hourglass,
   },
 ];
@@ -106,7 +121,8 @@ export function StatusTagFilterMultiSelect({
   return (
     <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
-        Filter goals and projects by signals: at risk, unassigned, zombie, stalled
+        Filter goals and projects by signals: flagged at risk, spotlighted,
+        unassigned, stuck in progress, needs kickoff
       </span>
       <button
         type="button"
@@ -140,31 +156,47 @@ export function StatusTagFilterMultiSelect({
             id={`${listId}-panel`}
             role="group"
             aria-label="Status filters"
-            className="absolute right-0 top-full z-50 mt-1 min-w-full w-max max-w-[calc(100vw-2rem)] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
+            className="absolute right-0 top-full z-50 mt-1 w-max min-w-full max-w-[calc(100vw-2rem)] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
           >
             <p className="px-2.5 pt-1.5 pb-1 text-[10px] uppercase tracking-wide text-zinc-500">
               Show rows matching any of
             </p>
             <div className="px-1 pb-1">
-              {OPTIONS.map(({ id, label, hint, Icon }) => {
-                const selected = selectedSet.has(id);
+              {(["flagged", "auto"] as SignalGroup[]).map((group, groupIdx) => {
+                const groupOptions = OPTIONS.filter((o) => o.group === group);
+                if (groupOptions.length === 0) return null;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-pressed={selected}
-                    title={hint}
-                    onClick={() => toggle(id)}
+                  <div
+                    key={group}
                     className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
-                      selected
-                        ? "bg-zinc-800 text-zinc-50 ring-1 ring-inset ring-zinc-500/80"
-                        : "text-zinc-200 hover:bg-zinc-800/60"
+                      groupIdx > 0 && "mt-1 border-t border-zinc-800 pt-1"
                     )}
                   >
-                    <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
-                    <span>{label}</span>
-                  </button>
+                    {groupOptions.map(({ id, label, hint, Icon }) => {
+                      const selected = selectedSet.has(id);
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={selected}
+                          title={hint}
+                          onClick={() => toggle(id)}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500",
+                            selected
+                              ? "bg-zinc-800 text-zinc-50 ring-1 ring-inset ring-zinc-500/80"
+                              : "text-zinc-200 hover:bg-zinc-800/60"
+                          )}
+                        >
+                          <Icon
+                            className="h-3.5 w-3.5 shrink-0 text-zinc-400"
+                            aria-hidden
+                          />
+                          <span>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
             </div>

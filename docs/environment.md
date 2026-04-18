@@ -56,6 +56,19 @@ Roadmap UI includes a **status dot** (green = activity within 24h, amber = quiet
 
 Profile photos from Slack import use **Vercel Blob** when `BLOB_READ_WRITE_TOKEN` is set. Roster duplicates are skipped by Slack user ID.
 
+## Daily executive digest (optional)
+
+A Vercel Cron job can post an AI-generated digest to `#executive-priorities` every morning. It reads the last 7 days of channel messages, joins them with the current tracker (at-risk / spotlight / P0–P1 / upcoming milestones), and surfaces only **new, interesting, or problematic** items since yesterday's digest. See [operations.md](operations.md#daily-executive-digest) for the full runbook.
+
+| Variable | Purpose |
+| -------- | ------- |
+| `SLACK_EXECUTIVE_PRIORITIES_CHANNEL_ID` | Slack **channel ID** (not name, e.g. `C0123456789`) where the digest is posted. The user token must be a member of the channel. |
+| `ECC_PUBLIC_BASE_URL` | Base URL prepended to Roadmap deep links in the digest. Defaults to `https://admin.mlabs.vc`. |
+| `CRON_SECRET` | Bearer secret required by `GET /api/cron/executive-digest`. Vercel Cron injects this automatically when the variable exists at build time. |
+| `DIGEST_POST_FAILURES` | Optional (`1`) — post a short `Digest failed: …` line into the channel on errors instead of silent logs. |
+
+Slack user-token scopes reused from the milestone-thread flow cover the digest as-is: `channels:history`, `groups:history`, and `chat:write`.
+
 ## See also
 
 - [data-storage.md](data-storage.md) — Redis key, seeding, backups

@@ -22,5 +22,6 @@ export type SlackScanStreamPayload =
       total: number;
     }
   | { type: "progress"; phase: "model"; message: string }
+  | { type: "progress"; phase: "model"; chunk: string }
   | { type: "done"; suggestions: SlackScrapeSuggestion[]; rejected: number }
   | { type: "error"; message: string };

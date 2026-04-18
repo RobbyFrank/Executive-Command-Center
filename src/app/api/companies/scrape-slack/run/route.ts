@@ -240,7 +240,11 @@ export async function POST(req: Request) {
         let slackTranscript = transcriptParts.join("\n");
         slackTranscript = capTranscript(slackTranscript, MAX_TRANSCRIPT_CHARS);
 
-        write({ type: "progress", phase: "model", message: "Asking Claude…" });
+        write({
+          type: "progress",
+          phase: "model",
+          message: "Analyzing conversations…",
+        });
 
         const existingBlock = buildExistingRoadmapBlock(data, companyId);
         const systemPrompt = buildSlackScrapeSystemPrompt(
@@ -249,7 +253,7 @@ export async function POST(req: Request) {
         );
 
         const anthropic = new Anthropic({ apiKey });
-        const msg = await anthropic.messages.create({
+        const modelStream = anthropic.messages.stream({
           model: getAnthropicModel(),
           max_tokens: 8192,
           system: systemPrompt,
@@ -261,7 +265,14 @@ export async function POST(req: Request) {
             },
           ],
         });
-        const block = msg.content[0];
+
+        modelStream.on("text", (textDelta: string) => {
+          if (!textDelta) return;
+          write({ type: "progress", phase: "model", chunk: textDelta });
+        });
+
+        const finalMessage = await modelStream.finalMessage();
+        const block = finalMessage.content[0];
         const textOut = block?.type === "text" ? block.text : "";
 
         let parsed: unknown;

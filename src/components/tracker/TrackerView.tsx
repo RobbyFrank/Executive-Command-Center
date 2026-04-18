@@ -487,10 +487,11 @@ export function TrackerView({
   const statusTagFilterLabel = useMemo(() => {
     if (statusTagFilterIds.length === 0) return "";
     const labels: Record<TrackerStatusTagId, string> = {
-      at_risk: "At risk",
+      at_risk: "Flagged at risk",
+      spotlight: "Spotlighted",
       unassigned: "Unassigned",
-      zombie: "Zombie",
-      stalled: "Stalled",
+      zombie: "Stuck in progress",
+      stalled: "Needs kickoff",
     };
     return statusTagFilterIds.map((id) => labels[id]).join(", ");
   }, [statusTagFilterIds]);

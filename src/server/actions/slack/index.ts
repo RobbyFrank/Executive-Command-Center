@@ -48,3 +48,8 @@ export {
   type PingSlackThreadResult,
 } from "./thread-ping-revise";
 export type { SlackMemberRosterHint } from "./thread-ai-shared";
+export {
+  resolveSlackMentionPreviewDisplays,
+  type SlackMentionPreviewDisplay,
+} from "./mention-preview";
+export { resolveSlackChannelLabelFromId } from "./channel-label";

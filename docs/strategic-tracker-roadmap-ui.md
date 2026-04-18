@@ -48,13 +48,13 @@ Use the **search** field at the top of Roadmap to filter by substring across com
 
 **Owner** cells show an **amber ring** (profile photo) or **dot** (name-only row) when the assignee’s autonomy is 1–2 (founders excluded).
 
-The **signals** multi-select shows rows where **any** chosen signal applies: **At risk**, **Unassigned** (no DRI on the goal or owner on the project), **Zombie** (project In Progress but no milestone progress yet), **Stalled** (goal cost of delay ≥4 and goal status not In Progress).
+The **signals** multi-select shows rows where **any** chosen signal applies. **Manually flagged:** **Flagged at risk** (`atRisk` flag on goal or project), **Spotlighted** (`spotlight` flag — win or positive momentum). **Auto-detected:** **Unassigned** (no DRI on the goal or owner on the project), **Stuck in progress** (project In Progress but no milestones completed yet — the "zombie" check), **Needs kickoff** (goal cost of delay ≥4 and goal status not In Progress — distinct from calendar-based overdue, which lives in the Dates filter).
 
 The **due date** multi-select filters **projects** by `targetDate` using **cumulative** horizons. Filter order: company → owner → priority → status enum → signals → due date → search.
 
 ## URL query parameters
 
-**Roadmap** (`/`) supports the same query parameters the UI uses: comma-separated `companies` (ids), `owners` (ids or owner-filter tokens), `tags` (signal ids: `at_risk`, `unassigned`, `zombie`, `stalled`), `priorities` (`P0`…`P3`), `delivery` (project status enum values), `due` (due-date bucket ids), `q` (search text), plus `focusGoal` / `focusProject` for a single expanded project.
+**Roadmap** (`/`) supports the same query parameters the UI uses: comma-separated `companies` (ids), `owners` (ids or owner-filter tokens), `tags` (signal ids: `at_risk`, `spotlight`, `unassigned`, `zombie`, `stalled`), `priorities` (`P0`…`P3`), `delivery` (project status enum values), `due` (due-date bucket ids), `q` (search text), plus `focusGoal` / `focusProject` for a single expanded project.
 
 **Review notes…** in the row menu opens the **review log** popover (append notes, read history). Dedicated **Summary**, **Matrix**, and full-page **Review** experiences are not part of this build (may be added later).
 

@@ -9,6 +9,11 @@ Next.js app for **MLabs portfolio** roadmaps: companies, goals, projects, milest
 - **[docs/data-storage.md](docs/data-storage.md)** — Redis key, seed/import, backups, images
 - **[docs/operations.md](docs/operations.md)** — CI, health check, caching, AI rate limits, PII in prompts
 - **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Scan Slack for suggested goals/projects
+- **[docs/design-system.md](docs/design-system.md)** — Brand primitives (glass surfaces, spotlight, buttons) and CSS tokens
+
+## Design system
+
+Shared UI lives under **`src/components/brand/`**: `Logo`, `PageHeader`, `GlassSurface`, `PremiumButton`, `DashboardMain` (dashboard background + subtle pointer spotlight), `AmbientPad` / `AmbientSpotlightLayers` + `useSpotlightCssVars` (grid highlight). Global tokens and utilities (`.brand-gradient-text`, `.brand-aurora`, focus `--ring`) are in **`src/app/globals.css`**. Favicon and Open Graph images are generated from **`src/app/icon.tsx`**, **`src/app/apple-icon.tsx`**, and **`src/app/opengraph-image.tsx`**.
 
 ## Prerequisites
 
@@ -59,6 +64,7 @@ Redis key **`ecc:tracker:data`**; schema in `src/lib/schemas/tracker.ts`. Seed w
 
 - **CI** — GitHub Actions runs `npm run lint` and `npm run typecheck` on pushes and PRs to `main` / `master`.
 - **`GET /api/health`** — JSON liveness: Redis `PING` (no login). Details: [docs/operations.md](docs/operations.md).
+- **Daily executive digest** — Vercel Cron posts an AI summary to `#executive-priorities` every morning at **12:00 UTC (≈ 8:00 AM ET)** from `GET /api/cron/executive-digest`. It reads the last 7 days of channel messages, cross-references the tracker, and only surfaces **new / interesting / problematic** items since the previous digest (deduped in Redis). Configure `SLACK_EXECUTIVE_PRIORITIES_CHANNEL_ID`, `ECC_PUBLIC_BASE_URL` (default `https://admin.mlabs.vc`), and `CRON_SECRET` — see [docs/environment.md](docs/environment.md) and [docs/operations.md](docs/operations.md#daily-executive-digest).
 
 ## Troubleshooting
 
@@ -78,5 +84,6 @@ Stale Next.js cache: see [docs/development.md](docs/development.md).
 | [docs/operations.md](docs/operations.md) | CI, health, cache tags, AI rate limits, PII redaction |
 | [docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md) | Slack scan API and batch import |
 | [docs/development.md](docs/development.md) | Local dev troubleshooting |
+| [docs/design-system.md](docs/design-system.md) | Brand components, spotlight intensities, tokens |
 
 Other files under `docs/` (e.g. internal prompts or rollout notes) are supplementary.

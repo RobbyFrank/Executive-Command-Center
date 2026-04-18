@@ -11,6 +11,7 @@ const PRIORITIES = new Set<Priority>(["P0", "P1", "P2", "P3"]);
 
 const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [
   "at_risk",
+  "spotlight",
   "unassigned",
   "zombie",
   "stalled",

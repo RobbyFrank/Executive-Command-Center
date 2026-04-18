@@ -6,6 +6,16 @@ export function formatSlackChannelHash(raw: string): string {
 }
 
 /**
+ * True when the stored "Slack channel" field is actually a channel id (e.g. goal name empty
+ * and only `C…` / `G…` was saved). Used to decide when to resolve via `conversations.info`.
+ */
+export function slackStoredChannelNameLooksLikeChannelId(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  return /^[CG][A-Z0-9]{8,}$/i.test(t);
+}
+
+/**
  * Build a Slack deep-link for a channel. Uses the universal redirect
  * endpoint so it works in desktop, mobile, and browser.
  */

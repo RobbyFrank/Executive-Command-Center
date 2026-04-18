@@ -15,6 +15,7 @@ import { isProjectZombie } from "@/lib/zombie";
 /** Multi-select status filters on the tracker (OR within selection). */
 export type TrackerStatusTagId =
   | "at_risk"
+  | "spotlight"
   | "unassigned"
   | "zombie"
   | "stalled";
@@ -339,6 +340,7 @@ function goalMatchesStatusTags(
   tags: Set<TrackerStatusTagId>
 ): boolean {
   if (tags.has("at_risk") && g.atRisk) return true;
+  if (tags.has("spotlight") && g.spotlight) return true;
   if (tags.has("unassigned") && !g.ownerId) return true;
   if (
     tags.has("stalled") &&
@@ -356,6 +358,7 @@ function projectMatchesStatusTags(
   tags: Set<TrackerStatusTagId>
 ): boolean {
   if (tags.has("at_risk") && p.atRisk) return true;
+  if (tags.has("spotlight") && p.spotlight) return true;
   if (tags.has("unassigned") && !p.ownerId) return true;
   if (tags.has("zombie") && isProjectZombie(p)) return true;
   return false;

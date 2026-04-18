@@ -3,6 +3,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -13,8 +14,9 @@ import { toast } from "sonner";
 import {
   createMilestoneSlackThread,
   getSlackThreadPosterPreviewIdentity,
+  type SlackMemberRosterHint,
 } from "@/server/actions/slack";
-import { formatSlackChannelHash } from "@/lib/slackDisplay";
+import { useResolvedSlackChannelLabel } from "@/hooks/useResolvedSlackChannelLabel";
 import type { Person } from "@/lib/types/tracker";
 import { cn } from "@/lib/utils";
 import { SlackDraftMessagePreview } from "./SlackDraftMessagePreview";
@@ -76,6 +78,22 @@ export function SlackCreateThreadDialog({
     vh: number;
   } | null>(null);
   const reviseAbortRef = useRef<AbortController | null>(null);
+
+  const rosterHints = useMemo((): SlackMemberRosterHint[] => {
+    return people
+      .filter((p) => p.slackHandle.trim() !== "")
+      .map((p) => ({
+        slackUserId: p.slackHandle,
+        name: p.name,
+        profilePicturePath: p.profilePicturePath.trim() || undefined,
+      }));
+  }, [people]);
+
+  const channelLabel = useResolvedSlackChannelLabel(
+    open,
+    channelName,
+    channelId
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -228,8 +246,6 @@ export function SlackCreateThreadDialog({
       onClose();
     }
   };
-
-  const channelLabel = formatSlackChannelHash(channelName || channelId);
 
   const revise = async () => {
     const hint = reviseHint.trim();
@@ -478,6 +494,7 @@ export function SlackCreateThreadDialog({
                     <SlackDraftMessagePreview
                       text={draft}
                       people={people}
+                      rosterHints={rosterHints}
                       posterDisplayName={poster?.displayName ?? "You"}
                       posterAvatarSrc={poster?.avatarSrc ?? null}
                       postedAt={previewAt}
