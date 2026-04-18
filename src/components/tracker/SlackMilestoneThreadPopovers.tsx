@@ -113,7 +113,10 @@ export function SlackMilestoneThreadPopovers({
       />
       <SlackPingDialog
         open={pingOpen}
-        onClose={() => onPingOpenChange(false)}
+        onClose={() => {
+          onPingOpenChange(false);
+          onPopoverOpenChange(true);
+        }}
         slackUrl={slackUrl}
         milestoneName={milestoneName}
         goalDescription={goalDescription}

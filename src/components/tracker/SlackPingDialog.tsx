@@ -616,7 +616,7 @@ export function SlackPingDialog({
               phase === "drafting"
             }
           >
-            Cancel
+            Back
           </button>
           <button
             type="button"
