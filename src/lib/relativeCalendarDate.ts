@@ -99,6 +99,42 @@ export function calendarDaysFromTodayYmd(
   return calendarDaysBetween(target, today);
 }
 
+const MS_HOUR = 60 * 60 * 1000;
+
+/**
+ * Urgency for a project due date (`YYYY-MM-DD`) vs `now`, using local **end of the due
+ * calendar day** so 24h / 48h thresholds work sensibly with date-only fields.
+ *
+ * - `past` — that calendar day has ended (overdue)
+ * - `within24h` — time from `now` until end of due day ≤ 24 hours
+ * - `within48h` — > 24h and ≤ 48h until end of due day
+ * - `null` — due later than 48h from `now`, or invalid input
+ */
+export type ProjectDueDateUrgency = "past" | "within24h" | "within48h";
+
+export function getProjectDueDateUrgency(
+  ymd: string,
+  now = new Date()
+): ProjectDueDateUrgency | null {
+  const start = parseCalendarDateString(ymd);
+  if (!start) return null;
+  const endOfDueDay = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+  const t = now.getTime();
+  if (t > endOfDueDay.getTime()) return "past";
+  const msRemaining = endOfDueDay.getTime() - t;
+  if (msRemaining <= 24 * MS_HOUR) return "within24h";
+  if (msRemaining <= 48 * MS_HOUR) return "within48h";
+  return null;
+}
+
 export interface FormatRelativeCalendarDateOptions {
   /**
    * When true, drop the leading "in " from future labels so the result reads as a bare

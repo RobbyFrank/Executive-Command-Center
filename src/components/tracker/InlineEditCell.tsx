@@ -125,6 +125,11 @@ interface InlineEditCellProps {
    */
   overlaySelectQuiet?: boolean;
   /**
+   * Overlay `select` only: center the trigger (e.g. Priority flag) under the column header; avoids
+   * left bias from asymmetric padding reserved for the hover chevron.
+   */
+  centerSelectTrigger?: boolean;
+  /**
    * Rendered inline immediately after the collapsed value (same line as the text when it fits).
    * Use for a trailing control (e.g. roadmap goal/project name + info icon). Incompatible with
    * `displayTruncateSingleLine` (suffix is ignored when the truncate tooltip path is used).
@@ -164,6 +169,7 @@ export function InlineEditCell({
   emphasizeEmpty = false,
   dateMin,
   overlaySelectQuiet = false,
+  centerSelectTrigger = false,
   collapsedSuffix,
 }: InlineEditCellProps) {
   const [editing, setEditing] = useState(() => Boolean(startInEditMode));
@@ -422,9 +428,10 @@ export function InlineEditCell({
           title={listLabel}
           aria-label={listLabel}
           className={cn(
-            "peer relative z-[1] flex min-h-8 w-full max-w-full cursor-pointer items-center rounded py-0.5 text-left text-sm transition-colors",
-            selectPadX,
-            "pr-7",
+            "peer relative z-[1] flex min-h-8 w-full max-w-full cursor-pointer items-center rounded py-0.5 text-sm transition-colors",
+            centerSelectTrigger && trackerGridAlign
+              ? "justify-center px-1 text-center"
+              : cn("text-left", selectPadX, "pr-7"),
             !value.trim() && "text-zinc-600 italic",
             value.trim() && displayClassName,
             overlaySelectQuiet

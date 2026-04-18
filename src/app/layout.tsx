@@ -13,12 +13,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark h-full">
+    <html lang="en" className="dark h-full" suppressHydrationWarning>
       {/*
         h-full + overflow-hidden: single scroll region (dashboard main), not the document.
         Login and other full-page routes use min-h-full + overflow-y-auto on their root.
       */}
-      <body className="h-full min-h-0 overflow-hidden antialiased">
+      <body
+        className="h-full min-h-0 overflow-hidden antialiased"
+        suppressHydrationWarning
+      >
         {children}
         <Toaster theme="dark" richColors position="bottom-right" />
       </body>

@@ -9,6 +9,10 @@ import { cn } from "@/lib/utils";
 const BODY_PREVIEW_MAX_CHARS = 200;
 const BODY_PREVIEW_MAX_CHARS_COMPACT = 110;
 
+/** Reserve width ≥ two digits + % so on-time / progress don’t shift; `4.5ch` fits `100%` in tabular nums. */
+const PERCENT_SPAN_CLASS =
+  "inline-block min-w-[4.5ch] text-end tabular-nums font-semibold";
+
 function truncateBody(s: string, maxChars: number): string {
   const t = s.trim();
   if (t.length <= maxChars) return t;
@@ -211,7 +215,8 @@ export const MilestoneSlackThreadInline = forwardRef<
             />
             <span
               className={cn(
-                "shrink-0 tabular-nums font-semibold",
+                PERCENT_SPAN_CLASS,
+                "shrink-0",
                 compact ? "text-[10px]" : "text-[11px]",
                 likelihoodTextClass(likelihood.riskLevel)
               )}
@@ -242,7 +247,8 @@ export const MilestoneSlackThreadInline = forwardRef<
                 />
                 <span
                   className={cn(
-                    "shrink-0 tabular-nums font-semibold",
+                    PERCENT_SPAN_CLASS,
+                    "shrink-0",
                     compact ? "text-[10px]" : "text-[11px]",
                     progressTextClass(likelihood.progressEstimate!)
                   )}

@@ -34,7 +34,13 @@ import { SlackCreateThreadDialog } from "./SlackCreateThreadDialog";
 import { StartSlackThreadChip } from "./StartSlackThreadChip";
 import { RowActionIcons } from "./RowActionIcons";
 import { cn } from "@/lib/utils";
-import { TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW } from "@/lib/tracker-roadmap-columns";
+import {
+  ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
+  ROADMAP_MILESTONE_GRID_PADDING_CLASS,
+  ROADMAP_MILESTONE_NEXT_CHIP_SLOT_CLASS,
+  ROADMAP_MILESTONE_TITLE_MAX_WHEN_SLACK_THREAD_STRIP_CLASS,
+  TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT,
+} from "@/lib/tracker-roadmap-columns";
 import { isValidHttpUrl } from "@/lib/httpUrl";
 import { useAssistantOptional } from "@/contexts/AssistantContext";
 import {
@@ -76,13 +82,13 @@ function milestoneTitleDisplayClass(
 ): string | undefined {
   switch (horizon) {
     case "overdue":
-      return "font-medium text-rose-50";
+      return "font-semibold text-rose-50";
     case "today":
-      return "font-medium text-orange-50";
+      return "font-semibold text-orange-50";
     case "soon":
-      return "font-medium text-yellow-50";
+      return "font-semibold text-yellow-50";
     case "this_week":
-      return "font-medium text-amber-50";
+      return "font-semibold text-amber-50";
     default:
       return undefined;
   }
@@ -129,9 +135,8 @@ interface MilestoneRowProps {
   /** Preformatted list of milestones for roadmap context (e.g. sibling milestones). */
   milestonesSummary?: string;
   /**
-   * Roadmap only: position the Slack thread preview (same milestone row) so its left
-   * edge matches the project row **Next milestone** column (`ProjectRow` `w-[36rem]`).
-   * Review mode keeps the default (preview beside the title in flow layout).
+   * Roadmap only: when there is no Slack URL yet, position the **Start Slack thread** chip
+   * with the same horizontal alignment as the linked thread strip (project **Complexity** column).
    */
   alignSlackPreviewToNextMilestoneColumn?: boolean;
   /**
@@ -236,11 +241,8 @@ export function MilestoneRow({
     threadReplyCount: hasSlackThreadUrl ? threadReplyCountForLikelihood : null,
   });
 
-  const showSlackInlineBesideTitle =
-    hasSlackThreadUrl && !alignSlackPreviewToNextMilestoneColumn;
-  /** Same row as title/checkbox — absolutely positioned to match `ProjectRow` Next milestone column. */
-  const showSlackPreviewAlignedInRow =
-    hasSlackThreadUrl && alignSlackPreviewToNextMilestoneColumn;
+  /** Linked thread preview — always in flow beside the title (same `gap-2` as date ↔ title). */
+  const showSlackInlineBesideTitle = hasSlackThreadUrl;
 
   const slackThreadPreview = (
     <MilestoneSlackThreadInline
@@ -403,7 +405,8 @@ export function MilestoneRow({
     <div
       ref={slackThreadSpotlightRef}
       className={cn(
-        "group/milestone relative flex min-w-0 items-center gap-3 pl-14 pr-4 py-1.5 transition-colors",
+        "group/milestone relative flex min-h-[28px] min-w-0 items-center gap-2 border-b border-zinc-900/70 py-1 transition-colors",
+        ROADMAP_MILESTONE_GRID_PADDING_CLASS,
         showNextDueHeatmap && DUE_ROW_BY_HORIZON[dueHorizon],
         isNextPendingMilestone &&
           !isDone &&
@@ -411,7 +414,7 @@ export function MilestoneRow({
           "bg-violet-950/20 hover:bg-violet-950/30",
         (!isNextPendingMilestone || isDone) &&
           !showNextDueHeatmap &&
-          "hover:bg-zinc-900/50",
+          "hover:bg-zinc-900/60",
         isQueuedPendingMilestone && !isDone && "opacity-[0.78]"
       )}
       onContextMenuCapture={milestoneContext.onContextMenuCapture}
@@ -453,45 +456,44 @@ export function MilestoneRow({
       </div>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {isNextPendingMilestone && !isDone ? (
-          <span
-            className={cn(
-              "inline shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ring-1",
-              nextMilestoneChipClass(dueHorizon)
-            )}
-            title="This is the next milestone to complete — link Slack here first"
-          >
-            Next
-          </span>
-        ) : null}
-        <div className="flex min-w-0 flex-1 items-center gap-6 overflow-hidden">
-          {/* Roadmap-aligned Slack is absolute — cap title width so the cell doesn’t span under it (avoids huge padding gaps). */}
-          <div
-            className={cn(
-              "min-h-[1.75rem] min-w-0 flex-1 shrink overflow-hidden",
-              showSlackPreviewAlignedInRow || showSlackStartAlignedInRow
-                ? "max-w-[min(36rem,52%)]"
-                : null
-            )}
-          >
-            <InlineEditCell
-              value={milestone.name}
-              onSave={(name) => updateMilestone(milestone.id, { name })}
-              displayClassName={cn(
-                isDone && "line-through text-zinc-500",
-                !isDone &&
-                  isNextPendingMilestone &&
-                  milestoneTitleDisplayClass(dueHorizon)
+        {/* Always reserve the Next chip column so names start on one vertical line (with or without Slack URL). */}
+        <div className={ROADMAP_MILESTONE_NEXT_CHIP_SLOT_CLASS}>
+          {isNextPendingMilestone && !isDone ? (
+            <span
+              className={cn(
+                "inline shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ring-1",
+                nextMilestoneChipClass(dueHorizon)
               )}
-              displayTruncateSingleLine
-              startInEditMode={startNameInEditMode}
-            />
-          </div>
-          {showSlackInlineBesideTitle ? (
-            <div className="min-w-0 max-w-[min(46rem,55%)] shrink-0">
-              {slackThreadPreview}
-            </div>
+              title="This is the next milestone to complete — link Slack here first"
+            >
+              Next
+            </span>
           ) : null}
+        </div>
+        <div
+          className={cn(
+            "min-h-[1.5rem] min-w-0 shrink overflow-hidden",
+            showSlackInlineBesideTitle
+              ? cn("flex-1", ROADMAP_MILESTONE_TITLE_MAX_WHEN_SLACK_THREAD_STRIP_CLASS)
+              : cn(
+                  "flex-1",
+                  showSlackStartAlignedInRow && "max-w-[min(36rem,52%)]"
+                )
+          )}
+        >
+          <InlineEditCell
+            value={milestone.name}
+            onSave={(name) => updateMilestone(milestone.id, { name })}
+            displayClassName={cn(
+              ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
+              isDone && "line-through text-zinc-500",
+              !isDone &&
+                isNextPendingMilestone &&
+                milestoneTitleDisplayClass(dueHorizon)
+            )}
+            displayTruncateSingleLine
+            startInEditMode={startNameInEditMode}
+          />
         </div>
       </div>
 
@@ -659,11 +661,11 @@ export function MilestoneRow({
         </button>
       </RowActionIcons>
 
-      {showSlackPreviewAlignedInRow ? (
+      {showSlackInlineBesideTitle ? (
         <div
           className="pointer-events-none absolute top-1/2 z-10 min-w-0 w-max max-w-[min(36rem,calc(100%-max(4.5rem,3vw)))] -translate-y-1/2 overflow-hidden"
           style={{
-            left: TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW,
+            left: TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT,
           }}
         >
           <div className="pointer-events-auto min-w-0 w-max max-w-full">
@@ -676,7 +678,7 @@ export function MilestoneRow({
         <div
           className="pointer-events-none absolute top-1/2 z-10 w-max max-w-[min(36rem,calc(100vw-4rem))] -translate-y-1/2"
           style={{
-            left: TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW,
+            left: TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT,
           }}
         >
           <div

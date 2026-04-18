@@ -83,6 +83,7 @@ import {
   formatCalendarDateHint,
   formatRelativeCalendarDate,
   formatRelativeCalendarDateCompact,
+  getProjectDueDateUrgency,
   parseCalendarDateString,
 } from "@/lib/relativeCalendarDate";
 import { PROJECT_STATUS_SELECT_OPTIONS_EDITABLE } from "@/lib/projectStatus";
@@ -106,7 +107,17 @@ import {
   type SlackPingMode,
 } from "./SlackMilestoneThreadPopovers";
 import { isValidHttpUrl } from "@/lib/httpUrl";
-import { ROADMAP_TITLE_COL_CLASS } from "@/lib/tracker-roadmap-columns";
+import {
+  ROADMAP_DATA_COL_CLASS,
+  ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
+  ROADMAP_GRID_GAP_CLASS,
+  ROADMAP_MILESTONE_BAND_CLASS,
+  ROADMAP_MILESTONE_GRID_PADDING_CLASS,
+  ROADMAP_NEXT_MILESTONE_COL_CLASS,
+  ROADMAP_OWNER_COL_CLASS,
+  ROADMAP_PROJECT_GRID_PADDING_CLASS,
+  ROADMAP_PROJECT_TITLE_COL_CLASS,
+} from "@/lib/tracker-roadmap-columns";
 
 /** Align editable cells with sticky column headers (no default resting inset). */
 const GRID_ALIGN = { trackerGridAlign: true as const };
@@ -545,6 +556,12 @@ export function ProjectRow({
     return !raw || parseCalendarDateString(raw) === null;
   }, [project.targetDate]);
 
+  const projectDueUrgency = useMemo(() => {
+    const raw = project.targetDate?.trim() ?? "";
+    if (!raw || parseCalendarDateString(raw) === null) return null;
+    return getProjectDueDateUrgency(raw);
+  }, [project.targetDate]);
+
   const isMirror = project.isMirror ?? false;
 
   const projectMenuEntries = useMemo((): ContextMenuEntry[] => {
@@ -769,10 +786,10 @@ export function ProjectRow({
       className={cn(
         "max-w-full min-w-0",
         project.atRisk &&
-          "rounded-md border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30",
+          "rounded-md border-l-2 border-amber-400 bg-amber-950/45",
         !project.atRisk &&
           project.spotlight &&
-          "rounded-md border-l-4 border-emerald-400/85 bg-emerald-950/40 shadow-[inset_6px_0_0_0_rgba(52,211,153,0.28)] ring-1 ring-emerald-500/25"
+          "rounded-md border-l-2 border-emerald-400/85 bg-emerald-950/40"
       )}
     >
       <div
@@ -787,10 +804,12 @@ export function ProjectRow({
         onClick={onProjectRowClick}
         onContextMenuCapture={projectContext.onContextMenuCapture}
         className={cn(
-          "group/project group/project-row flex w-full min-w-max cursor-pointer items-center gap-2 border-b border-zinc-900 py-1.5 pl-6 pr-4 transition-colors motion-reduce:transition-none",
+          "group/project group/project-row flex min-h-[28px] w-full min-w-max cursor-pointer items-center border-b border-zinc-900 py-1 transition-colors motion-reduce:transition-none",
+          ROADMAP_GRID_GAP_CLASS,
+          ROADMAP_PROJECT_GRID_PADDING_CLASS,
           !project.atRisk &&
             !project.spotlight &&
-            "hover:bg-zinc-900/35"
+            "hover:bg-zinc-900/60"
         )}
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -806,7 +825,7 @@ export function ProjectRow({
         {/* Project name — AI info icon inline at end of name; Shared/Mirror — w-[360px] matches goal + headers */}
         <div
           className={cn(
-            ROADMAP_TITLE_COL_CLASS,
+            ROADMAP_PROJECT_TITLE_COL_CLASS,
             "flex items-center gap-1.5"
           )}
           onClick={(e) => {
@@ -821,7 +840,7 @@ export function ProjectRow({
               onSave={(name) => updateProject(project.id, { name })}
               startInEditMode={project.id === focusProjectNameEditId}
               openEditNonce={projectRenameNonce}
-              displayClassName="text-zinc-200"
+              displayClassName={ROADMAP_ENTITY_TITLE_DISPLAY_CLASS}
               collapsedSuffix={
                 <span
                   className={cn(
@@ -857,9 +876,10 @@ export function ProjectRow({
         </div>
 
         {/* Owner */}
-        <div className="w-[5.85rem] min-w-0 shrink-0">
+        <div className={ROADMAP_OWNER_COL_CLASS}>
           <OwnerPickerCell
             {...GRID_ALIGN}
+            avatarOnly
             people={people}
             value={project.ownerId}
             onSave={(ownerId) => updateProject(project.id, { ownerId })}
@@ -870,9 +890,10 @@ export function ProjectRow({
         </div>
 
         {/* Priority */}
-        <div className="w-28 shrink-0">
+        <div className={ROADMAP_DATA_COL_CLASS}>
           <InlineEditCell
             {...GRID_ALIGN}
+            centerSelectTrigger
             className="group/status"
             overlaySelectQuiet
             value={project.priority}
@@ -889,7 +910,7 @@ export function ProjectRow({
 
         {/* Complexity — matches ProjectsColumnHeaders; before Confidence */}
         <div
-          className="w-28 shrink-0 min-w-0"
+          className={ROADMAP_DATA_COL_CLASS}
           onClick={(e) => e.stopPropagation()}
         >
           <InlineEditCell
@@ -909,9 +930,13 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Confidence — w-28 aligns with goal Confidence column; left-aligned so the segmented meter
-            reads as a label (not a right-hanging value) and mirrors the Complexity column to its left. */}
-        <div className="w-28 shrink-0 flex items-center justify-start pl-0.5">
+        {/* Confidence — left-aligned with goal Confidence column. */}
+        <div
+          className={cn(
+            ROADMAP_DATA_COL_CLASS,
+            "flex items-center justify-start pl-0.5",
+          )}
+        >
           <AutoConfidencePercent
             score={projectConfidenceAuto}
             explanation={projectConfidenceExplain}
@@ -920,7 +945,7 @@ export function ProjectRow({
 
         {/* Status — dependency-blocked rows show a read-only Blocked pill */}
         <div
-          className="w-44 shrink-0 min-w-0"
+          className={ROADMAP_DATA_COL_CLASS}
           onClick={(e) => e.stopPropagation()}
         >
           {project.isBlocked === true &&
@@ -956,10 +981,20 @@ export function ProjectRow({
             Swapped ahead of Progress so the visual Progress bar sits closer to Next milestone, where the
             milestone list is read from. */}
         <div
-          className="w-28 shrink-0 -ml-1"
+          className={ROADMAP_DATA_COL_CLASS}
           title={
             project.targetDate.trim()
-              ? `${formatCalendarDateHint(project.targetDate)} — from last milestone with a date`
+              ? [
+                  formatCalendarDateHint(project.targetDate),
+                  " — from last milestone with a date",
+                  projectDueUrgency === "past"
+                    ? " — overdue"
+                    : projectDueUrgency === "within24h"
+                      ? " — due within 24 hours"
+                      : projectDueUrgency === "within48h"
+                        ? " — due within 48 hours"
+                        : "",
+                ].join("")
               : "Set a target date on at least one milestone"
           }
         >
@@ -968,7 +1003,13 @@ export function ProjectRow({
               "block truncate px-1 py-0.5 text-xs font-medium leading-tight",
               projectNeedsDueDate
                 ? "rounded border border-amber-500/45 bg-amber-950/40 text-amber-100/95 ring-1 ring-amber-500/25"
-                : "text-zinc-200"
+                : projectDueUrgency === "past"
+                  ? "rounded border border-rose-500/40 bg-rose-950/35 text-rose-200 ring-1 ring-rose-500/25"
+                  : projectDueUrgency === "within24h"
+                    ? "rounded border border-orange-500/40 bg-orange-950/35 text-orange-200 ring-1 ring-orange-500/30"
+                    : projectDueUrgency === "within48h"
+                      ? "rounded border border-yellow-500/35 bg-yellow-950/25 text-yellow-200 ring-1 ring-yellow-500/25"
+                      : "text-zinc-200"
             )}
           >
             {project.targetDate.trim()
@@ -981,7 +1022,7 @@ export function ProjectRow({
 
         {/* Progress — milestone completion shown as bare "x/y" inside the bar; the column header
             already carries the "Progress" meaning, no need to repeat "done". */}
-        <div className="w-32 shrink-0 ml-3">
+        <div className={ROADMAP_DATA_COL_CLASS}>
           <ProgressBar
             percent={project.progress}
             label={`${milestonesDoneCount}/${project.milestones.length}`}
@@ -990,7 +1031,13 @@ export function ProjectRow({
         </div>
 
         {/* Next milestone — horizon + name; hidden when milestones are expanded inline */}
-        <div className={cn("w-[36rem] min-w-0 shrink-0 overflow-hidden", milestonesVisible && "invisible")}>
+        <div
+          className={cn(
+            ROADMAP_NEXT_MILESTONE_COL_CLASS,
+            "overflow-hidden",
+            milestonesVisible && "invisible"
+          )}
+        >
           {project.milestones.length === 0 ? (
             <button
               type="button"
@@ -1234,9 +1281,15 @@ export function ProjectRow({
 
       {/* Milestones — group/milestones so “Add milestone” row shows only when hovering this list */}
       <CollapsePanel open={expanded && showMilestones}>
-        <div className="group/milestones ml-8">
+        <div className="group/milestones border-t border-zinc-800/50">
+          <div className={ROADMAP_MILESTONE_BAND_CLASS}>
           {lowAutonomyOwnerHint ? (
-            <div className="pl-14 pr-4 pt-1 pb-2 border-b border-zinc-800/80 mb-0.5">
+            <div
+              className={cn(
+                "mb-0.5 border-b border-zinc-800/70 py-1.5",
+                ROADMAP_MILESTONE_GRID_PADDING_CLASS
+              )}
+            >
               <p className="text-[11px] leading-snug text-zinc-400">
                 <span className="font-medium text-amber-200/90">Owner — </span>
                 {lowAutonomyOwnerHint}
@@ -1244,7 +1297,7 @@ export function ProjectRow({
             </div>
           ) : null}
           {project.milestones.length === 0 ? (
-            <div className="pl-14 pr-4 py-2">
+            <div className={cn("py-2", ROADMAP_MILESTONE_GRID_PADDING_CLASS)}>
               <p
                 className={cn(
                   "w-full min-w-0",
@@ -1274,7 +1327,12 @@ export function ProjectRow({
               </p>
             </div>
           ) : milestonesForRunway.length === 0 && !showCompletedProjects ? (
-            <div className="pl-14 pr-4 py-2 text-xs text-zinc-500">
+            <div
+              className={cn(
+                "py-2 text-xs text-zinc-500",
+                ROADMAP_MILESTONE_GRID_PADDING_CLASS
+              )}
+            >
               Completed milestones are hidden — turn on Show completed in the
               toolbar to see them.
             </div>
@@ -1308,7 +1366,12 @@ export function ProjectRow({
                       renderMilestoneRow(ms)
                     )}
                   </CollapsePanel>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800/60 pl-14 pr-4 py-1.5">
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800/60 py-1.5",
+                      ROADMAP_MILESTONE_GRID_PADDING_CLASS
+                    )}
+                  >
                     <button
                       type="button"
                       onClick={() => setFutureMilestonesOpen((open) => !open)}
@@ -1347,7 +1410,8 @@ export function ProjectRow({
               ) : (
                 <div
                   className={cn(
-                    "overflow-hidden pl-14 pr-4",
+                    "overflow-hidden",
+                    ROADMAP_MILESTONE_GRID_PADDING_CLASS,
                     "max-h-0 py-0 opacity-0 pointer-events-none",
                     "transition-[max-height,padding,opacity] duration-150 ease-out",
                     "group-hover/milestones:max-h-14 group-hover/milestones:py-1.5 group-hover/milestones:opacity-100 group-hover/milestones:pointer-events-auto",
@@ -1366,6 +1430,7 @@ export function ProjectRow({
               )}
             </>
           )}
+          </div>
         </div>
       </CollapsePanel>
 

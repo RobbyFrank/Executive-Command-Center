@@ -37,6 +37,7 @@ import {
   appendGoalReviewNote,
 } from "@/server/actions/tracker";
 import {
+  CalendarPlus,
   ChevronRight,
   ChevronDown,
   Flag,
@@ -62,7 +63,24 @@ import {
   ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX,
   TRACKER_GOAL_HEADER_ROW_FALLBACK_PX,
 } from "@/lib/tracker-sticky-layout";
-import { ROADMAP_TITLE_COL_CLASS } from "@/lib/tracker-roadmap-columns";
+import {
+  ROADMAP_DATA_COL_CLASS,
+  ROADMAP_ENTITY_TITLE_DISPLAY_CLASS,
+  ROADMAP_GOAL_GRID_PADDING_CLASS,
+  ROADMAP_GOAL_TITLE_COL_CLASS,
+  ROADMAP_GRID_GAP_CLASS,
+  ROADMAP_NEXT_MILESTONE_COL_CLASS,
+  ROADMAP_OWNER_COL_CLASS,
+} from "@/lib/tracker-roadmap-columns";
+import { goalLatestMilestoneDueDateYmd } from "@/lib/goal-milestone-aggregates";
+import { milestoneProgressPercent } from "@/lib/milestone-progress";
+import {
+  formatCalendarDateHint,
+  formatRelativeCalendarDate,
+  getProjectDueDateUrgency,
+  parseCalendarDateString,
+} from "@/lib/relativeCalendarDate";
+import { ProgressBar } from "./ProgressBar";
 import {
   TRACKER_EMPTY_HINT_COPY_GOAL_CLASS,
   TRACKER_FOOTER_TEXT_ACTION,
@@ -251,6 +269,29 @@ export function GoalSection({
     () => explainGoalConfidence(goal, peopleById),
     [goal, peopleById]
   );
+
+  const goalMilestonesFlat = useMemo(
+    () => goal.projects.flatMap((p) => p.milestones),
+    [goal.projects]
+  );
+  const goalLatestDueYmd = useMemo(
+    () => goalLatestMilestoneDueDateYmd(goal),
+    [goal]
+  );
+  const goalMilestonesDoneCount = useMemo(
+    () => goalMilestonesFlat.filter((m) => m.status === "Done").length,
+    [goalMilestonesFlat]
+  );
+  const goalMilestoneProgressPercent = useMemo(
+    () => milestoneProgressPercent(goalMilestonesFlat),
+    [goalMilestonesFlat]
+  );
+  const goalDueUrgency = useMemo(() => {
+    const raw = goalLatestDueYmd.trim();
+    if (!raw || parseCalendarDateString(raw) === null) return null;
+    return getProjectDueDateUrgency(raw);
+  }, [goalLatestDueYmd]);
+
   const ownerPerson = people.find((p) => p.id === goal.ownerId);
 
   const onNewProjectCreated = useCallback((id: string) => {
@@ -453,7 +494,7 @@ export function GoalSection({
 
   /** Bordered slot after the goal title (project count or empty-state add controls). */
   const goalTitleMetaRuleClass =
-    "-translate-y-0.5 ml-2 mr-1.5 border-l border-zinc-600/35 pl-2.5";
+    "-translate-y-0.5 ml-1.5 mr-1.5 border-l border-zinc-600/35 pl-2";
 
   return (
     <div
@@ -467,10 +508,10 @@ export function GoalSection({
           !goal.spotlight &&
           "hover:bg-zinc-900/30",
         goal.atRisk &&
-          "border-l-4 border-amber-400 bg-amber-950/45 shadow-[inset_6px_0_0_0_rgba(251,191,36,0.35)] ring-1 ring-amber-500/30 hover:bg-amber-950/55",
+          "border-l-2 border-amber-400 bg-amber-950/45 hover:bg-amber-950/55",
         !goal.atRisk &&
           goal.spotlight &&
-          "border-l-4 border-emerald-400/85 bg-emerald-950/40 shadow-[inset_6px_0_0_0_rgba(52,211,153,0.28)] ring-1 ring-emerald-500/25 hover:bg-emerald-950/48"
+          "border-l-2 border-emerald-400/85 bg-emerald-950/40 hover:bg-emerald-950/48"
       )}
     >
       {/* Goal header — click row (not inline controls) to expand/collapse; AI context via info icon */}
@@ -479,19 +520,21 @@ export function GoalSection({
         style={{ top: goalStickyTopPx }}
         onContextMenuCapture={goalContext.onContextMenuCapture}
         className={cn(
-          "sticky z-[27] w-full min-w-0 max-w-full shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
+          "sticky z-[27] w-full min-w-0 max-w-full border-b border-zinc-800/60 shadow-[0_1px_0_rgba(0,0,0,0.2)] backdrop-blur-sm",
           headerTopRounded ? "rounded-t-md" : "rounded-t-none",
           goal.atRisk
             ? "bg-amber-950/85"
             : goal.spotlight
               ? "bg-emerald-950/80"
-              : "bg-zinc-950/90"
+              : "bg-zinc-950/95"
         )}
       >
         <div
           onClick={onGoalHeaderClick}
           className={cn(
-            "group/goal flex w-full min-w-0 cursor-pointer items-center gap-2 py-1.5 pl-6 pr-4 transition-colors"
+            "group/goal flex min-h-[28px] w-full min-w-max max-w-full cursor-pointer items-center py-1 transition-colors",
+            ROADMAP_GRID_GAP_CLASS,
+            ROADMAP_GOAL_GRID_PADDING_CLASS
           )}
         >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -505,12 +548,12 @@ export function GoalSection({
         </div>
 
         {/* Goal title — AI info icon inline after name; collapsed project count nudged up to align with title */}
-        <div className={cn(ROADMAP_TITLE_COL_CLASS)}>
+        <div className={cn(ROADMAP_GOAL_TITLE_COL_CLASS)}>
           <InlineEditCell
             {...GRID_ALIGN}
             value={goal.description}
             onSave={(description) => updateGoal(goal.id, { description })}
-            displayClassName="font-semibold text-zinc-100"
+            displayClassName={ROADMAP_ENTITY_TITLE_DISPLAY_CLASS}
             startInEditMode={goal.id === focusGoalTitleEditId}
             openEditNonce={goalRenameNonce}
             collapsedSuffix={
@@ -586,9 +629,10 @@ export function GoalSection({
         </div>
 
         {/* DRI */}
-        <div className="w-[5.85rem] min-w-0 shrink">
+        <div className={ROADMAP_OWNER_COL_CLASS}>
           <OwnerPickerCell
             {...GRID_ALIGN}
+            avatarOnly
             people={people}
             value={goal.ownerId}
             onSave={(ownerId) => updateGoal(goal.id, { ownerId })}
@@ -600,9 +644,10 @@ export function GoalSection({
         </div>
 
         {/* Priority */}
-        <div className="w-28 min-w-0 shrink">
+        <div className={ROADMAP_DATA_COL_CLASS}>
           <InlineEditCell
             {...GRID_ALIGN}
+            centerSelectTrigger
             className="group/status"
             overlaySelectQuiet
             value={goal.priority}
@@ -615,8 +660,8 @@ export function GoalSection({
           />
         </div>
 
-        {/* Cost of delay — w-28 aligns above project Complexity */}
-        <div className="w-28 min-w-0 shrink">
+        {/* Delay cost — aligns above project Complexity */}
+        <div className={ROADMAP_DATA_COL_CLASS}>
           <InlineEditCell
             {...GRID_ALIGN}
             className="group/status"
@@ -628,13 +673,17 @@ export function GoalSection({
             type="select"
             options={SCORE_BAND_OPTIONS}
             formatDisplay={costOfDelayFormatDisplay}
-            displayTitle={`Cost of delay — ${scoreBandLabel(goal.costOfDelay)} (${goal.costOfDelay}/5)`}
+            displayTitle={`Delay cost — ${scoreBandLabel(goal.costOfDelay)} (${goal.costOfDelay}/5)`}
           />
         </div>
 
-        {/* Confidence — auto: plain average of child project scores; w-28 aligns with project Confidence.
-            Left-aligned to match the project row so the segmented meter stays under the header label. */}
-        <div className="w-28 min-w-0 shrink flex items-center justify-start pl-0.5">
+        {/* Confidence — auto: plain average of child project scores; left-aligned with project row. */}
+        <div
+          className={cn(
+            ROADMAP_DATA_COL_CLASS,
+            "flex items-center justify-start pl-0.5",
+          )}
+        >
           <AutoConfidencePercent
             score={goalConfidenceAuto}
             explanation={goalConfidenceExplain}
@@ -642,7 +691,7 @@ export function GoalSection({
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) */}
-        <div className="w-52 min-w-0 shrink">
+        <div className={ROADMAP_DATA_COL_CLASS}>
           <SlackChannelPicker
             channelName={goal.slackChannel}
             channelId={goal.slackChannelId ?? ""}
@@ -655,6 +704,63 @@ export function GoalSection({
             variant="plain"
           />
         </div>
+
+        {/* Due date — latest milestone target date across all projects in this goal */}
+        <div
+          className={ROADMAP_DATA_COL_CLASS}
+          title={
+            goalLatestDueYmd.trim()
+              ? [
+                  formatCalendarDateHint(goalLatestDueYmd),
+                  " — latest milestone due date in this goal",
+                  goalDueUrgency === "past"
+                    ? " — overdue"
+                    : goalDueUrgency === "within24h"
+                      ? " — due within 24 hours"
+                      : goalDueUrgency === "within48h"
+                        ? " — due within 48 hours"
+                        : "",
+                ].join("")
+              : "Set a target date on at least one milestone under this goal’s projects"
+          }
+        >
+          {goalLatestDueYmd.trim() ? (
+            <span
+              className={cn(
+                "block truncate px-1 py-0.5 text-xs font-medium leading-tight",
+                goalDueUrgency === "past"
+                  ? "rounded border border-rose-500/40 bg-rose-950/35 text-rose-200 ring-1 ring-rose-500/25"
+                  : goalDueUrgency === "within24h"
+                    ? "rounded border border-orange-500/40 bg-orange-950/35 text-orange-200 ring-1 ring-orange-500/30"
+                    : goalDueUrgency === "within48h"
+                      ? "rounded border border-yellow-500/35 bg-yellow-950/25 text-yellow-200 ring-1 ring-yellow-500/25"
+                      : "text-zinc-200"
+              )}
+            >
+              {formatRelativeCalendarDate(goalLatestDueYmd, new Date(), {
+                omitFuturePreposition: true,
+              })}
+            </span>
+          ) : (
+            <span
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800/55 hover:text-zinc-300"
+              aria-label="No milestone due date yet — add a target date on a milestone under this goal"
+            >
+              <CalendarPlus className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+            </span>
+          )}
+        </div>
+
+        {/* Progress — all milestones in this goal */}
+        <div className={ROADMAP_DATA_COL_CLASS}>
+          <ProgressBar
+            percent={goalMilestoneProgressPercent}
+            label={`${goalMilestonesDoneCount}/${goalMilestonesFlat.length}`}
+            title={`${goalMilestonesDoneCount} of ${goalMilestonesFlat.length} milestones complete in this goal (${goalMilestoneProgressPercent}%)`}
+          />
+        </div>
+
+        <div className={ROADMAP_NEXT_MILESTONE_COL_CLASS} aria-hidden />
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
 
@@ -762,7 +868,7 @@ export function GoalSection({
       >
         <div className="group/project-area">
           {goal.projects.length > 0 && (
-            <div className="rounded-r-md border-l-2 border-zinc-700/50 bg-zinc-900/25 shadow-[inset_1px_0_0_rgba(0,0,0,0.2)]">
+            <div className="rounded-r-md border-l-[3px] border-zinc-600/60 bg-zinc-900/45">
               <ProjectsColumnHeaders
                 stackTopPx={projectsColumnStackTopPx}
                 stickyZClass="z-[26]"
@@ -791,7 +897,7 @@ export function GoalSection({
           )}
 
           {goal.projects.length === 0 && (
-            <div className="pl-16 pr-4 py-1.5">
+            <div className="pl-12 pr-3 py-1.5">
               <div
                 className={cn(
                   "m-0 w-full min-w-0",

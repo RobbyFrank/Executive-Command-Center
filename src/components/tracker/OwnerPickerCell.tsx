@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, AlertTriangle } from "lucide-react";
+import { ChevronDown, AlertTriangle, UserPlus } from "lucide-react";
 import type { Person } from "@/lib/types/tracker";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 import {
@@ -41,6 +41,11 @@ interface OwnerPickerCellProps {
   /** Roadmap grid: align resting label with sticky column headers. */
   trackerGridAlign?: boolean;
   /**
+   * Roadmap: avatar only (no name beside photo); unassigned shows a quiet dashed icon.
+   * When set, `emphasizeUnassigned` is ignored for cell chrome.
+   */
+  avatarOnly?: boolean;
+  /**
    * Goal DRI column: only founders and autonomy 4–5; footnote explains the rule.
    * Project owners use the default full roster.
    */
@@ -57,6 +62,7 @@ export function OwnerPickerCell({
   workloadMap,
   emphasizeUnassigned = false,
   trackerGridAlign = false,
+  avatarOnly = false,
   restrictToGoalDriEligible = false,
 }: OwnerPickerCellProps) {
   const [open, setOpen] = useState(false);
@@ -159,7 +165,9 @@ export function OwnerPickerCell({
     !isFounderPerson(person) &&
     clampAutonomy(person.autonomyScore) <= 2;
 
-  const unassignedHighlight = emphasizeUnassigned && !person;
+  const unassignedHighlight =
+    !avatarOnly && emphasizeUnassigned && !person;
+  const compactAvatar = avatarOnly && trackerGridAlign;
 
   const collapsed = (
     <button
@@ -170,8 +178,11 @@ export function OwnerPickerCell({
         setOpen(!open);
       }}
       className={cn(
-        "group/owner relative flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center rounded py-0.5 pr-7 text-left text-sm transition-colors hover:bg-zinc-800",
-        trackerGridAlign ? "pl-0" : "pl-1.5",
+        "group/owner relative flex w-full min-w-0 max-w-full cursor-pointer items-center rounded text-left text-sm transition-colors hover:bg-zinc-800",
+        compactAvatar
+          ? "min-h-[26px] justify-center px-0.5 py-0.5"
+          : "min-h-[28px] py-0.5 pr-7",
+        !compactAvatar && (trackerGridAlign ? "pl-0" : "pl-1.5"),
         unassignedHighlight &&
           "rounded-md border border-amber-500/45 bg-amber-950/40 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
         unassignedHighlight && trackerGridAlign && "pl-1.5",
@@ -181,7 +192,12 @@ export function OwnerPickerCell({
     >
       {person ? (
         photo ? (
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex min-w-0 max-w-full items-center",
+              compactAvatar ? "justify-start" : "gap-1.5",
+            )}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={photo}
@@ -191,11 +207,21 @@ export function OwnerPickerCell({
                 autonomyRing ? "ring-amber-500/75" : "ring-zinc-700",
               )}
             />
-            {displayName ? (
+            {!compactAvatar && displayName ? (
               <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-100">
                 {displayName}
               </span>
             ) : null}
+          </span>
+        ) : compactAvatar ? (
+          <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-zinc-200 ring-2 ring-zinc-700">
+            {autonomyRing ? (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500/90 ring-1 ring-amber-400/50"
+                aria-hidden
+              />
+            ) : null}
+            {((displayName ?? person.name).trim().charAt(0) || "?").toUpperCase()}
           </span>
         ) : (
           <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
@@ -213,6 +239,13 @@ export function OwnerPickerCell({
             </span>
           </span>
         )
+      ) : compactAvatar ? (
+        <span
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-dashed border-zinc-700/60 bg-transparent"
+          aria-hidden
+        >
+          <UserPlus className="h-3.5 w-3.5 text-zinc-600" aria-hidden />
+        </span>
       ) : (
         <span
           className={cn(
@@ -227,8 +260,13 @@ export function OwnerPickerCell({
       )}
       <ChevronDown
         className={cn(
-          "pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity motion-reduce:transition-none group-hover/owner:opacity-100",
-          unassignedHighlight ? "text-amber-400/90 opacity-100" : "opacity-0"
+          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-zinc-500 transition-opacity motion-reduce:transition-none group-hover/owner:opacity-100",
+          compactAvatar
+            ? "right-0 h-3 w-3 opacity-0"
+            : cn(
+                "right-1 h-3.5 w-3.5",
+                unassignedHighlight ? "text-amber-400/90 opacity-100" : "opacity-0",
+              ),
         )}
         aria-hidden
       />
