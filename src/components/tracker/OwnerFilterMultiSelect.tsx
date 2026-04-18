@@ -28,6 +28,10 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  FilterSelectSelectionBadge,
+  filterSelectTriggerButtonClass,
+} from "./filter-select-trigger";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 
 const EMPLOYMENT_OPTIONS = [
@@ -313,14 +317,18 @@ export function OwnerFilterMultiSelect({
         aria-labelledby={`${listId}-label`}
         aria-controls={`${listId}-panel`}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-2 pr-2 text-left text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+        className={filterSelectTriggerButtonClass(
+          open,
+          selectedIds.length > 0
+        )}
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
           {buttonSummary}
+          <FilterSelectSelectionBadge count={selectedIds.length} />
         </span>
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform",
+            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform motion-reduce:transition-none",
             open && "rotate-180"
           )}
           aria-hidden

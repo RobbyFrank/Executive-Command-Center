@@ -263,7 +263,7 @@ export function SlackImportDialog({
             <label className="flex cursor-pointer items-center gap-3 text-sm text-zinc-400 select-none">
               <input
                 type="checkbox"
-                className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-zinc-900 text-blue-600 focus:ring-2 focus:ring-blue-500/40"
+                className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-zinc-900 text-emerald-600 accent-emerald-600 focus:ring-2 focus:ring-emerald-500/45"
                 checked={showExistingMembers}
                 onChange={(e) => setShowExistingMembers(e.target.checked)}
               />
@@ -403,7 +403,7 @@ export function SlackImportDialog({
                         ) : (
                           <input
                             type="checkbox"
-                            className="h-5 w-5 shrink-0 cursor-pointer rounded border-zinc-600 bg-zinc-900 text-blue-600 focus:ring-blue-500/40"
+                            className="h-5 w-5 shrink-0 cursor-pointer rounded border-zinc-600 bg-zinc-900 text-emerald-600 accent-emerald-600 focus:ring-2 focus:ring-emerald-500/45"
                             checked={checked}
                             readOnly
                             tabIndex={-1}

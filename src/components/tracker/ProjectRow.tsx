@@ -311,6 +311,12 @@ export function ProjectRow({
     [project.milestones]
   );
 
+  /** Matches the server-side `milestoneProgressPercent` definition: a milestone counts as done iff `status === "Done"`. */
+  const milestonesDoneCount = useMemo(
+    () => project.milestones.filter((m) => m.status === "Done").length,
+    [project.milestones]
+  );
+
   const milestonesSummaryForLikelihood = useMemo(
     () =>
       project.milestones
@@ -469,6 +475,7 @@ export function ProjectRow({
 
   const goalChannelIdTrimmed = goalSlackChannelId.trim();
   const canCreateSlackThread = Boolean(goalChannelIdTrimmed);
+  const closeNextMsSlackConnectMenu = nextMsSlackConnectMenu.close;
 
   const nextMilestoneSlackConnectMenuEntries = useMemo((): ContextMenuEntry[] => {
     return [
@@ -481,7 +488,7 @@ export function ProjectRow({
         disabledReason:
           "Set a Slack channel on the goal first (Roadmap goal row)",
         onClick: () => {
-          nextMsSlackConnectMenu.close();
+          closeNextMsSlackConnectMenu();
           setNextMilestoneCreateThreadOpen(true);
         },
       },
@@ -491,14 +498,14 @@ export function ProjectRow({
         label: "Attach existing Slack thread URL…",
         icon: Pencil,
         onClick: () => {
-          nextMsSlackConnectMenu.close();
+          closeNextMsSlackConnectMenu();
           setExpanded(true);
           setShowMilestones(true);
           setNextMilestoneSlackUrlEditSignal((n) => n + 1);
         },
       },
     ];
-  }, [canCreateSlackThread]);
+  }, [canCreateSlackThread, closeNextMsSlackConnectMenu]);
 
   const warnings = useMemo(
     () => getTrackerProjectWarnings(project, goalCostOfDelay, people),
@@ -717,6 +724,7 @@ export function ProjectRow({
     isMirror,
     project.atRisk,
     project.id,
+    project.name,
     project.spotlight,
     project.blockedByProjectId,
     setProjectRenameNonce,
@@ -747,7 +755,12 @@ export function ProjectRow({
         }
         onClick={onProjectRowClick}
         onContextMenuCapture={projectContext.onContextMenuCapture}
-        className="group/project group/project-row flex w-full min-w-max items-center gap-2 pl-6 pr-4 py-1.5 transition-colors border-b border-zinc-900 cursor-pointer"
+        className={cn(
+          "group/project group/project-row flex w-full min-w-max cursor-pointer items-center gap-2 border-b border-zinc-900 py-1.5 pl-6 pr-4 transition-colors motion-reduce:transition-none",
+          !project.atRisk &&
+            !project.spotlight &&
+            "hover:bg-zinc-900/35"
+        )}
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
           <ChevronRight
@@ -781,7 +794,7 @@ export function ProjectRow({
               collapsedSuffix={
                 <span
                   className={cn(
-                    "inline-flex items-center align-middle transition-opacity duration-150",
+                    "inline-flex items-center align-middle transition-opacity duration-150 motion-reduce:transition-none",
                     "opacity-0 group-hover/project-row:opacity-100",
                     aiContextUiOpen && "opacity-100",
                     "pointer-events-none group-hover/project-row:pointer-events-auto",
@@ -865,8 +878,9 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Confidence — w-28 aligns with goal Confidence column */}
-        <div className="w-28 shrink-0 flex items-center justify-end pr-0.5">
+        {/* Confidence — w-28 aligns with goal Confidence column; left-aligned so the segmented meter
+            reads as a label (not a right-hanging value) and mirrors the Complexity column to its left. */}
+        <div className="w-28 shrink-0 flex items-center justify-start pl-0.5">
           <AutoConfidencePercent
             score={projectConfidenceAuto}
             explanation={projectConfidenceExplain}
@@ -907,14 +921,11 @@ export function ProjectRow({
           )}
         </div>
 
-        {/* Progress — nudged toward Status (−ml) vs header; Due date has +ml for clearer separation */}
-        <div className="w-32 shrink-0 -ml-1">
-          <ProgressBar percent={project.progress} />
-        </div>
-
-        {/* Due date — derived from last milestone with a target date (same relative label as milestone dates) */}
+        {/* Due date — derived from last milestone with a target date (same relative label as milestone dates).
+            Swapped ahead of Progress so the visual Progress bar sits closer to Next milestone, where the
+            milestone list is read from. */}
         <div
-          className="w-28 shrink-0 ml-3"
+          className="w-28 shrink-0 -ml-1"
           title={
             project.targetDate.trim()
               ? `${formatCalendarDateHint(project.targetDate)} — from last milestone with a date`
@@ -930,9 +941,21 @@ export function ProjectRow({
             )}
           >
             {project.targetDate.trim()
-              ? formatRelativeCalendarDate(project.targetDate)
+              ? formatRelativeCalendarDate(project.targetDate, new Date(), {
+                  omitFuturePreposition: true,
+                })
               : "—"}
           </span>
+        </div>
+
+        {/* Progress — milestone completion shown as bare "x/y" inside the bar; the column header
+            already carries the "Progress" meaning, no need to repeat "done". */}
+        <div className="w-32 shrink-0 ml-3">
+          <ProgressBar
+            percent={project.progress}
+            label={`${milestonesDoneCount}/${project.milestones.length}`}
+            title={`${milestonesDoneCount} of ${project.milestones.length} milestones complete (${project.progress}%)`}
+          />
         </div>
 
         {/* Next milestone — horizon + name; hidden when milestones are expanded inline */}
@@ -1026,6 +1049,7 @@ export function ProjectRow({
                       x={nextMsSlackConnectMenu.x}
                       y={nextMsSlackConnectMenu.y}
                       onClose={nextMsSlackConnectMenu.close}
+                      scope="milestone"
                       ariaLabel="Slack thread for next milestone"
                       entries={nextMilestoneSlackConnectMenuEntries}
                     />
@@ -1097,6 +1121,7 @@ export function ProjectRow({
         x={projectContext.x}
         y={projectContext.y}
         onClose={projectContext.close}
+        scope="project"
         ariaLabel={`Actions for project ${project.name}`}
         entries={projectMenuEntries}
       />

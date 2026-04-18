@@ -57,6 +57,11 @@ return 1
 
 let _redis: Redis | null = null;
 
+/** Shared Upstash client (KV + AI rate limiting). */
+export function getSharedRedisClient(): Redis {
+  return getRedis();
+}
+
 function getRedis(): Redis {
   if (!_redis) {
     const url =

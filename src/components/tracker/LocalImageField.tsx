@@ -87,7 +87,7 @@ export function LocalImageField({ variant, entityId, path }: LocalImageFieldProp
         className={cn(
           "relative shrink-0 cursor-pointer overflow-hidden border border-zinc-700 bg-zinc-900/80 p-0 transition-colors",
           sizeClass,
-          "hover:border-zinc-500 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600",
+          "hover:border-zinc-500 hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600",
           "disabled:cursor-not-allowed",
           pending && "pointer-events-none opacity-60"
         )}

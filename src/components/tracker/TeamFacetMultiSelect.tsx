@@ -122,7 +122,7 @@ export function TeamFacetMultiSelect({
         <span className="flex min-w-0 flex-1 items-center gap-2">{buttonSummary}</span>
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform",
+            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform motion-reduce:transition-none",
             open && "rotate-180"
           )}
           aria-hidden

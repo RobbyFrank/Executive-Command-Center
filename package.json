@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "seed:kv": "tsx scripts/seed-kv.ts"
+    "typecheck": "tsc --noEmit",
+    "seed:kv": "tsx scripts/seed-kv.ts",
+    "set-password": "tsx scripts/set-password.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.87.0",
@@ -16,6 +18,7 @@
     "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/blob": "^2.3.3",
     "bcryptjs": "^3.0.3",

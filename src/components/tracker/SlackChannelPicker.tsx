@@ -11,6 +11,14 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronDown, Hash, Loader2, Pencil, X } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
+import {
+  channelMatchesCompanyTerms,
+  companyFilterTerms,
+} from "@/lib/scrapeCompanyChannels";
+import {
+  getFreshSlackChannelsListCache,
+  putSlackChannelsListCache,
+} from "@/lib/slackChannelsListClientCache";
 import { fetchSlackChannelsList } from "@/server/actions/slack";
 import { formatSlackChannelHash, slackChannelUrl } from "@/lib/slackDisplay";
 import { SlackLogo } from "./SlackLogo";
@@ -30,40 +38,7 @@ interface SlackChannelPickerProps {
   variant?: "default" | "plain";
 }
 
-/** Lowercase substrings to match in channel name, topic, or purpose (non-empty only). */
-function companyFilterTerms(
-  companyName: string | undefined,
-  companyShortName: string | undefined
-): string[] {
-  const out: string[] = [];
-  const n = companyName?.trim();
-  const s = companyShortName?.trim();
-  if (n) out.push(n.toLowerCase());
-  if (s) out.push(s.toLowerCase());
-  return out;
-}
-
-function channelMatchesCompanyTerms(
-  ch: SlackChannel,
-  termsLower: string[]
-): boolean {
-  if (termsLower.length === 0) return true;
-  const hay = `${ch.name}\n${ch.topic}\n${ch.purpose}`.toLowerCase();
-  return termsLower.some((t) => hay.includes(t));
-}
-
 const PANEL_W = 380;
-
-/** Reuse the last successful `fetchSlackChannelsList` across picker opens (~1.5 min). */
-const SLACK_CHANNELS_CACHE_TTL_MS = 90_000;
-
-type SlackChannelsCacheEntry = {
-  fetchedAt: number;
-  channels: SlackChannel[];
-  notice: string | null;
-};
-
-let slackChannelsListCache: SlackChannelsCacheEntry | null = null;
 
 export function SlackChannelPicker({
   channelName,
@@ -95,10 +70,8 @@ export function SlackChannelPicker({
     setRelevantOnly(true);
     setFetchError(null);
 
-    const cached = slackChannelsListCache;
-    const cacheFresh =
-      cached && Date.now() - cached.fetchedAt < SLACK_CHANNELS_CACHE_TTL_MS;
-    if (cacheFresh && cached) {
+    const cached = getFreshSlackChannelsListCache();
+    if (cached) {
       setChannels(cached.channels);
       setScopeNotice(cached.notice);
       setLoading(false);
@@ -117,11 +90,7 @@ export function SlackChannelPicker({
         const notice = r.notice ?? null;
         setChannels(r.channels);
         setScopeNotice(notice);
-        slackChannelsListCache = {
-          fetchedAt: Date.now(),
-          channels: r.channels,
-          notice,
-        };
+        putSlackChannelsListCache(r.channels, notice);
       } else {
         setFetchError(r.error);
       }
@@ -278,7 +247,7 @@ export function SlackChannelPicker({
             <span className="italic text-zinc-600">Add channel</span>
           )}
           <ChevronDown
-            className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity group-hover/slack:opacity-100"
+            className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity motion-reduce:transition-none group-hover/slack:opacity-100"
             aria-hidden
           />
         </button>

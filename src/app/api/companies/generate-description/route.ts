@@ -1,9 +1,18 @@
 import { runCompanyDescriptionPipeline } from "@/server/companyDescriptionFromWebsites";
+import {
+  aiRateLimitExceededResponse,
+  checkAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  const rate = await checkAiRateLimit();
+  if (!rate.ok) {
+    return aiRateLimitExceededResponse(rate.retryAfterSeconds);
+  }
+
   const encoder = new TextEncoder();
   const signal = req.signal;
 

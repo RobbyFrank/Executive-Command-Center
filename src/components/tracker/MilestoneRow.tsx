@@ -634,11 +634,6 @@ export function MilestoneRow({
               />
             </div>
           </div>
-        ) : showSlackStartAlignedInRow ? (
-          <div
-            className="flex w-7 shrink-0 justify-center"
-            aria-hidden
-          />
         ) : (
           <div className="flex w-7 shrink-0 justify-center">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-sm">
@@ -689,6 +684,7 @@ export function MilestoneRow({
           x={slackQuickContext.x}
           y={slackQuickContext.y}
           onClose={slackQuickContext.close}
+          scope="milestone"
           ariaLabel={`Slack thread for ${milestone.name}`}
           entries={slackQuickMenuEntries}
         />
@@ -746,6 +742,7 @@ export function MilestoneRow({
         x={milestoneContext.x}
         y={milestoneContext.y}
         onClose={milestoneContext.close}
+        scope="milestone"
         ariaLabel={`Actions for milestone ${milestone.name}`}
         entries={milestoneMenuEntries}
       />

@@ -12,33 +12,12 @@ import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { projectMatchesCloseWatchByOwnerMap } from "@/lib/closeWatch";
 import { isProjectZombie } from "@/lib/zombie";
 
-function isHighLeverageProject(
-  g: GoalWithProjects,
-  p: ProjectWithMilestones
-): boolean {
-  return (
-    (g.priority === "P0" || g.priority === "P1") && p.complexityScore <= 2
-  );
-}
-
-function isLowLeverageProject(
-  g: GoalWithProjects,
-  p: ProjectWithMilestones
-): boolean {
-  return g.priority === "P3" && p.complexityScore >= 4;
-}
-
 /** Multi-select status filters on the tracker (OR within selection). */
 export type TrackerStatusTagId =
   | "at_risk"
-  | "spotlight"
   | "unassigned"
-  | "close_watch"
   | "zombie"
-  | "high_leverage"
-  | "low_leverage"
-  | "time_sensitive"
-  | "blocked_by_dep";
+  | "stalled";
 
 export function normalizeTrackerSearchQuery(raw: string): string {
   return raw.trim().toLowerCase();
@@ -327,8 +306,9 @@ export function filterTrackerHierarchyByStatusEnum(
 /**
  * When `hideDone` is true: removes projects with status `Done` (except those with no
  * milestones — those stay visible), drops goals that only had completed work but keeps
- * goals with an empty project list, and drops companies with no remaining goals. Done
- * milestone rows are hidden separately in `ProjectRow` via the same toolbar toggle.
+ * goals with an empty project list. Companies that still have no goals (never had any)
+ * stay visible; companies whose goals were all removed as completed-only are dropped.
+ * Done milestone rows are hidden separately in `ProjectRow` via the same toolbar toggle.
  */
 export function filterTrackerHierarchyHideDoneProjects(
   hierarchy: CompanyWithGoals[],
@@ -348,79 +328,46 @@ export function filterTrackerHierarchyHideDoneProjects(
         return [{ ...g, projects }];
       }),
     }))
-    .filter((c) => c.goals.length > 0);
+    .filter(
+      (c, idx) =>
+        hierarchy[idx]!.goals.length === 0 || c.goals.length > 0
+    );
 }
 
 function goalMatchesStatusTags(
   g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>,
-  peopleById: Map<string, Person>
+  tags: Set<TrackerStatusTagId>
 ): boolean {
   if (tags.has("at_risk") && g.atRisk) return true;
-  if (tags.has("spotlight") && g.spotlight) return true;
   if (tags.has("unassigned") && !g.ownerId) return true;
   if (
-    tags.has("close_watch") &&
-    g.projects.some((proj) =>
-      projectMatchesCloseWatchByOwnerMap(proj, peopleById)
-    )
-  )
-    return true;
-  if (
-    tags.has("time_sensitive") &&
+    tags.has("stalled") &&
     g.costOfDelay >= 4 &&
     g.status !== "In Progress"
   )
     return true;
   if (tags.has("zombie") && g.projects.some((proj) => isProjectZombie(proj)))
     return true;
-  if (
-    tags.has("blocked_by_dep") &&
-    g.projects.some((proj) => proj.isBlocked === true)
-  )
-    return true;
-  if (
-    tags.has("high_leverage") &&
-    g.projects.some((proj) => isHighLeverageProject(g, proj))
-  )
-    return true;
-  if (
-    tags.has("low_leverage") &&
-    g.projects.some((proj) => isLowLeverageProject(g, proj))
-  )
-    return true;
   return false;
 }
 
 function projectMatchesStatusTags(
   p: ProjectWithMilestones,
-  g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>,
-  peopleById: Map<string, Person>
+  tags: Set<TrackerStatusTagId>
 ): boolean {
   if (tags.has("at_risk") && p.atRisk) return true;
-  if (tags.has("spotlight") && p.spotlight) return true;
   if (tags.has("unassigned") && !p.ownerId) return true;
-  if (
-    tags.has("close_watch") &&
-    projectMatchesCloseWatchByOwnerMap(p, peopleById)
-  )
-    return true;
   if (tags.has("zombie") && isProjectZombie(p)) return true;
-  if (tags.has("blocked_by_dep") && p.isBlocked === true) return true;
-  if (tags.has("high_leverage") && isHighLeverageProject(g, p)) return true;
-  if (tags.has("low_leverage") && isLowLeverageProject(g, p)) return true;
   return false;
 }
 
 function filterGoalByStatusTags(
   g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>,
-  peopleById: Map<string, Person>
+  tags: Set<TrackerStatusTagId>
 ): GoalWithProjects | null {
-  const goalMatches = goalMatchesStatusTags(g, tags, peopleById);
+  const goalMatches = goalMatchesStatusTags(g, tags);
   const projects = g.projects.filter((p) =>
-    projectMatchesStatusTags(p, g, tags, peopleById)
+    projectMatchesStatusTags(p, tags)
   );
   if (goalMatches) return g;
   if (projects.length > 0) return { ...g, projects };
@@ -429,11 +376,10 @@ function filterGoalByStatusTags(
 
 function filterCompanyByStatusTags(
   c: CompanyWithGoals,
-  tags: Set<TrackerStatusTagId>,
-  peopleById: Map<string, Person>
+  tags: Set<TrackerStatusTagId>
 ): CompanyWithGoals | null {
   const goals = c.goals
-    .map((g) => filterGoalByStatusTags(g, tags, peopleById))
+    .map((g) => filterGoalByStatusTags(g, tags))
     .filter((g): g is GoalWithProjects => g !== null);
   if (goals.length === 0) return null;
   return { ...c, goals };
@@ -446,15 +392,13 @@ function filterCompanyByStatusTags(
  */
 export function filterTrackerHierarchyByStatusTags(
   hierarchy: CompanyWithGoals[],
-  tagIds: TrackerStatusTagId[] | null,
-  people: Person[]
+  tagIds: TrackerStatusTagId[] | null
 ): CompanyWithGoals[] {
   if (!tagIds || tagIds.length === 0) return hierarchy;
 
-  const peopleById = new Map(people.map((p) => [p.id, p]));
   const tags = new Set(tagIds);
   return hierarchy
-    .map((c) => filterCompanyByStatusTags(c, tags, peopleById))
+    .map((c) => filterCompanyByStatusTags(c, tags))
     .filter((c): c is CompanyWithGoals => c !== null);
 }
 

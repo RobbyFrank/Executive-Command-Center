@@ -2,8 +2,11 @@
  * Horizontal layout for Roadmap `ProjectRow` / `TrackerColumnHeaders` must stay in sync.
  *
  * Used as **`left`** on the absolutely positioned Slack preview / “Start thread” chip in
- * `MilestoneRow` — approximately aligned with the **Progress** column on the project row
- * (not Next milestone). Tuned by subtracting Progress→Due→Next span from the old Next-MS calc.
+ * `MilestoneRow` — the left edge sits just inside the Status column's right edge (where the
+ * first post-Status project cell begins). After the Due-date / Progress swap this is the
+ * **Due date** column; the chip's wide max-width still extends across Progress and into
+ * Next milestone, so the inline thread preview remains visually anchored in the same spot.
+ * Tuned by subtracting the post-Status column span from the old Next-MS calc.
  */
 export const TRACKER_ROADMAP_NEXT_MS_COLUMN_PL_FROM_MILESTONE_ROW =
   "calc(360px + 38.35rem + 0.375rem + 65px)";

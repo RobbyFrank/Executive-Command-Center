@@ -11,6 +11,8 @@
  * @see https://api.slack.com/methods/team.billableInfo
  */
 
+import { SLACK_CHANNELS_LIST_CACHE_TTL_MS } from "@/lib/slackChannelsCacheConstants";
+
 /**
  * Set `SLACK_JOIN_DATE_DEBUG=1` in `.env.local` to print join-date resolution to the **Node /
  * Next.js server terminal** (where `npm run dev` runs) — not the browser DevTools console.
@@ -591,6 +593,13 @@ export type FetchSlackChannelsResult =
   | { ok: true; channels: SlackChannel[]; notice?: string }
   | { ok: false; error: string };
 
+type SlackChannelsServerCache = {
+  expiresAt: number;
+  result: FetchSlackChannelsResult;
+};
+
+let slackChannelsServerCache: SlackChannelsServerCache | null = null;
+
 /**
  * Fetches public and private channels the bot can access via `conversations.list`.
  * Prefer a single paginated run with `types=public_channel,private_channel`; falls back
@@ -600,8 +609,29 @@ export type FetchSlackChannelsResult =
  * With a **user** token (`SLACK_CHANNEL_LIST_USER_TOKEN` or `SLACK_BILLING_USER_TOKEN`),
  * Slack returns channels that **user** can access (typical for an admin workspace token).
  * Requires `channels:read` and `groups:read` on whichever token is used (bot or user scopes).
+ *
+ * Successful responses are memoized in-process for {@link SLACK_CHANNELS_LIST_CACHE_TTL_MS} ms
+ * (same window as the Roadmap channel picker / scraper client cache).
  */
 export async function fetchSlackChannels(): Promise<FetchSlackChannelsResult> {
+  const now = Date.now();
+  if (slackChannelsServerCache && now < slackChannelsServerCache.expiresAt) {
+    return slackChannelsServerCache.result;
+  }
+
+  const result = await fetchSlackChannelsFromApi();
+
+  if (result.ok) {
+    slackChannelsServerCache = {
+      expiresAt: now + SLACK_CHANNELS_LIST_CACHE_TTL_MS,
+      result,
+    };
+  }
+
+  return result;
+}
+
+async function fetchSlackChannelsFromApi(): Promise<FetchSlackChannelsResult> {
   const token = slackTokenForConversationsList();
   if (!token) {
     return {
@@ -975,6 +1005,136 @@ export async function fetchSlackThreadReplies(
     rootTs,
     latestDate,
   };
+}
+
+/** Top-level channel message from `conversations.history` (thread replies excluded). */
+export type SlackChannelHistoryMessage = {
+  ts: string;
+  user?: string;
+  text?: string;
+  bot_id?: string;
+  subtype?: string;
+  /** Present on thread replies; parent has `thread_ts === ts`. */
+  thread_ts?: string;
+};
+
+type ConversationsHistoryResponse = {
+  ok?: boolean;
+  error?: string;
+  messages?: SlackChannelHistoryMessage[];
+  has_more?: boolean;
+  response_metadata?: { next_cursor?: string };
+};
+
+/**
+ * Fetches top-level channel messages via `conversations.history` (paginated) using the user token.
+ * Thread replies are not included (only messages in the channel timeline).
+ * Pass `oldestTs` to only include messages at or after that Slack `ts` (e.g. window start).
+ */
+export async function fetchSlackChannelHistory(
+  channelId: string,
+  options: {
+    oldestTs?: string;
+    /** Per request; Slack max is 1000. Default 200. */
+    limitPerPage?: number;
+    /** Stop after this many messages (across pages). Default 500. */
+    maxMessages?: number;
+  } = {}
+): Promise<
+  | { ok: true; messages: SlackChannelHistoryMessage[] }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured for history. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scopes channels:history and groups:history.",
+    };
+  }
+
+  const limitPerPage = Math.min(
+    Math.max(1, options.limitPerPage ?? 200),
+    1000
+  );
+  const maxMessages = Math.max(1, options.maxMessages ?? 500);
+
+  const collected: SlackChannelHistoryMessage[] = [];
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set("channel", channelId.trim());
+    params.set("limit", String(limitPerPage));
+    if (cursor) params.set("cursor", cursor);
+    const oldest = options.oldestTs?.trim();
+    if (oldest) params.set("oldest", oldest);
+
+    const res = await fetch(
+      `https://slack.com/api/conversations.history?${params.toString()}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Slack API request failed (${res.status}).`,
+      };
+    }
+
+    const data = (await res.json()) as ConversationsHistoryResponse;
+
+    if (!data.ok) {
+      const err = data.error ?? "unknown_error";
+      if (err === "missing_scope") {
+        return {
+          ok: false,
+          error:
+            "Slack token is missing a required scope (channels:history or groups:history). Add User Token Scopes and reinstall the app.",
+        };
+      }
+      if (err === "channel_not_found") {
+        return {
+          ok: false,
+          error:
+            "Channel not found or you’re not a member — check the channel and your workspace access.",
+        };
+      }
+      if (err === "not_in_channel") {
+        return {
+          ok: false,
+          error:
+            "You’re not in this channel — join it in Slack or pick another channel.",
+        };
+      }
+      return {
+        ok: false,
+        error: `Slack API error: ${err}`,
+      };
+    }
+
+    const page = data.messages ?? [];
+    for (const m of page) {
+      if (!m?.ts) continue;
+      if (m.thread_ts && m.thread_ts !== m.ts) continue;
+      collected.push(m);
+      if (collected.length >= maxMessages) break;
+    }
+
+    if (collected.length >= maxMessages) break;
+
+    const next = data.response_metadata?.next_cursor?.trim();
+    if (!next) break;
+    cursor = next;
+  }
+
+  collected.sort((a, b) => compareSlackTs(a.ts, b.ts));
+
+  return { ok: true, messages: collected };
 }
 
 type ChatPostMessageResponse = {

@@ -40,6 +40,7 @@ import {
   TRACKER_INLINE_TEXT_ACTION,
 } from "./tracker-text-actions";
 import { AiCreateButton } from "./AiCreateButton";
+import { CompanyScrapeButton } from "./CompanyScrapeButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import {
@@ -223,16 +224,17 @@ export function CompanySection({
         className="sticky z-[29] bg-zinc-950/90 pb-1 shadow-[0_1px_0_rgba(0,0,0,0.35)] backdrop-blur-sm"
         style={{ top: stickyStackBasePx }}
       >
+        <div className="group/companyHeader flex min-w-0 items-stretch overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/60 transition-colors hover:bg-zinc-900/85">
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
           onContextMenu={companyContext.onContextMenu}
           aria-expanded={expanded}
-          className="group flex w-full items-center gap-3 px-4 py-3 text-left bg-zinc-900/60 rounded-lg border border-zinc-800 hover:bg-zinc-900/85 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+          className="group flex min-w-0 flex-1 items-center gap-3 border-0 bg-transparent px-4 py-3 text-left transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-inset rounded-none"
         >
         <ChevronRight
           className={cn(
-            "h-5 w-5 shrink-0 text-zinc-400 transition-transform group-hover:text-zinc-200",
+            "h-5 w-5 shrink-0 text-zinc-400 transition-transform motion-reduce:transition-none group-hover:text-zinc-200",
             expanded && "rotate-90"
           )}
           aria-hidden
@@ -289,11 +291,16 @@ export function CompanySection({
           </div>
         </div>
         </button>
+        <div className="flex shrink-0 items-center pr-2">
+          <CompanyScrapeButton company={company} />
+        </div>
+        </div>
         <ContextMenu
           open={companyContext.open}
           x={companyContext.x}
           y={companyContext.y}
           onClose={companyContext.close}
+          scope="company"
           ariaLabel={`Actions for ${company.name}`}
           entries={companyMenuEntries}
         />

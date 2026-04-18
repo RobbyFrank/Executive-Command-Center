@@ -51,10 +51,15 @@ interface SlackPingDialogProps {
   rosterHints?: SlackMemberRosterHint[];
   /** Called after a successful post so the parent can refetch thread status. */
   onSent?: () => void;
-  /** "ping" = ask for an update; "nudge" = push on deadline (requires `targetDate` + `likelihoodContext`). */
-  mode?: "ping" | "nudge";
+  /**
+   * "ping" = ask for an update; "nudge" = push on deadline (requires `targetDate` + `likelihoodContext`);
+   * "reply" = freeform AI-drafted reply (no auto-draft; user supplies intent).
+   */
+  mode?: "ping" | "nudge" | "reply";
   targetDate?: string;
   likelihoodContext?: DeadlineNudgeLikelihoodContext | null;
+  /** Project owner / assignee name: AI addresses this person instead of the sender. */
+  assigneeName?: string | null;
   /** Milestone row (or other container) to leave clear of the dimmed overlay. */
   spotlightRef?: RefObject<HTMLElement | null>;
 }
@@ -74,6 +79,7 @@ export function SlackPingDialog({
   mode = "ping",
   targetDate = "",
   likelihoodContext = null,
+  assigneeName = null,
   spotlightRef,
 }: SlackPingDialogProps) {
   const [phase, setPhase] = useState<
@@ -173,12 +179,22 @@ export function SlackPingDialog({
       return;
     }
 
-    setDraftView("preview");
-    let cancelled = false;
-    setPhase("drafting");
     setError(null);
     setDraft("");
     setReviseHint("");
+
+    // "reply" mode is user-driven: skip auto-generation and start in Edit with an
+    // empty textarea. The user either types directly or asks the AI to draft via
+    // the intent box below.
+    if (mode === "reply") {
+      setDraftView("edit");
+      setPhase("ready");
+      return;
+    }
+
+    setDraftView("preview");
+    let cancelled = false;
+    setPhase("drafting");
 
     void (async () => {
       if (mode === "nudge") {
@@ -197,7 +213,8 @@ export function SlackPingDialog({
           milestoneName,
           td,
           rosterHints,
-          likelihoodContext
+          likelihoodContext,
+          assigneeName?.trim() || undefined
         );
         if (cancelled) return;
         if (!r.ok) {
@@ -214,7 +231,8 @@ export function SlackPingDialog({
       const r = await generateThreadPingMessage(
         slackUrl,
         milestoneName,
-        rosterHints
+        rosterHints,
+        assigneeName?.trim() || undefined
       );
       if (cancelled) return;
       if (!r.ok) {
@@ -238,6 +256,7 @@ export function SlackPingDialog({
     mode,
     targetDate,
     likelihoodContext,
+    assigneeName,
   ]);
 
   if (!open) return null;
@@ -269,7 +288,8 @@ export function SlackPingDialog({
       previousDraft,
       hint,
       targetDate,
-      likelihoodContext
+      likelihoodContext,
+      assigneeName?.trim() || undefined
     );
 
     if (!r.ok) {
@@ -305,10 +325,24 @@ export function SlackPingDialog({
   };
 
   const title =
-    mode === "nudge" ? "Nudge on deadline" : "Ask for an update";
+    mode === "nudge"
+      ? "Nudge on deadline"
+      : mode === "reply"
+        ? "Draft a reply"
+        : "Ask for an update";
   const dueHint = targetDate.trim()
     ? formatCalendarDateHint(targetDate.trim())
     : null;
+  const isReplyMode = mode === "reply";
+  const draftIsEmpty = draft.trim() === "";
+  const aiSectionTitle = isReplyMode ? "Draft with AI" : "Revise with AI";
+  const aiInputPlaceholder = isReplyMode
+    ? draftIsEmpty
+      ? "Describe what you want to say, e.g. Thank them for the demo and ask about Monday's cut-over…"
+      : "Adjust the draft, e.g. Make it shorter, sound more casual…"
+    : "e.g. Shorter, mention the deadline, add a call to action…";
+  const aiActionLabel = isReplyMode && draftIsEmpty ? "Draft" : "Revise";
+  const aiBusyLabel = isReplyMode && draftIsEmpty ? "Drafting…" : "Revising…";
 
   const layer = (
     <>
@@ -394,6 +428,13 @@ export function SlackPingDialog({
                 Draft pushes the team on hitting the milestone (
                 <span className="text-zinc-300">{dueHint}</span>
                 ). Posts as a reply in the linked thread using your Slack user
+                token.
+              </>
+            ) : mode === "reply" ? (
+              <>
+                Tell the AI what you want to say and it will draft a reply grounded
+                in the thread context. You can also type directly and revise with
+                AI. Posts as a reply in the linked thread using your Slack user
                 token.
               </>
             ) : (
@@ -509,7 +550,7 @@ export function SlackPingDialog({
 
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
             <p className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
-              Revise with AI
+              {aiSectionTitle}
             </p>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
               <input
@@ -521,7 +562,7 @@ export function SlackPingDialog({
                   e.preventDefault();
                   void revise();
                 }}
-                placeholder="e.g. Shorter, mention the deadline, add a call to action…"
+                placeholder={aiInputPlaceholder}
                 disabled={
                   phase === "drafting" ||
                   phase === "revising" ||
@@ -551,10 +592,10 @@ export function SlackPingDialog({
                       className="h-4 w-4 shrink-0 animate-spin text-zinc-400"
                       aria-hidden
                     />
-                    Revising…
+                    {aiBusyLabel}
                   </>
                 ) : (
-                  "Revise"
+                  aiActionLabel
                 )}
               </button>
             </div>

@@ -51,7 +51,7 @@ export function EmploymentSelect({
       {!disabled ? (
         <ChevronDown
           className={cn(
-            "pointer-events-none absolute right-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-all duration-150",
+            "pointer-events-none absolute right-1.5 top-1/2 z-[1] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-all duration-150 motion-reduce:transition-none",
             "opacity-0 scale-95",
             "group-hover:opacity-100 group-hover:scale-100 group-hover:text-zinc-400",
             "group-focus-within:opacity-100 group-focus-within:scale-100 group-focus-within:text-zinc-400"

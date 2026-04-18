@@ -10,7 +10,7 @@ import type { Person } from "@/lib/types/tracker";
 import { SlackThreadPopover } from "./SlackThreadPopover";
 import { SlackPingDialog } from "./SlackPingDialog";
 
-export type SlackPingMode = "ping" | "nudge";
+export type SlackPingMode = "ping" | "nudge" | "reply";
 
 interface SlackMilestoneThreadPopoversProps {
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -99,6 +99,10 @@ export function SlackMilestoneThreadPopovers({
           onPingModeChange("nudge");
           onPingOpenChange(true);
         }}
+        onOpenReply={() => {
+          onPingModeChange("reply");
+          onPingOpenChange(true);
+        }}
         targetDate={targetDate}
         ownerName={ownerName}
         ownerAutonomy={ownerAutonomy}
@@ -121,6 +125,7 @@ export function SlackMilestoneThreadPopovers({
         onSent={onPingSent}
         mode={pingMode}
         targetDate={targetDate}
+        assigneeName={ownerName}
         spotlightRef={spotlightRef}
         likelihoodContext={
           pingMode === "nudge" && likelihood

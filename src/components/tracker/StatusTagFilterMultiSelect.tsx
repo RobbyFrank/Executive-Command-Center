@@ -4,19 +4,18 @@ import { useCallback, useId, useMemo, useState } from "react";
 import type { TrackerStatusTagId } from "@/lib/tracker-search-filter";
 import {
   ChevronDown,
-  Eye,
   Flag,
   Ghost,
   Hourglass,
-  Link2,
-  Sparkles,
   Tags,
-  TrendingDown,
-  TrendingUp,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  FilterSelectSelectionBadge,
+  filterSelectTriggerButtonClass,
+} from "./filter-select-trigger";
 
 const OPTIONS: {
   id: TrackerStatusTagId;
@@ -31,22 +30,10 @@ const OPTIONS: {
     Icon: Flag,
   },
   {
-    id: "spotlight",
-    label: "Spotlight",
-    hint: "Positive signal — win, momentum, or exec highlight",
-    Icon: Sparkles,
-  },
-  {
     id: "unassigned",
     label: "Unassigned",
     hint: "No DRI on the goal or owner on the project",
     Icon: UserRound,
-  },
-  {
-    id: "close_watch",
-    label: "Close watch",
-    hint: "P0/P1 project owned by someone with autonomy 1–2",
-    Icon: Eye,
   },
   {
     id: "zombie",
@@ -55,27 +42,9 @@ const OPTIONS: {
     Icon: Ghost,
   },
   {
-    id: "blocked_by_dep",
-    label: "Blocked (dependency)",
-    hint: "Project marked blocked by another until that project's milestones are done",
-    Icon: Link2,
-  },
-  {
-    id: "high_leverage",
-    label: "High leverage",
-    hint: "P0 or P1 goal with low-complexity project (1–2)",
-    Icon: TrendingUp,
-  },
-  {
-    id: "low_leverage",
-    label: "Low leverage",
-    hint: "P3 goal with high-complexity project (4–5)",
-    Icon: TrendingDown,
-  },
-  {
-    id: "time_sensitive",
-    label: "Time-sensitive",
-    hint: "High cost of delay but goal not In Progress",
+    id: "stalled",
+    label: "Stalled",
+    hint: "High cost of delay (≥4) but goal not In Progress",
     Icon: Hourglass,
   },
 ];
@@ -137,8 +106,7 @@ export function StatusTagFilterMultiSelect({
   return (
     <div className="relative min-w-[10rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
-        Filter goals and projects by signals: at risk, spotlight, leverage, zombie,
-        time-sensitive, and more
+        Filter goals and projects by signals: at risk, unassigned, zombie, stalled
       </span>
       <button
         type="button"
@@ -147,14 +115,18 @@ export function StatusTagFilterMultiSelect({
         aria-labelledby={`${listId}-label`}
         aria-controls={`${listId}-panel`}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-2 pr-2 text-left text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+        className={filterSelectTriggerButtonClass(
+          open,
+          selectedIds.length > 0
+        )}
       >
         <span className="flex min-w-0 flex-1 items-center gap-2">
           {buttonSummary}
+          <FilterSelectSelectionBadge count={selectedIds.length} />
         </span>
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform",
+            "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform motion-reduce:transition-none",
             open && "rotate-180"
           )}
           aria-hidden

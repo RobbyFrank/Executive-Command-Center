@@ -433,8 +433,8 @@ export function InlineEditCell({
             // Quiet roadmap score cells: avoid a boxy ring at rest; keep a clear keyboard focus indicator.
             overlaySelectQuiet
               ? "focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:underline focus-visible:decoration-dotted focus-visible:decoration-zinc-500 focus-visible:underline-offset-4"
-              : "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
-            overlaySelectOpen && "ring-1 ring-blue-600"
+              : "focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-600",
+            overlaySelectOpen && "ring-1 ring-emerald-600"
           )}
         >
           {value.trim()
@@ -447,7 +447,7 @@ export function InlineEditCell({
         {overlayListbox}
         <ChevronDown
           className={cn(
-            "pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity",
+            "pointer-events-none absolute right-1 top-1/2 z-[2] h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity motion-reduce:transition-none",
             overlaySelectQuiet
               ? cn(
                   "opacity-0 group-hover/status:opacity-100 peer-focus-visible:opacity-100",
@@ -479,7 +479,7 @@ export function InlineEditCell({
             "appearance-none border-0 bg-transparent shadow-none",
             "transition-colors",
             "hover:bg-zinc-800",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-600",
             value.trim() ? displayClassName : "text-zinc-600 italic",
             className
           )}
@@ -493,7 +493,7 @@ export function InlineEditCell({
           ))}
         </select>
         <ChevronDown
-          className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity peer-hover:opacity-100 peer-focus-visible:opacity-100"
+          className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 opacity-0 transition-opacity motion-reduce:transition-none peer-hover:opacity-100 peer-focus-visible:opacity-100"
           aria-hidden
         />
       </div>
@@ -529,7 +529,7 @@ export function InlineEditCell({
             cellPadX,
             "border-0 bg-transparent transition-colors cursor-pointer",
             "hover:bg-zinc-800",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-600",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-600",
             !value.trim() && !emptyAttention && "text-zinc-600 italic",
             emptyAttention &&
               "rounded-md border border-amber-500/45 bg-amber-950/40 font-medium not-italic text-amber-100 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
@@ -641,7 +641,7 @@ export function InlineEditCell({
                 setEditing(true);
               }}
               className={cn(
-                "inline-flex h-7 w-5 shrink-0 items-center justify-center rounded text-zinc-500 hover:text-zinc-300 transition-opacity",
+                "inline-flex h-7 w-5 shrink-0 items-center justify-center rounded text-zinc-500 transition-opacity motion-reduce:transition-none hover:text-zinc-300",
                 "opacity-0 group-hover/urlicon:opacity-100 focus-visible:opacity-100",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-500/35"
               )}
@@ -744,7 +744,7 @@ export function InlineEditCell({
           : cn(
               "inline-block max-w-full min-w-0 break-words rounded py-0.5 text-left text-sm cursor-pointer transition-colors outline-none",
               cellPadX,
-              "hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-blue-600"
+              "hover:bg-zinc-800 focus-visible:ring-1 focus-visible:ring-emerald-600"
             ),
         !value &&
           (variant === "plain"
@@ -832,7 +832,7 @@ export function InlineEditCell({
   }
 
   const inputClasses = cn(
-    "w-full py-0.5 bg-zinc-900 border border-zinc-700 rounded text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-600",
+    "w-full py-0.5 bg-zinc-900 border border-zinc-700 rounded text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-600",
     cellPadX
   );
 

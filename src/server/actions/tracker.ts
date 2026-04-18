@@ -1,7 +1,8 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { updateTag } from "next/cache";
 import { getRepository } from "@/server/repository";
+import { ECC_TRACKER_DATA_TAG } from "@/lib/cache-tags";
 import { deleteFileIfInUploads } from "@/server/imageFiles";
 import { v4 as uuid } from "uuid";
 import type {
@@ -12,11 +13,14 @@ import type {
   Milestone,
   Person,
 } from "@/lib/types/tracker";
-import { computeMomentumScore, isActiveStatus } from "@/lib/companyMomentum";
 import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import { isValidHttpUrl } from "@/lib/httpUrl";
 import { isBlockingProjectIncomplete } from "@/lib/blocked-status";
+import {
+  createScrapedItemsPayloadSchema,
+  type CreateScrapedItemsPayload,
+} from "@/lib/schemas/tracker";
 
 const repo = getRepository();
 
@@ -45,10 +49,8 @@ async function maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
   await repo.updateProject(projectId, { status: "In Progress" });
 }
 
-function revalidate() {
-  revalidatePath("/");
-  revalidatePath("/companies");
-  revalidatePath("/team");
+function revalidateTrackerPages() {
+  updateTag(ECC_TRACKER_DATA_TAG);
 }
 
 // --- Companies ---
@@ -59,7 +61,7 @@ export async function createCompany(
   const id = uuid();
   const company = { id, ...data };
   await repo.createCompany(company);
-  revalidate();
+  revalidateTrackerPages();
   return company;
 }
 
@@ -68,7 +70,7 @@ export async function updateCompany(
   updates: Partial<Company>
 ): Promise<Company> {
   const result = await repo.updateCompany(id, updates);
-  revalidate();
+  revalidateTrackerPages();
   return result;
 }
 
@@ -91,7 +93,7 @@ export async function deleteCompany(
       /* logo cleanup is best-effort after JSON delete */
     }
   }
-  revalidate();
+  revalidateTrackerPages();
   return { error: null };
 }
 
@@ -110,7 +112,7 @@ export async function createGoal(
     createdAt,
   };
   await repo.createGoal(goal);
-  revalidate();
+  revalidateTrackerPages();
   return goal;
 }
 
@@ -135,7 +137,7 @@ export async function updateGoal(
   }
   const { createdAt: _omitCreatedAt, ...goalUpdates } = updates;
   const result = await repo.updateGoal(id, goalUpdates);
-  revalidate();
+  revalidateTrackerPages();
   return result;
 }
 
@@ -149,7 +151,7 @@ export async function deleteGoal(
       error: e instanceof Error ? e.message : "Could not delete goal.",
     };
   }
-  revalidate();
+  revalidateTrackerPages();
   return { error: null };
 }
 
@@ -178,7 +180,7 @@ export async function createProject(
     createdAt,
   };
   await repo.createProject(project);
-  revalidate();
+  revalidateTrackerPages();
   return project;
 }
 
@@ -206,13 +208,13 @@ export async function updateProject(
   }
 
   const result = await repo.updateProject(id, next);
-  revalidate();
+  revalidateTrackerPages();
   return result;
 }
 
 export async function deleteProject(id: string): Promise<void> {
   await repo.deleteProject(id);
-  revalidate();
+  revalidateTrackerPages();
 }
 
 /** Attach a project to an additional goal (mirror). Primary goal remains `goalId`. */
@@ -266,7 +268,7 @@ export async function createMilestone(
     "",
     milestone.slackUrl
   );
-  revalidate();
+  revalidateTrackerPages();
   return milestone;
 }
 
@@ -287,33 +289,174 @@ export async function updateMilestone(
     );
   }
 
-  revalidate();
+  revalidateTrackerPages();
   return result;
 }
 
 export async function deleteMilestone(id: string): Promise<void> {
   await repo.deleteMilestone(id);
-  revalidate();
+  revalidateTrackerPages();
+}
+
+/**
+ * Batch-creates goals, projects, and milestones from Slack scrape review (single KV write).
+ */
+export async function createScrapedItems(
+  payload: CreateScrapedItemsPayload
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = createScrapedItemsPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { ok: false, error: "Invalid payload" };
+  }
+
+  const { companyId, bundles, projectsOnExistingGoals } = parsed.data;
+  const company = await repo.getCompany(companyId);
+  if (!company) {
+    return { ok: false, error: "Company not found" };
+  }
+
+  const goalIdsForCompany = new Set(
+    (await repo.getGoalsByCompany(companyId)).map((g) => g.id)
+  );
+
+  const goals: Goal[] = [];
+  const projects: Project[] = [];
+  const milestones: Milestone[] = [];
+  const today = calendarDateTodayLocal();
+
+  for (const bundle of bundles) {
+    const goalId = uuid();
+    goals.push({
+      id: goalId,
+      companyId,
+      createdAt: today,
+      reviewLog: [],
+      description: bundle.goal.description,
+      measurableTarget: bundle.goal.measurableTarget,
+      whyItMatters: bundle.goal.whyItMatters,
+      currentValue: bundle.goal.currentValue,
+      impactScore: bundle.goal.impactScore,
+      confidenceScore: 0,
+      costOfDelay: 3,
+      ownerId: "",
+      priority: bundle.goal.priority,
+      slackChannel: "",
+      slackChannelId: "",
+      status: bundle.goal.status,
+      atRisk: false,
+      spotlight: false,
+    });
+
+    for (const pd of bundle.projects) {
+      const projectId = uuid();
+      projects.push({
+        id: projectId,
+        goalId,
+        createdAt: today,
+        reviewLog: [],
+        name: pd.name,
+        description: pd.description,
+        definitionOfDone: pd.definitionOfDone,
+        priority: pd.priority,
+        complexityScore: pd.complexityScore,
+        type: pd.type,
+        status: "Pending",
+        ownerId: "",
+        assigneeIds: [],
+        mirroredGoalIds: [],
+        slackUrl: "",
+        blockedByProjectId: "",
+        atRisk: false,
+        spotlight: false,
+        startDate: "",
+        targetDate: "",
+      });
+      for (const md of pd.milestones) {
+        milestones.push({
+          id: uuid(),
+          projectId,
+          name: md.name,
+          status: "Not Done",
+          targetDate: md.targetDate,
+          slackUrl: "",
+        });
+      }
+    }
+  }
+
+  for (const row of projectsOnExistingGoals) {
+    if (!goalIdsForCompany.has(row.goalId)) {
+      return { ok: false, error: "Invalid goal id for this company" };
+    }
+    const projectId = uuid();
+    projects.push({
+      id: projectId,
+      goalId: row.goalId,
+      createdAt: today,
+      reviewLog: [],
+      name: row.project.name,
+      description: row.project.description,
+      definitionOfDone: row.project.definitionOfDone,
+      priority: row.project.priority,
+      complexityScore: row.project.complexityScore,
+      type: row.project.type,
+      status: "Pending",
+      ownerId: "",
+      assigneeIds: [],
+      mirroredGoalIds: [],
+      slackUrl: "",
+      blockedByProjectId: "",
+      atRisk: false,
+      spotlight: false,
+      startDate: "",
+      targetDate: "",
+    });
+    for (const md of row.project.milestones) {
+      milestones.push({
+        id: uuid(),
+        projectId,
+        name: md.name,
+        status: "Not Done",
+        targetDate: md.targetDate,
+        slackUrl: "",
+      });
+    }
+  }
+
+  if (goals.length === 0 && projects.length === 0) {
+    return { ok: false, error: "Nothing to create" };
+  }
+
+  try {
+    await repo.createScrapedItemsBatch({ goals, projects, milestones });
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Could not save scraped items",
+    };
+  }
+  revalidateTrackerPages();
+  return { ok: true };
 }
 
 // --- People ---
 
 export async function createPerson(
-  data: Omit<Person, "id">
+  data: Omit<Person, "id" | "passwordHash">
 ): Promise<Person> {
   const id = uuid();
-  const person = { id, ...data };
-  await repo.createPerson(person);
-  revalidate();
-  return person;
+  const person: Person = { id, ...data, passwordHash: "" };
+  const created = await repo.createPerson(person);
+  revalidateTrackerPages();
+  return created;
 }
 
 export async function updatePerson(
   id: string,
-  updates: Partial<Person>
+  updates: Partial<Omit<Person, "passwordHash">>
 ): Promise<Person> {
   const result = await repo.updatePerson(id, updates);
-  revalidate();
+  revalidateTrackerPages();
   return result;
 }
 
@@ -336,7 +479,7 @@ export async function deletePerson(
       /* file cleanup is best-effort after JSON delete */
     }
   }
-  revalidate();
+  revalidateTrackerPages();
   return { error: null };
 }
 
@@ -386,96 +529,11 @@ export async function getCompanies() {
   return repo.getCompanies();
 }
 
-function emptyCompanyDirectoryStats(): CompanyDirectoryStats {
-  return {
-    goals: 0,
-    projects: 0,
-    owners: 0,
-    activeGoals: 0,
-    activeProjects: 0,
-    goalsWithSpotlight: 0,
-    goalsWithAtRisk: 0,
-    projectsWithSpotlight: 0,
-    projectsWithAtRisk: 0,
-    milestonesDone: 0,
-    milestonesTotal: 0,
-    momentumScore: 0,
-  };
-}
-
-/** Per-company tracker stats for the Companies directory. */
+/** Per-company tracker stats for the Companies directory (uncached; use `getCachedCompanyStatsByCompanyId` on pages). */
 export async function getCompanyStatsByCompanyId(): Promise<
   Record<string, CompanyDirectoryStats>
 > {
-  const [companies, goals, projects, milestones] = await Promise.all([
-    repo.getCompanies(),
-    repo.getGoals(),
-    repo.getProjects(),
-    repo.getMilestones(),
-  ]);
-  const stats: Record<string, CompanyDirectoryStats> = {};
-  for (const c of companies) {
-    stats[c.id] = emptyCompanyDirectoryStats();
-  }
-  const ownerIdsByCompany = new Map<string, Set<string>>();
-
-  function ensureCompanySet(companyId: string): Set<string> {
-    let set = ownerIdsByCompany.get(companyId);
-    if (!set) {
-      set = new Set<string>();
-      ownerIdsByCompany.set(companyId, set);
-    }
-    return set;
-  }
-
-  const goalById = new Map(goals.map((g) => [g.id, g]));
-  const projectById = new Map(projects.map((p) => [p.id, p]));
-
-  for (const g of goals) {
-    const row = stats[g.companyId];
-    if (!row) continue;
-    row.goals += 1;
-    if (isActiveStatus(g.status)) row.activeGoals += 1;
-    if (g.spotlight) row.goalsWithSpotlight += 1;
-    if (g.atRisk) row.goalsWithAtRisk += 1;
-    if (g.ownerId) ensureCompanySet(g.companyId).add(g.ownerId);
-  }
-
-  for (const p of projects) {
-    const goal = goalById.get(p.goalId);
-    if (!goal) continue;
-    const row = stats[goal.companyId];
-    if (!row) continue;
-    row.projects += 1;
-    if (isActiveStatus(p.status)) row.activeProjects += 1;
-    if (p.spotlight) row.projectsWithSpotlight += 1;
-    if (p.atRisk) row.projectsWithAtRisk += 1;
-    if (p.ownerId) ensureCompanySet(goal.companyId).add(p.ownerId);
-  }
-
-  for (const m of milestones) {
-    const proj = projectById.get(m.projectId);
-    if (!proj) continue;
-    const goal = goalById.get(proj.goalId);
-    if (!goal) continue;
-    const row = stats[goal.companyId];
-    if (!row) continue;
-    row.milestonesTotal += 1;
-    if (m.status === "Done") row.milestonesDone += 1;
-  }
-
-  for (const [companyId, set] of ownerIdsByCompany) {
-    const row = stats[companyId];
-    if (row) row.owners = set.size;
-  }
-
-  for (const c of companies) {
-    const row = stats[c.id];
-    if (!row) continue;
-    row.momentumScore = computeMomentumScore(row);
-  }
-
-  return stats;
+  return repo.getCompanyStatsByCompanyId();
 }
 
 export async function getPeople() {

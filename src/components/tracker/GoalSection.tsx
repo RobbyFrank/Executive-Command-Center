@@ -243,8 +243,8 @@ export function GoalSection({
     [people]
   );
   const goalConfidenceAuto = useMemo(
-    () => computeGoalConfidence(goal.projects, peopleById, goal.costOfDelay),
-    [goal.projects, peopleById, goal.costOfDelay]
+    () => computeGoalConfidence(goal.projects, peopleById),
+    [goal.projects, peopleById]
   );
   const goalConfidenceExplain = useMemo(
     () => explainGoalConfidence(goal, peopleById),
@@ -628,8 +628,9 @@ export function GoalSection({
           />
         </div>
 
-        {/* Confidence — auto: average of project scores; w-28 aligns with project Confidence */}
-        <div className="w-28 min-w-0 shrink flex items-center justify-end pr-0.5">
+        {/* Confidence — auto: plain average of child project scores; w-28 aligns with project Confidence.
+            Left-aligned to match the project row so the segmented meter stays under the header label. */}
+        <div className="w-28 min-w-0 shrink flex items-center justify-start pl-0.5">
           <AutoConfidencePercent
             score={goalConfidenceAuto}
             explanation={goalConfidenceExplain}
@@ -735,6 +736,7 @@ export function GoalSection({
         x={goalContext.x}
         y={goalContext.y}
         onClose={goalContext.close}
+        scope="goal"
         ariaLabel={`Actions for goal ${goal.description}`}
         entries={goalMenuEntries}
       />

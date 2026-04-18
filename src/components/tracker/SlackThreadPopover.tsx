@@ -43,6 +43,7 @@ interface SlackThreadPopoverProps {
   onRefreshStatus: () => void;
   onOpenPing: () => void;
   onOpenNudge: () => void;
+  onOpenReply: () => void;
   targetDate: string;
   ownerName: string | null;
   ownerAutonomy: number | null;
@@ -246,6 +247,7 @@ export function SlackThreadPopover({
   onRefreshStatus,
   onOpenPing,
   onOpenNudge,
+  onOpenReply,
   targetDate,
   ownerName,
   ownerAutonomy,
@@ -456,6 +458,16 @@ export function SlackThreadPopover({
               </div>
 
               <div className="flex shrink-0 flex-col gap-2 border-t border-zinc-800/90 px-5 py-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenReply();
+                  }}
+                  className="w-full rounded-md border border-sky-600/50 bg-sky-950/40 px-2 py-1.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/50"
+                >
+                  Draft a reply with AI…
+                </button>
                 <button
                   type="button"
                   onClick={() => {

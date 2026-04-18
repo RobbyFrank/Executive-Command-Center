@@ -85,13 +85,29 @@ export function getMilestoneDueHorizon(
   return "later";
 }
 
+export interface FormatRelativeCalendarDateOptions {
+  /**
+   * When true, drop the leading "in " from future labels so the result reads as a bare
+   * duration (e.g. "2 weeks" instead of "in 2 weeks"). Past "… ago" labels are unaffected
+   * because dropping "ago" would be ambiguous with future durations. "today"/"tomorrow"/
+   * "yesterday" pass through unchanged.
+   *
+   * Opt-in because most in-app usages (e.g. "Due {...}", "Launched {...}") read naturally
+   * with the preposition; this is for compact table cells where the column header already
+   * supplies the "when" context.
+   */
+  omitFuturePreposition?: boolean;
+}
+
 /**
  * Human-friendly relative label for a calendar date (e.g. target dates).
  * Examples: today, yesterday, in 6 days (under 2 weeks), in 5 weeks, 3 months ago, in 1 year.
+ * Pass `{ omitFuturePreposition: true }` for compact cells that don't want the "in " prefix.
  */
 export function formatRelativeCalendarDate(
   ymd: string,
-  now = new Date()
+  now: Date = new Date(),
+  options: FormatRelativeCalendarDateOptions = {}
 ): string {
   const target = parseCalendarDateString(ymd);
   if (!target) return ymd;
@@ -105,46 +121,35 @@ export function formatRelativeCalendarDate(
 
   const abs = Math.abs(diff);
   const future = diff > 0;
+  const omitIn = future && options.omitFuturePreposition === true;
+  const futurePrefix = omitIn ? "" : "in ";
 
   /** Near-term only — past ~2 weeks we switch to rounded weeks. */
   if (abs < 14) {
     if (abs === 7) {
-      return future ? "in 1 week" : "1 week ago";
+      return future ? `${futurePrefix}1 week` : "1 week ago";
     }
     const dayWord = abs === 1 ? "day" : "days";
-    return future ? `in ${abs} ${dayWord}` : `${abs} ${dayWord} ago`;
+    return future
+      ? `${futurePrefix}${abs} ${dayWord}`
+      : `${abs} ${dayWord} ago`;
   }
 
   if (abs < 60) {
     const w = Math.max(1, Math.round(abs / 7));
-    return future
-      ? w === 1
-        ? "in 1 week"
-        : `in ${w} weeks`
-      : w === 1
-        ? "1 week ago"
-        : `${w} weeks ago`;
+    const label = w === 1 ? "1 week" : `${w} weeks`;
+    return future ? `${futurePrefix}${label}` : `${label} ago`;
   }
 
   if (abs < 365) {
     const months = Math.max(1, Math.round(abs / 30));
-    return future
-      ? months === 1
-        ? "in 1 month"
-        : `in ${months} months`
-      : months === 1
-        ? "1 month ago"
-        : `${months} months ago`;
+    const label = months === 1 ? "1 month" : `${months} months`;
+    return future ? `${futurePrefix}${label}` : `${label} ago`;
   }
 
   const years = Math.max(1, Math.round(abs / 365));
-  return future
-    ? years === 1
-      ? "in 1 year"
-      : `in ${years} years`
-    : years === 1
-      ? "1 year ago"
-      : `${years} years ago`;
+  const label = years === 1 ? "1 year" : `${years} years`;
+  return future ? `${futurePrefix}${label}` : `${label} ago`;
 }
 
 /**

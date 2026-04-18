@@ -9,11 +9,12 @@ import type {
   Person,
   TrackerData,
   CompanyWithGoals,
+  CompanyDirectoryStats,
   GoalWithProjects,
   ProjectWithMilestones,
   PersonWorkload,
 } from "@/lib/types/tracker";
-import type { TrackerRepository } from "./types";
+import type { ScrapedItemsBatch, TrackerRepository } from "./types";
 import type { TrackerStorage } from "./tracker-storage";
 import { TrackerConcurrentModificationError } from "./errors";
 import { compareMilestonesByTargetDate } from "@/lib/milestoneSort";
@@ -21,8 +22,27 @@ import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
 import { comparePriority } from "@/lib/prioritySort";
 import { sortProjectsBlockedUnderBlocker } from "@/lib/projectBlockedOrder";
 import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
+import { toPublicPerson } from "@/lib/personSecrets";
+import { computeMomentumScore, isActiveStatus } from "@/lib/companyMomentum";
 
 const MAX_COMMIT_ATTEMPTS = 12;
+
+function emptyCompanyDirectoryStats(): CompanyDirectoryStats {
+  return {
+    goals: 0,
+    projects: 0,
+    owners: 0,
+    activeGoals: 0,
+    activeProjects: 0,
+    goalsWithSpotlight: 0,
+    goalsWithAtRisk: 0,
+    projectsWithSpotlight: 0,
+    projectsWithAtRisk: 0,
+    milestonesDone: 0,
+    milestonesTotal: 0,
+    momentumScore: 0,
+  };
+}
 
 /** atRisk and spotlight cannot both be true; resolve using the latest explicit update. */
 function reconcileGoalProjectExecFlags<
@@ -158,6 +178,23 @@ export class TrackerRepositoryCore implements TrackerRepository {
     });
   }
 
+  async createScrapedItemsBatch(batch: ScrapedItemsBatch): Promise<void> {
+    await this.commitWithRetry((data) => {
+      for (const g of batch.goals) {
+        if (data.goals.some((x) => x.id === g.id)) continue;
+        data.goals.push(g);
+      }
+      for (const p of batch.projects) {
+        if (data.projects.some((x) => x.id === p.id)) continue;
+        data.projects.push(p);
+      }
+      for (const m of batch.milestones) {
+        if (data.milestones.some((x) => x.id === m.id)) continue;
+        data.milestones.push(m);
+      }
+    });
+  }
+
   // --- Projects ---
 
   async getProjects(): Promise<Project[]> {
@@ -256,22 +293,28 @@ export class TrackerRepositoryCore implements TrackerRepository {
 
   async getPeople(): Promise<Person[]> {
     const data = await this.getData();
-    return data.people.map(withFounderDepartmentRules);
+    return data.people.map((p) =>
+      toPublicPerson(withFounderDepartmentRules(p))
+    );
   }
 
   async getPerson(id: string): Promise<Person | undefined> {
     const data = await this.getData();
     const p = data.people.find((p) => p.id === id);
-    return p ? withFounderDepartmentRules(p) : undefined;
+    return p ? toPublicPerson(withFounderDepartmentRules(p)) : undefined;
   }
 
   async createPerson(person: Person): Promise<Person> {
-    const normalized = withFounderDepartmentRules(person);
+    const withDefaults: Person = {
+      ...person,
+      passwordHash: person.passwordHash ?? "",
+    };
+    const normalized = withFounderDepartmentRules(withDefaults);
     await this.commitWithRetry((data) => {
       if (data.people.some((p) => p.id === normalized.id)) return;
       data.people.push(normalized);
     });
-    return normalized;
+    return toPublicPerson(normalized);
   }
 
   async updatePerson(id: string, updates: Partial<Person>): Promise<Person> {
@@ -283,7 +326,7 @@ export class TrackerRepositoryCore implements TrackerRepository {
       data.people[idx] = withFounderDepartmentRules(merged);
       result = data.people[idx];
     });
-    return result;
+    return toPublicPerson(result);
   }
 
   async deletePerson(id: string): Promise<void> {
@@ -378,7 +421,9 @@ export class TrackerRepositoryCore implements TrackerRepository {
   async getPersonWorkloads(): Promise<PersonWorkload[]> {
     const data = await this.getData();
     return data.people.map((person) => {
-      const personNorm = withFounderDepartmentRules(person);
+      const personNorm = toPublicPerson(
+        withFounderDepartmentRules(person)
+      );
       const owned = data.projects.filter((p) => p.ownerId === personNorm.id);
       const companyIds = new Set<string>();
       for (const project of owned) {
@@ -398,5 +443,79 @@ export class TrackerRepositoryCore implements TrackerRepository {
         projectCompanyIds,
       };
     });
+  }
+
+  async getCompanyStatsByCompanyId(): Promise<
+    Record<string, CompanyDirectoryStats>
+  > {
+    const [companies, goals, projects, milestones] = await Promise.all([
+      this.getCompanies(),
+      this.getGoals(),
+      this.getProjects(),
+      this.getMilestones(),
+    ]);
+    const stats: Record<string, CompanyDirectoryStats> = {};
+    for (const c of companies) {
+      stats[c.id] = emptyCompanyDirectoryStats();
+    }
+    const ownerIdsByCompany = new Map<string, Set<string>>();
+
+    function ensureCompanySet(companyId: string): Set<string> {
+      let set = ownerIdsByCompany.get(companyId);
+      if (!set) {
+        set = new Set<string>();
+        ownerIdsByCompany.set(companyId, set);
+      }
+      return set;
+    }
+
+    const goalById = new Map(goals.map((g) => [g.id, g]));
+    const projectById = new Map(projects.map((p) => [p.id, p]));
+
+    for (const g of goals) {
+      const row = stats[g.companyId];
+      if (!row) continue;
+      row.goals += 1;
+      if (isActiveStatus(g.status)) row.activeGoals += 1;
+      if (g.spotlight) row.goalsWithSpotlight += 1;
+      if (g.atRisk) row.goalsWithAtRisk += 1;
+      if (g.ownerId) ensureCompanySet(g.companyId).add(g.ownerId);
+    }
+
+    for (const p of projects) {
+      const goal = goalById.get(p.goalId);
+      if (!goal) continue;
+      const row = stats[goal.companyId];
+      if (!row) continue;
+      row.projects += 1;
+      if (isActiveStatus(p.status)) row.activeProjects += 1;
+      if (p.spotlight) row.projectsWithSpotlight += 1;
+      if (p.atRisk) row.projectsWithAtRisk += 1;
+      if (p.ownerId) ensureCompanySet(goal.companyId).add(p.ownerId);
+    }
+
+    for (const m of milestones) {
+      const proj = projectById.get(m.projectId);
+      if (!proj) continue;
+      const goal = goalById.get(proj.goalId);
+      if (!goal) continue;
+      const row = stats[goal.companyId];
+      if (!row) continue;
+      row.milestonesTotal += 1;
+      if (m.status === "Done") row.milestonesDone += 1;
+    }
+
+    for (const [companyId, set] of ownerIdsByCompany) {
+      const row = stats[companyId];
+      if (row) row.owners = set.size;
+    }
+
+    for (const c of companies) {
+      const row = stats[c.id];
+      if (!row) continue;
+      row.momentumScore = computeMomentumScore(row);
+    }
+
+    return stats;
   }
 }

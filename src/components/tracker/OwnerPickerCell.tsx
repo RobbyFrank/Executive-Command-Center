@@ -227,7 +227,7 @@ export function OwnerPickerCell({
       )}
       <ChevronDown
         className={cn(
-          "pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity group-hover/owner:opacity-100",
+          "pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500 transition-opacity motion-reduce:transition-none group-hover/owner:opacity-100",
           unassignedHighlight ? "text-amber-400/90 opacity-100" : "opacity-0"
         )}
         aria-hidden
@@ -384,7 +384,7 @@ function PersonOption({
             showWarning
               ? "ring-amber-500/60"
               : selected
-                ? "ring-blue-500/60"
+                ? "ring-emerald-500/60"
                 : "ring-zinc-700",
           )}
         />
@@ -395,7 +395,7 @@ function PersonOption({
             showWarning
               ? "bg-amber-950/50 text-amber-300 ring-2 ring-amber-500/60"
               : selected
-                ? "bg-blue-950/50 text-blue-300 ring-2 ring-blue-500/60"
+                ? "bg-emerald-950/50 text-emerald-300 ring-2 ring-emerald-500/60"
                 : "bg-zinc-800 text-zinc-400 ring-2 ring-zinc-700",
           )}
         >

@@ -220,7 +220,7 @@ export function DepartmentSelect({
         </span>
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-all duration-150",
+            "h-3.5 w-3.5 shrink-0 transition-all duration-150 motion-reduce:transition-none",
             isNoDepartment ? "text-amber-400/90" : "text-zinc-500",
             "opacity-0 scale-95",
             "group-hover:opacity-100 group-hover:scale-100",

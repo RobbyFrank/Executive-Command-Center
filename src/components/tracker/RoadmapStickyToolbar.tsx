@@ -29,7 +29,7 @@ export function RoadmapStickyToolbar({ children }: { children: ReactNode }) {
       className={cn(
         "sticky top-0 z-30 min-w-0 max-w-full border-b border-zinc-800/70",
         "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-3",
-        "shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)]"
+        "shadow-[0_10px_28px_-10px_rgba(0,0,0,0.5)] motion-reduce:shadow-none"
       )}
     >
       {children}

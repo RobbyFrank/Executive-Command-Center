@@ -47,6 +47,7 @@ import {
   Activity,
   Users,
   RefreshCw,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SlackLogo } from "./SlackLogo";
@@ -87,6 +88,8 @@ import { formatUsdWhole } from "@/lib/formatUsd";
 import { SlackImportDialog } from "./SlackImportDialog";
 import { refreshPersonFromSlack } from "@/server/actions/slack";
 import { SLACK_REFRESH_NO_NEW_DATA_MESSAGE } from "@/lib/slack-refresh-messages";
+import { SetPersonPasswordDialog } from "./SetPersonPasswordDialog";
+import { setPersonPassword } from "@/server/actions/auth-admin";
 
 function EmploymentMiniIcon({ label }: { label: string }) {
   if (label === "Outsourced") {
@@ -133,10 +136,14 @@ function RosterGroupSalaryStats({ people }: { people: Person[] }) {
   );
 }
 
+type PersonWithLoginFlag = Person & { loginPasswordSet?: boolean };
+
 interface TeamRosterManagerProps {
   initialPeople: Person[];
   companies: Company[];
   workloads: PersonWorkload[];
+  /** Founders can set/clear app login passwords for roster members (email + bcrypt hash in tracker JSON). */
+  canManageLoginPasswords: boolean;
 }
 
 /** Same shell as Roadmap’s sticky toolbar (border, blur, shadow, padding). */
@@ -165,8 +172,13 @@ export function TeamRosterManager({
   initialPeople,
   companies,
   workloads,
+  canManageLoginPasswords,
 }: TeamRosterManagerProps) {
   const router = useRouter();
+  const [passwordDialog, setPasswordDialog] = useState<{
+    person: PersonWithLoginFlag;
+    mode: "set" | "change";
+  } | null>(null);
   /** After adding a person, name cell opens in edit mode so the user can type immediately. */
   const [newPersonNameFocusId, setNewPersonNameFocusId] = useState<
     string | null
@@ -548,6 +560,14 @@ export function TeamRosterManager({
         onClose={() => setSlackImportOpen(false)}
         existingSlackIds={existingSlackIds}
       />
+      {passwordDialog ? (
+        <SetPersonPasswordDialog
+          open
+          person={passwordDialog.person}
+          mode={passwordDialog.mode}
+          onClose={() => setPasswordDialog(null)}
+        />
+      ) : null}
       <div className="min-w-0 min-h-0 max-w-full">
       <div ref={teamStickyToolbarRef} className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
         <div className="mb-4 flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -775,7 +795,7 @@ export function TeamRosterManager({
           </p>
         ) : null}
         {!(filterActive && filteredPeople.length === 0) ? (
-        <table className="w-full text-sm min-w-[1380px]">
+        <table className="w-full text-sm min-w-[1500px]">
           <thead>
             <tr
               ref={teamColumnHeaderRef}
@@ -820,6 +840,12 @@ export function TeamRosterManager({
               </th>
               <th className="text-left px-3 py-3 font-medium" scope="col">
                 <SlackLogo alt="Slack" className="h-4 w-4" />
+              </th>
+              <th
+                className="text-left px-3 py-3 font-medium min-w-[10rem]"
+                scope="col"
+              >
+                Login
               </th>
               <th
                 className="w-10 py-3 pr-4"
@@ -870,7 +896,7 @@ export function TeamRosterManager({
                     "sticky z-10 top-[var(--team-roster-group-top,0px)] bg-zinc-900 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.35)]"
                   )}
                 >
-                  <td colSpan={13} className="px-3 py-2.5">
+                  <td colSpan={14} className="px-3 py-2.5">
                     <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {group.kind === "department" ? (
@@ -1148,6 +1174,83 @@ export function TeamRosterManager({
                         displayTitle="Slack user ID — click to edit"
                         displayClassName="text-zinc-500"
                       />
+                    </td>
+                    <td className="px-3 py-2 align-middle max-w-[12rem]">
+                      {(() => {
+                        const p = person as PersonWithLoginFlag;
+                        const hasEmail = (p.email ?? "").trim() !== "";
+                        if (!canManageLoginPasswords) {
+                          return (
+                            <span className="text-zinc-600" aria-hidden>
+                              —
+                            </span>
+                          );
+                        }
+                        if (!hasEmail) {
+                          return (
+                            <span
+                              className="text-xs text-zinc-600"
+                              title="Add an email in the Email column first"
+                            >
+                              Set email first
+                            </span>
+                          );
+                        }
+                        if (p.loginPasswordSet) {
+                          return (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <Lock
+                                className="h-3.5 w-3.5 shrink-0 text-emerald-500/90"
+                                aria-hidden
+                              />
+                              <button
+                                type="button"
+                                className="text-xs font-medium text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
+                                onClick={() =>
+                                  setPasswordDialog({ person: p, mode: "change" })
+                                }
+                              >
+                                Change
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs font-medium text-zinc-500 hover:text-red-400"
+                                onClick={() => {
+                                  if (
+                                    !confirm(
+                                      "Remove login access for this person? They can be given a new password later."
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  void (async () => {
+                                    const r = await setPersonPassword(p.id, null);
+                                    if (!r.ok) {
+                                      toast.error(r.error);
+                                      return;
+                                    }
+                                    toast.success("Login access removed.");
+                                    router.refresh();
+                                  })();
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            className="rounded border border-zinc-600 bg-zinc-900/80 px-2 py-1 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                            onClick={() =>
+                              setPasswordDialog({ person: p, mode: "set" })
+                            }
+                          >
+                            Set password
+                          </button>
+                        );
+                      })()}
                     </td>
                     <td className="py-2 pl-2 pr-4 align-middle">
                       <TeamRosterRowMenu person={person} />

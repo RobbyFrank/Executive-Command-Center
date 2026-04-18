@@ -1,4 +1,7 @@
-import { getHierarchy, getPeople } from "@/server/actions/tracker";
+import {
+  getCachedHierarchy,
+  getCachedPeople,
+} from "@/server/tracker-page-data";
 import { TrackerView } from "@/components/tracker/TrackerView";
 import { parseRoadmapSearchParams } from "@/lib/roadmap-query";
 
@@ -11,8 +14,8 @@ export default async function RoadmapPage({
   const { initialFocus, filters: initialFilters } = parseRoadmapSearchParams(sp);
 
   const [hierarchy, people] = await Promise.all([
-    getHierarchy(),
-    getPeople(),
+    getCachedHierarchy(),
+    getCachedPeople(),
   ]);
 
   return (

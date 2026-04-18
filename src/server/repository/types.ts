@@ -6,8 +6,16 @@ import type {
   Person,
   TrackerData,
   CompanyWithGoals,
+  CompanyDirectoryStats,
   PersonWorkload,
 } from "@/lib/types/tracker";
+
+/** Single-transaction batch create for Slack scrape import. */
+export type ScrapedItemsBatch = {
+  goals: Goal[];
+  projects: Project[];
+  milestones: Milestone[];
+};
 
 export interface TrackerRepository {
   load(): Promise<TrackerData>;
@@ -47,4 +55,10 @@ export interface TrackerRepository {
 
   getHierarchy(): Promise<CompanyWithGoals[]>;
   getPersonWorkloads(): Promise<PersonWorkload[]>;
+  /** Per-company aggregates for the Companies directory (momentum, counts). */
+  getCompanyStatsByCompanyId(): Promise<
+    Record<string, CompanyDirectoryStats>
+  >;
+
+  createScrapedItemsBatch(batch: ScrapedItemsBatch): Promise<void>;
 }

@@ -2,6 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicModel } from "@/lib/anthropicModel";
 import type { Milestone, TrackerData } from "@/lib/types/tracker";
 import { getRepository } from "@/server/repository";
+import { redactTrackerForAi } from "@/lib/tracker-redact";
+import {
+  aiRateLimitExceededResponse,
+  checkAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 function formatMilestones(ms: Milestone[]): string {
   if (ms.length === 0) return "(No milestones.)";
@@ -137,6 +142,11 @@ export async function POST(req: Request) {
     );
   }
 
+  const rate = await checkAiRateLimit();
+  if (!rate.ok) {
+    return aiRateLimitExceededResponse(rate.retryAfterSeconds);
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -197,7 +207,7 @@ export async function POST(req: Request) {
   }
 
   const repo = getRepository();
-  const data = await repo.load();
+  const data = redactTrackerForAi(await repo.load());
 
   const entityContextBlock =
     type === "goal"

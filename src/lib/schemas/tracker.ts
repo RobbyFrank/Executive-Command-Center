@@ -251,6 +251,11 @@ const PersonInputSchema = z.object({
    * count as founders; explicit `false` opts out.
    */
   isFounder: z.boolean().optional(),
+  /** bcrypt hash for app login; empty means no login. Never expose to the client. */
+  passwordHash: z
+    .string()
+    .default("")
+    .transform((s) => s.trim()),
 });
 
 export const PersonSchema = PersonInputSchema.transform((p) => {
@@ -273,9 +278,83 @@ export const PersonSchema = PersonInputSchema.transform((p) => {
       Math.round(Number.isFinite(p.estimatedMonthlySalary) ? p.estimatedMonthlySalary : 0)
     ),
     employment,
+    passwordHash: p.passwordHash,
     ...(p.isFounder !== undefined ? { isFounder: p.isFounder } : {}),
   };
 });
+
+// --- Slack scrape suggestions (AI output, validated before create) ---
+
+export const SlackScrapeEvidenceSchema = z.object({
+  channel: z.string().min(1),
+  ts: z.string().min(1),
+  quote: z.string().min(1),
+});
+
+/** Goal fields proposed for a new goal (ids set server-side). */
+export const SlackScrapeGoalDraftSchema = z.object({
+  description: z.string().min(1),
+  measurableTarget: z.string().default(""),
+  whyItMatters: z.string().default(""),
+  currentValue: z.string().default(""),
+  impactScore: z.number().int().min(1).max(5).default(3),
+  priority: PriorityEnum.default("P2"),
+  status: GoalStatusEnum.default("Idea"),
+});
+
+export const SlackScrapeMilestoneDraftSchema = z.object({
+  name: z.string().min(1),
+  targetDate: z.string().min(1),
+});
+
+/** Project fields proposed for creation (goal id resolved server-side). */
+export const SlackScrapeProjectDraftSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().default(""),
+  definitionOfDone: z.string().default(""),
+  priority: PriorityEnum.default("P2"),
+  complexityScore: z.number().int().min(1).max(5).default(3),
+  type: ProjectTypeEnum.default("Engineering"),
+  milestones: z.array(SlackScrapeMilestoneDraftSchema).default([]),
+});
+
+export const SlackScrapeSuggestionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("newGoalWithProjects"),
+    goal: SlackScrapeGoalDraftSchema,
+    projects: z.array(SlackScrapeProjectDraftSchema).default([]),
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+  }),
+  z.object({
+    kind: z.literal("newProjectOnExistingGoal"),
+    existingGoalId: z.string().min(1),
+    project: SlackScrapeProjectDraftSchema,
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+  }),
+]);
+
+export type SlackScrapeSuggestion = z.infer<typeof SlackScrapeSuggestionSchema>;
+
+const scrapedBundleSchema = z.object({
+  goal: SlackScrapeGoalDraftSchema,
+  projects: z.array(SlackScrapeProjectDraftSchema),
+});
+
+/** Payload for `createScrapedItems` server action (kept out of `"use server"` files). */
+export const createScrapedItemsPayloadSchema = z.object({
+  companyId: z.string().min(1),
+  bundles: z.array(scrapedBundleSchema),
+  projectsOnExistingGoals: z.array(
+    z.object({
+      goalId: z.string().min(1),
+      project: SlackScrapeProjectDraftSchema,
+    })
+  ),
+});
+
+export type CreateScrapedItemsPayload = z.infer<
+  typeof createScrapedItemsPayloadSchema
+>;
 
 // --- Root data store ---
 

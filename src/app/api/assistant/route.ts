@@ -7,6 +7,11 @@ import {
 } from "@/lib/assistantMentions";
 import { isFounderPerson } from "@/lib/autonomyRoster";
 import { getRepository } from "@/server/repository";
+import { redactTrackerForAi } from "@/lib/tracker-redact";
+import {
+  aiRateLimitExceededResponse,
+  checkAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 export async function POST(req: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -15,6 +20,11 @@ export async function POST(req: Request) {
       { error: "ANTHROPIC_API_KEY is not configured" },
       { status: 503 }
     );
+  }
+
+  const rate = await checkAiRateLimit();
+  if (!rate.ok) {
+    return aiRateLimitExceededResponse(rate.retryAfterSeconds);
   }
 
   let body: unknown;
@@ -54,7 +64,7 @@ export async function POST(req: Request) {
   }
 
   const repo = getRepository();
-  const data = await repo.load();
+  const data = redactTrackerForAi(await repo.load());
 
   const seen = new Set<string>();
   const focusChunks: string[] = [];

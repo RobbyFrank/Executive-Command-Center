@@ -73,8 +73,8 @@ export function RosterContactInput({
           error
             ? "border border-red-600 bg-zinc-900/80 text-zinc-200 focus:ring-1 focus:ring-red-600"
             : looksFilled
-              ? "border border-transparent bg-transparent text-zinc-300 shadow-none hover:border-zinc-700 hover:bg-zinc-900/80 focus:border-zinc-700 focus:bg-zinc-900/80 focus:ring-1 focus:ring-blue-600"
-              : "border border-zinc-700 bg-zinc-900/80 text-zinc-200 focus:border-zinc-600 focus:ring-1 focus:ring-blue-600"
+              ? "border border-transparent bg-transparent text-zinc-300 shadow-none hover:border-zinc-700 hover:bg-zinc-900/80 focus:border-zinc-700 focus:bg-zinc-900/80 focus:ring-1 focus:ring-emerald-600"
+              : "border border-zinc-700 bg-zinc-900/80 text-zinc-200 focus:border-zinc-600 focus:ring-1 focus:ring-emerald-600"
         )}
       />
       {error ? (

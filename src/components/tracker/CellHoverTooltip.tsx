@@ -301,7 +301,7 @@ export const CellHoverTooltip = forwardRef<
                   className={cn(
                     "min-h-[8rem] w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2",
                     "text-base leading-relaxed text-zinc-100 placeholder:text-zinc-600",
-                    "focus:outline-none focus:ring-2 focus:ring-blue-600/80"
+                    "focus:outline-none focus:ring-2 focus:ring-emerald-600/80"
                   )}
                   aria-label={placeholder ?? "Edit value"}
                 />

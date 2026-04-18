@@ -4,11 +4,20 @@ import {
   buildMilestoneThreadContextBlock,
   MILESTONE_THREAD_DRAFT_SYSTEM_PROMPT,
 } from "@/server/slackMilestoneThreadDraftContext";
+import {
+  aiRateLimitExceededResponse,
+  checkAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export async function POST(req: Request) {
+  const rate = await checkAiRateLimit();
+  if (!rate.ok) {
+    return aiRateLimitExceededResponse(rate.retryAfterSeconds);
+  }
+
   let milestoneId = "";
   try {
     const body = (await req.json()) as { milestoneId?: unknown };

@@ -176,7 +176,7 @@ Everything grouped by Company → Goal → Project, with collapsible sections.
 - **By Type:** "Show me all Hiring projects"
 - **Stale:** Items where Last Reviewed is 2+ weeks ago
 - **Unassigned:** Projects with no owner (stuck, needs hiring or delegation)
-- **Close watch (computed):** Projects where the owner's autonomy score is ≤ 2 and priority is P0 or P1 — surfaced as a **Close watch** status filter and pill on the Roadmap (distinct from the manual **At risk** exec flag below).
+- **Close watch (computed):** Projects where the owner's autonomy score is ≤ 2 and priority is P0 or P1 — surfaced as an amber owner ring/dot and a **Close watch** pill on the Roadmap (distinct from the manual **At risk** exec flag below).
 - **At risk (manual):** Exec-flagged goal or project (`atRisk`) when leadership marks work as needing attention for any reason.
 - **Low Confidence:** Projects where Confidence Score is ≤ 2 (quiet risks, gut-feel problems)
 - **Zombie:** Status is "In Progress" + no milestone completed in 3+ weeks + Last Reviewed not updated. These are projects people have stopped working on but haven't had the heart to kill or pause yet.

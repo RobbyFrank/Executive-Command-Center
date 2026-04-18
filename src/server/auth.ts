@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
-import { compareSync, hashSync } from "bcryptjs";
+import { compareSync } from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
+import { getRepository } from "@/server/repository";
+import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
 
 const SESSION_COOKIE = "ecc_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -11,34 +13,30 @@ function getSecret() {
   return new TextEncoder().encode(secret);
 }
 
-interface UserCredentials {
-  username: string;
-  passwordHash: string;
-}
-
-function getUsers(): UserCredentials[] {
-  const users: UserCredentials[] = [];
-  const u1 = process.env.AUTH_USER_1_USERNAME;
-  const p1 = process.env.AUTH_USER_1_PASSWORD;
-  if (u1 && p1) users.push({ username: u1, passwordHash: hashSync(p1, 10) });
-
-  const u2 = process.env.AUTH_USER_2_USERNAME;
-  const p2 = process.env.AUTH_USER_2_PASSWORD;
-  if (u2 && p2) users.push({ username: u2, passwordHash: hashSync(p2, 10) });
-
-  return users;
-}
-
 export async function authenticate(
-  username: string,
+  email: string,
   password: string
-): Promise<{ success: boolean; username?: string }> {
-  const users = getUsers();
-  const user = users.find((u) => u.username === username);
-  if (!user) return { success: false };
-  if (!compareSync(password, user.passwordHash)) return { success: false };
+): Promise<{ success: boolean; personId?: string; email?: string }> {
+  const trimmed = email.trim();
+  if (!trimmed || !password) return { success: false };
 
-  const token = await new SignJWT({ username })
+  const emailLower = trimmed.toLowerCase();
+  const data = await getRepository().load();
+  const person = data.people
+    .map((p) => withFounderDepartmentRules(p))
+    .find(
+      (p) =>
+        p.email.trim().toLowerCase() === emailLower &&
+        (p.passwordHash ?? "").trim() !== ""
+    );
+
+  if (!person) return { success: false };
+  if (!compareSync(password, person.passwordHash)) return { success: false };
+
+  const token = await new SignJWT({
+    sub: person.id,
+    email: person.email.trim(),
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime(`${SESSION_MAX_AGE}s`)
     .setIssuedAt()
@@ -53,17 +51,29 @@ export async function authenticate(
     path: "/",
   });
 
-  return { success: true, username };
+  return {
+    success: true,
+    personId: person.id,
+    email: person.email.trim(),
+  };
 }
 
-export async function getSession(): Promise<{ username: string } | null> {
+export type Session = {
+  personId: string;
+  email: string;
+};
+
+export async function getSession(): Promise<Session | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE)?.value;
     if (!token) return null;
     const { payload } = await jwtVerify(token, getSecret());
-    if (!payload.username || typeof payload.username !== "string") return null;
-    return { username: payload.username };
+    const sub = payload.sub;
+    const email = payload.email;
+    if (typeof sub !== "string" || !sub.trim()) return null;
+    if (typeof email !== "string" || !email.trim()) return null;
+    return { personId: sub.trim(), email: email.trim() };
   } catch {
     return null;
   }

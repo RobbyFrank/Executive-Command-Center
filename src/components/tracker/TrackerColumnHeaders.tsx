@@ -35,7 +35,7 @@ export function GoalsColumnHeaders({
       className={cn(
         "sticky max-w-full min-w-0 border-b border-zinc-800/90",
         stickyZClass ?? "z-20",
-        "bg-zinc-950/95 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+        "bg-zinc-950/95 backdrop-blur-sm"
       )}
       style={{ top }}
     >
@@ -54,7 +54,7 @@ export function GoalsColumnHeaders({
           Owner
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-28 shrink-0 flex items-center justify-center pr-7"
+          className="w-28 shrink-0 flex items-center justify-center"
           tooltip="Priority — Urgent (P0) through Low (P3); stored as P0–P3."
         >
           Priority
@@ -97,7 +97,7 @@ export function ProjectsColumnHeaders({
       className={cn(
         "sticky max-w-full min-w-0 border-b border-zinc-800/70",
         stickyZClass ?? "z-20",
-        "bg-zinc-950/90 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.3)]"
+        "bg-zinc-950/90 backdrop-blur-sm"
       )}
       style={{ top }}
     >
@@ -125,16 +125,16 @@ export function ProjectsColumnHeaders({
           Status
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
-          className="w-32 shrink-0 -ml-1"
-          tooltip="Progress — share of milestones marked done."
-        >
-          Progress
-        </RoadmapColumnHeader>
-        <RoadmapColumnHeader
-          className="w-28 shrink-0 ml-3"
+          className="w-28 shrink-0 -ml-1"
           tooltip="Due date — same date as the last milestone with a target date; shown as a relative label (e.g. in 2 months) like milestone dates. Hover for the full date."
         >
           Due date
+        </RoadmapColumnHeader>
+        <RoadmapColumnHeader
+          className="w-32 shrink-0 ml-3"
+          tooltip="Progress — milestones marked Done out of total (e.g. 3/7). Bar fill reflects the share."
+        >
+          Progress
         </RoadmapColumnHeader>
         <RoadmapColumnHeader
           className="w-[36rem] shrink-0 min-w-0"

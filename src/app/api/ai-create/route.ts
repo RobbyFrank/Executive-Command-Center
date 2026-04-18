@@ -2,6 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicModel } from "@/lib/anthropicModel";
 import type { Company, Goal, TrackerData } from "@/lib/types/tracker";
 import { getRepository } from "@/server/repository";
+import { redactTrackerForAi } from "@/lib/tracker-redact";
+import {
+  aiRateLimitExceededResponse,
+  checkAiRateLimit,
+} from "@/lib/ai-rate-limit";
 
 function formatCompanyDetail(c: Company): string {
   const lines: string[] = [];
@@ -162,6 +167,11 @@ export async function POST(req: Request) {
     );
   }
 
+  const rate = await checkAiRateLimit();
+  if (!rate.ok) {
+    return aiRateLimitExceededResponse(rate.retryAfterSeconds);
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -206,7 +216,7 @@ export async function POST(req: Request) {
   }
 
   const repo = getRepository();
-  const data = await repo.load();
+  const data = redactTrackerForAi(await repo.load());
 
   let entityName = "Unknown";
   if (type === "goal" && typeof raw.companyId === "string") {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { CellHoverTooltipEditExtrasContext } from "./CellHoverTooltip";
 import { Check, Circle, Globe, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { consumeNdjsonStream } from "@/lib/ndjsonConsumeStream";
 import { cn } from "@/lib/utils";
 
 type UrlScrapeStatus = "queued" | "running" | "done" | "failed";
@@ -21,45 +22,6 @@ type StreamPayload =
   | { type: "done"; description: string }
   | { type: "error"; message: string }
   | { type: "cancelled" };
-
-async function consumeNdjsonStream(
-  res: Response,
-  onPayload: (p: StreamPayload) => void,
-  signal?: AbortSignal
-): Promise<void> {
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error("No response body");
-  const dec = new TextDecoder();
-  let buf = "";
-  while (true) {
-    if (signal?.aborted) {
-      await reader.cancel();
-      return;
-    }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop() ?? "";
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t) continue;
-      try {
-        onPayload(JSON.parse(t) as StreamPayload);
-      } catch {
-        // ignore malformed chunks
-      }
-    }
-  }
-  const tail = buf.trim();
-  if (tail) {
-    try {
-      onPayload(JSON.parse(tail) as StreamPayload);
-    } catch {
-      // ignore
-    }
-  }
-}
 
 function EntryStatusIcon({ status }: { status: UrlScrapeStatus }) {
   switch (status) {
@@ -173,7 +135,7 @@ export function CompanyDescriptionGenerateExtras({
       }
 
       let terminal = false;
-      await consumeNdjsonStream(
+      await consumeNdjsonStream<StreamPayload>(
         res,
         (p) => {
           if (p.type === "progress") {
@@ -240,7 +202,7 @@ export function CompanyDescriptionGenerateExtras({
         className={cn(
           "inline-flex w-full items-center justify-center gap-2 rounded-md border border-zinc-600/80 bg-zinc-800/60 px-2.5 py-1.5 text-xs font-medium text-zinc-200 cursor-pointer",
           "transition-colors hover:bg-zinc-800 hover:text-zinc-50",
-          "focus:outline-none focus:ring-2 focus:ring-blue-600/50"
+          "focus:outline-none focus:ring-2 focus:ring-emerald-600/50"
         )}
       >
         <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -294,7 +256,7 @@ export function CompanyDescriptionGenerateExtras({
                   className={cn(
                     "mt-1 w-full rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2",
                     "text-sm text-zinc-100 placeholder:text-zinc-600",
-                    "focus:outline-none focus:ring-2 focus:ring-blue-600/70",
+                    "focus:outline-none focus:ring-2 focus:ring-emerald-600/70",
                     running && "opacity-60"
                   )}
                 />
@@ -304,7 +266,7 @@ export function CompanyDescriptionGenerateExtras({
                 <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2">
                   <div className="h-2 w-full shrink-0 overflow-hidden rounded-full bg-zinc-800">
                     <div
-                      className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out"
+                      className="h-full rounded-full bg-emerald-600 transition-[width] duration-300 ease-out motion-reduce:transition-none"
                       style={{ width: `${Math.round(barFraction * 100)}%` }}
                     />
                   </div>

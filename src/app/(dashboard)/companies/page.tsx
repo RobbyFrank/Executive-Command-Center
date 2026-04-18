@@ -1,13 +1,13 @@
 import {
-  getCompanies,
-  getCompanyStatsByCompanyId,
-} from "@/server/actions/tracker";
+  getCachedCompanies,
+  getCachedCompanyStatsByCompanyId,
+} from "@/server/tracker-page-data";
 import { CompaniesManager } from "@/components/tracker/CompaniesManager";
 
 export default async function CompaniesPage() {
   const [companies, companyStatsByCompanyId] = await Promise.all([
-    getCompanies(),
-    getCompanyStatsByCompanyId(),
+    getCachedCompanies(),
+    getCachedCompanyStatsByCompanyId(),
   ]);
 
   return (

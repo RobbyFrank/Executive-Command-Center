@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { updateGoal, updateProject } from "@/server/actions/tracker";
 
 type MessageRole = "user" | "assistant";
@@ -264,6 +265,7 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
     setApplying(true);
     setError(null);
     try {
+      let wrote = false;
       if (type === "goal" && props.type === "goal") {
         const p = proposal as GoalFieldProposal;
         const patch: Partial<{
@@ -282,6 +284,7 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
         }
         if (Object.keys(patch).length > 0) {
           await updateGoal(props.goalId, patch);
+          wrote = true;
         }
       } else if (type === "project" && props.type === "project") {
         const p = proposal as ProjectFieldProposal;
@@ -297,7 +300,11 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
         }
         if (Object.keys(patch).length > 0) {
           await updateProject(props.projectId, patch);
+          wrote = true;
         }
+      }
+      if (wrote) {
+        toast.success("AI updates applied");
       }
       onClose();
     } catch (e) {

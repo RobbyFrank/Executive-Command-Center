@@ -24,21 +24,24 @@ interface AutoConfidencePercentProps {
   className?: string;
 }
 
-function barFillClass(pct: number): string {
-  if (pct <= 0) return "bg-red-600";
-  if (pct >= 80) return "bg-emerald-500";
-  if (pct >= 60) return "bg-sky-500";
-  if (pct >= 40) return "bg-amber-500";
-  return "bg-zinc-500";
-}
+/** Total segments in the Confidence meter (one per 20%: 0, 20, 40, 60, 80, 100). */
+const CONFIDENCE_SEGMENTS = 5;
 
-/** At 0% the bar has no width, so the track + label must carry the critical affordance. */
-function isZeroConfidenceDisplay(pct: number): boolean {
-  return pct <= 0;
+/**
+ * Lit-segment fill. A calm, single tone is used across all partial states — the *count*
+ * of lit segments is the signal, color is not. Full (100%) gets a quiet emerald reward so
+ * "done" still reads as a small positive cue without the rainbow.
+ */
+function litSegmentFillClass(pct: number): string {
+  return pct >= 100 ? "bg-emerald-500/90" : "bg-zinc-300";
 }
 
 /**
- * Confidence readout: percentage inside a compact bar; structured details in a hover panel.
+ * Confidence readout for the Roadmap: a 5-segment meter with the percentage alongside.
+ * Intentionally low-key — a single calm tone across partial states (count of lit segments
+ * is the signal), with a quiet emerald reward only at 100%. Structured details live in the
+ * hover panel. Visually distinct from the adjacent `ProgressBar` (continuous pill fill) so
+ * the two roadmap columns don't collide.
  */
 export function AutoConfidencePercent({
   score,
@@ -47,8 +50,9 @@ export function AutoConfidencePercent({
 }: AutoConfidencePercentProps) {
   const panelId = useId();
   const pct = confidenceScoreToPercent(score);
-  const fillClass = barFillClass(pct);
-  const zeroDisplay = isZeroConfidenceDisplay(pct);
+  /** Score is a 0–5 band (see `confidenceScoreToPercent`); segments light up 1 per 20%. */
+  const litSegments = Math.round(pct / 20);
+  const litFillClass = litSegmentFillClass(pct);
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,10 +145,7 @@ export function AutoConfidencePercent({
         ref={triggerRef}
         type="button"
         className={cn(
-          "w-full min-w-0 rounded-md border-0 bg-transparent px-0.5 py-0.5 text-left font-inherit outline-none transition-colors",
-          zeroDisplay
-            ? "hover:bg-red-950/40 focus-visible:ring-2 focus-visible:ring-red-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
-            : "hover:bg-zinc-800/50 focus-visible:ring-2 focus-visible:ring-sky-600/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+          "w-full min-w-0 rounded-md border-0 bg-transparent px-0.5 py-0.5 text-left font-inherit outline-none transition-colors hover:bg-zinc-800/50 focus-visible:ring-2 focus-visible:ring-sky-600/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
           className
         )}
         aria-label={explanation.ariaLabel}
@@ -156,27 +157,26 @@ export function AutoConfidencePercent({
         onBlur={scheduleClose}
       >
         <div
-          className={cn(
-            "relative h-4 w-full min-w-0 overflow-hidden rounded-full",
-            zeroDisplay
-              ? "bg-red-950/70 ring-1 ring-inset ring-red-500/45 shadow-[inset_0_1px_8px_rgba(127,29,29,0.35)]"
-              : "bg-zinc-800/90"
-          )}
+          className="flex h-4 w-full min-w-0 items-center justify-start gap-1.5"
           aria-hidden
         >
-          <div
-            className={cn(
-              "absolute left-0 top-0 h-full rounded-full transition-[width] duration-200",
-              fillClass
-            )}
-            style={{ width: `${pct}%` }}
-          />
-          <span
-            className={cn(
-              "relative z-10 flex h-full w-full items-center justify-center text-[9px] font-semibold tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)] pointer-events-none",
-              zeroDisplay ? "text-red-100" : "text-zinc-100"
-            )}
-          >
+          <div className="flex items-center gap-0.5">
+            {Array.from({ length: CONFIDENCE_SEGMENTS }, (_, i) => {
+              const isLit = i < litSegments;
+              return (
+                <span
+                  key={i}
+                  className={cn(
+                    "h-3 w-1.5 rounded-[2px] transition-colors",
+                    isLit
+                      ? litFillClass
+                      : "bg-zinc-800 ring-1 ring-inset ring-zinc-700/60"
+                  )}
+                />
+              );
+            })}
+          </div>
+          <span className="shrink-0 text-[10px] font-semibold tabular-nums leading-none text-zinc-400">
             {pct}%
           </span>
         </div>
@@ -196,16 +196,18 @@ export function AutoConfidencePercent({
             <p className="text-xs font-semibold tracking-tight text-zinc-100">
               {explanation.headline}
             </p>
-            <div className="mt-2 space-y-2 border-t border-zinc-800 pt-2">
-              {explanation.paragraphs.map((p, i) => (
-                <p
-                  key={i}
-                  className="text-[11px] leading-relaxed text-zinc-300"
-                >
-                  {p}
-                </p>
-              ))}
-            </div>
+            {explanation.paragraphs.length > 0 ? (
+              <div className="mt-2 space-y-2 border-t border-zinc-800 pt-2">
+                {explanation.paragraphs.map((p, i) => (
+                  <p
+                    key={i}
+                    className="text-[11px] leading-relaxed text-zinc-300"
+                  >
+                    {p}
+                  </p>
+                ))}
+              </div>
+            ) : null}
             {explanation.bullets && explanation.bullets.length > 0 ? (
               <ul className="mt-2 list-disc space-y-1 border-t border-zinc-800 pt-2 pl-4 text-[11px] leading-snug text-zinc-300 marker:text-zinc-600">
                 {explanation.bullets.map((line, i) => (

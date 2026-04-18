@@ -13,8 +13,10 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const SIDEBAR_COLLAPSED_KEY = "ecc.sidebar.collapsed";
+import {
+  SIDEBAR_COLLAPSED_PREF_KEY,
+  setSidebarCollapsedCookie,
+} from "@/lib/sidebar-prefs";
 
 type NavItem = {
   href: string;
@@ -36,13 +38,23 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-export function Sidebar({ username }: { username: string }) {
+export function Sidebar({
+  displayName,
+  initialCollapsed = false,
+}: {
+  displayName: string;
+  /** From HTTP cookie so the first paint matches the user's last choice (see `sidebar-prefs`). */
+  initialCollapsed?: boolean;
+}) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
 
   useEffect(() => {
     try {
-      setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
+      const ls = localStorage.getItem(SIDEBAR_COLLAPSED_PREF_KEY);
+      if (ls !== null) {
+        setCollapsed(ls === "true");
+      }
     } catch {
       /* ignore */
     }
@@ -52,10 +64,14 @@ export function Sidebar({ username }: { username: string }) {
     setCollapsed((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "true" : "false");
+        localStorage.setItem(
+          SIDEBAR_COLLAPSED_PREF_KEY,
+          next ? "true" : "false"
+        );
       } catch {
         /* ignore */
       }
+      setSidebarCollapsedCookie(next);
       return next;
     });
   }, []);
@@ -63,7 +79,7 @@ export function Sidebar({ username }: { username: string }) {
   return (
     <aside
       className={cn(
-        "border-r border-zinc-800 bg-zinc-950 flex min-h-0 flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out",
+        "border-r border-zinc-800 bg-zinc-950 flex min-h-0 flex-col shrink-0 overflow-x-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
         collapsed ? "w-16" : "w-56"
       )}
     >
@@ -98,13 +114,13 @@ export function Sidebar({ username }: { username: string }) {
                     aria-label={collapsed ? collapsedHint : undefined}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "flex items-center rounded-md text-sm transition-colors",
+                      "flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
                       collapsed
                         ? "justify-center px-2 py-2"
-                        : "gap-3 px-3 py-2",
+                        : "gap-3 pl-2.5 pr-3 py-2",
                       isActive
-                        ? "bg-zinc-800 text-zinc-100"
-                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                        ? "border-l-2 border-emerald-500/90 bg-zinc-900/80 text-zinc-100"
+                        : "border-l-2 border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/70"
                     )}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -151,7 +167,7 @@ export function Sidebar({ username }: { username: string }) {
               collapsed && "sr-only"
             )}
           >
-            {username}
+            {displayName}
           </span>
           <form action={logoutAction} className="shrink-0">
             <button

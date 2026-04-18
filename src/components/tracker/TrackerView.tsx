@@ -24,11 +24,11 @@ import { RoadmapStickyBelowToolbarGap } from "./RoadmapStickyBelowToolbarGap";
 import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
 import { RoadmapExpandModeSelect } from "./RoadmapExpandModeSelect";
 import {
-  Check,
   Crosshair,
   FilterX,
   Map as MapIcon,
   Search,
+  X,
 } from "lucide-react";
 import { sortPeopleLikeTeamRoster } from "@/lib/autonomyRoster";
 import { groupCompaniesByRevenueTier } from "@/lib/companyRevenueTiers";
@@ -54,11 +54,16 @@ import {
 } from "@/lib/owner-filter";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
 import { cn } from "@/lib/utils";
-import type { RoadmapInitialFilters } from "@/lib/roadmap-query";
-import { emptyRoadmapFilters } from "@/lib/roadmap-query";
+import { toast } from "sonner";
+import {
+  buildRoadmapHref,
+  emptyRoadmapFilters,
+  type RoadmapInitialFilters,
+} from "@/lib/roadmap-query";
 
 const ROADMAP_FOCUS_MODE_STORAGE_KEY = "ecc-roadmap-focus-mode";
 const ROADMAP_EXPAND_PRESET_STORAGE_KEY = "ecc-roadmap-expand-preset";
+const ROADMAP_SEARCH_DEBOUNCE_MS = 180;
 function parseStoredExpandPreset(raw: string): TrackerExpandPreset | undefined {
   if (raw === "") return null;
   if (
@@ -90,6 +95,9 @@ export function TrackerView({
   const initialFilters = initialFiltersProp ?? emptyRoadmapFilters();
 
   const [searchQuery, setSearchQuery] = useState(
+    () => initialFilters.searchQuery
+  );
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(
     () => initialFilters.searchQuery
   );
   const [companyFilterIds, setCompanyFilterIds] = useState<string[]>(
@@ -151,15 +159,77 @@ export function TrackerView({
     priorityFilterActive ||
     statusEnumFilterActive;
 
+  const activeFilterDimensionCount = useMemo(() => {
+    let n = 0;
+    if (searchActive) n++;
+    if (companyFilterActive) n++;
+    if (ownerFilterActive) n++;
+    if (priorityFilterActive) n++;
+    if (statusEnumFilterActive) n++;
+    if (statusTagFilterActive) n++;
+    if (dueDateFilterActive) n++;
+    return n;
+  }, [
+    searchActive,
+    companyFilterActive,
+    ownerFilterActive,
+    priorityFilterActive,
+    statusEnumFilterActive,
+    statusTagFilterActive,
+    dueDateFilterActive,
+  ]);
+
   const resetFilters = useCallback(() => {
     setSearchQuery("");
+    setDebouncedSearchQuery("");
     setCompanyFilterIds([]);
     setOwnerFilterIds([]);
     setStatusTagFilterIds([]);
     setDueDateFilterIds([]);
     setPriorityFilterIds([]);
     setStatusEnumFilterIds([]);
+    toast.message("Filters cleared", { duration: 2200 });
   }, []);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, ROADMAP_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [searchQuery]);
+
+  /** Keep the address bar in sync for shareable bookmarks (no full navigation). */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const fg = sp.get("focusGoal")?.trim();
+    const fp = sp.get("focusProject")?.trim();
+    const focus =
+      fg && fp ? { goalId: fg, projectId: fp } : undefined;
+
+    const next = buildRoadmapHref({
+      focus,
+      companyFilterIds,
+      ownerFilterIds,
+      statusTagFilterIds,
+      dueDateFilterIds,
+      priorityFilterIds,
+      statusEnumFilterIds,
+      searchQuery,
+    });
+
+    const cur = `${window.location.pathname}${window.location.search}`;
+    if (cur === next) return;
+    window.history.replaceState(null, "", next);
+  }, [
+    companyFilterIds,
+    ownerFilterIds,
+    statusTagFilterIds,
+    dueDateFilterIds,
+    priorityFilterIds,
+    statusEnumFilterIds,
+    searchQuery,
+  ]);
 
   useEffect(() => {
     let expandPresetFromStorage = false;
@@ -248,10 +318,16 @@ export function TrackerView({
     setFocusEnforceTick((x) => x + 1);
   }, [initialFocus?.goalId, initialFocus?.projectId]);
 
+  /** Focus mode is single-branch drill-in; bulk presets that expand the whole tree fight that — force Goals only while Focus is on. */
+  const effectiveExpandPreset = useMemo<TrackerExpandPreset>(
+    () => (focusMode ? "goals_only" : expandPreset),
+    [focusMode, expandPreset]
+  );
+
   const bulkValue = useMemo(
     () => ({
       bulkTick,
-      expandPreset,
+      expandPreset: effectiveExpandPreset,
       focusProjectMode,
       focusedGoalId,
       setFocusedGoalId,
@@ -261,7 +337,7 @@ export function TrackerView({
     }),
     [
       bulkTick,
-      expandPreset,
+      effectiveExpandPreset,
       focusProjectMode,
       focusedGoalId,
       focusedProjectId,
@@ -351,10 +427,9 @@ export function TrackerView({
     () =>
       filterTrackerHierarchyByStatusTags(
         hierarchyAfterStatusEnum,
-        statusTagFilterIds.length > 0 ? statusTagFilterIds : null,
-        people
+        statusTagFilterIds.length > 0 ? statusTagFilterIds : null
       ),
-    [hierarchyAfterStatusEnum, statusTagFilterIds, people]
+    [hierarchyAfterStatusEnum, statusTagFilterIds]
   );
 
   const hierarchyAfterHideDone = useMemo(
@@ -377,8 +452,12 @@ export function TrackerView({
 
   const filteredHierarchy = useMemo(
     () =>
-      filterTrackerHierarchy(hierarchyAfterDueDate, people, searchQuery),
-    [hierarchyAfterDueDate, people, searchQuery]
+      filterTrackerHierarchy(
+        hierarchyAfterDueDate,
+        people,
+        debouncedSearchQuery
+      ),
+    [hierarchyAfterDueDate, people, debouncedSearchQuery]
   );
 
   const companyFilterLabel = useMemo(() => {
@@ -409,14 +488,9 @@ export function TrackerView({
     if (statusTagFilterIds.length === 0) return "";
     const labels: Record<TrackerStatusTagId, string> = {
       at_risk: "At risk",
-      spotlight: "Spotlight",
       unassigned: "Unassigned",
-      close_watch: "Close watch",
       zombie: "Zombie",
-      blocked_by_dep: "Blocked (dependency)",
-      high_leverage: "High leverage",
-      low_leverage: "Low leverage",
-      time_sensitive: "Time-sensitive",
+      stalled: "Stalled",
     };
     return statusTagFilterIds.map((id) => labels[id]).join(", ");
   }, [statusTagFilterIds]);
@@ -523,13 +597,7 @@ export function TrackerView({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-        <div
-          className={`relative flex-1 min-w-0 transition-[max-width] duration-200 ease-out ${
-            searchQuery.trim() !== ""
-              ? "max-w-[19.2rem]"
-              : "max-w-[10rem] focus-within:max-w-[19.2rem]"
-          }`}
-        >
+        <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
             aria-hidden
@@ -539,10 +607,27 @@ export function TrackerView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search…"
-            className="w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 pr-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            className={cn(
+              "w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+              "[&::-webkit-search-cancel-button]:appearance-none",
+              searchActive ? "pr-8" : "pr-3"
+            )}
             aria-label="Search tracker"
             autoComplete="off"
           />
+          {searchActive ? (
+            <button
+              type="button"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              aria-label="Clear search"
+              onClick={() => {
+                setSearchQuery("");
+                setDebouncedSearchQuery("");
+              }}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ) : null}
         </div>
         <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[20rem]">
           <CompanyFilterMultiSelect
@@ -584,17 +669,64 @@ export function TrackerView({
           />
         </div>
         {filterActive ? (
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors shrink-0"
-            title="Clear search and all filters"
-          >
-            <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Reset filters
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <span
+              className="rounded-md border border-zinc-700/90 bg-zinc-900/70 px-2 py-1 text-[11px] font-medium tabular-nums text-zinc-400"
+              aria-live="polite"
+            >
+              {activeFilterDimensionCount} filter
+              {activeFilterDimensionCount !== 1 ? "s" : ""} active
+            </span>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              title="Clear search and all filters"
+            >
+              <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Reset filters
+            </button>
+          </div>
         ) : null}
         <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 shrink-0 ml-auto">
+          <div className="relative min-w-[10.5rem] shrink-0">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showCompletedProjects}
+              aria-label={
+                showCompletedProjects
+                  ? "Showing completed goals, projects, and milestones — click to hide"
+                  : "Hiding completed goals, projects, and milestones — click to show"
+              }
+              title="When off: hides Done milestones, Done projects (except projects with no milestones), and goals that only have completed work. Goals with no projects always stay visible."
+              onClick={() => setShowCompletedProjects((v) => !v)}
+              className={cn(
+                "flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 motion-reduce:transition-none",
+                showCompletedProjects
+                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)]"
+                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200"
+              )}
+            >
+              <span
+                className={cn(
+                  "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors motion-reduce:transition-none",
+                  showCompletedProjects
+                    ? "border-emerald-500/50 bg-emerald-600/85"
+                    : "border-zinc-600 bg-zinc-800"
+                )}
+                aria-hidden
+              >
+                <span
+                  className={cn(
+                    "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform motion-reduce:transition-none",
+                    showCompletedProjects ? "translate-x-[1.125rem]" : "translate-x-0.5"
+                  )}
+                />
+              </span>
+              <span className="min-w-0 truncate">Show completed</span>
+            </button>
+          </div>
           <button
             type="button"
             onClick={onFocusModeToggle}
@@ -607,7 +739,7 @@ export function TrackerView({
                   : "Focus — only one goal and one project expanded; opening another closes the rest"
             }
             className={cn(
-              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-40",
               focusMode
                 ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-950/55"
                 : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
@@ -617,40 +749,10 @@ export function TrackerView({
             <Crosshair className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
             Focus
           </button>
-          <div className="relative min-w-[10.5rem] shrink-0">
-            <button
-              type="button"
-              aria-pressed={showCompletedProjects}
-              aria-label={
-                showCompletedProjects
-                  ? "Showing completed goals, projects, and milestones — click to hide"
-                  : "Hiding completed goals, projects, and milestones — click to show"
-              }
-              title="When off: hides Done milestones, Done projects (except projects with no milestones), and goals that only have completed work. Goals with no projects always stay visible."
-              onClick={() => setShowCompletedProjects((v) => !v)}
-              className={cn(
-                "flex min-h-[2.25rem] w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-zinc-500",
-                showCompletedProjects
-                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)]"
-                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200"
-              )}
-            >
-              <Check
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0",
-                  showCompletedProjects
-                    ? "text-emerald-400"
-                    : "text-zinc-600"
-                )}
-                strokeWidth={2.5}
-                aria-hidden
-              />
-              <span className="min-w-0 truncate">Show completed</span>
-            </button>
-          </div>
           <RoadmapExpandModeSelect
-            expandPreset={expandPreset}
+            expandPreset={effectiveExpandPreset}
             onChange={onExpandPresetChange}
+            viewLocked={focusMode}
           />
         </div>
         </div>
@@ -673,19 +775,29 @@ export function TrackerView({
             </p>
           </div>
         ) : filterActive && filteredHierarchy.length === 0 ? (
-          <p className="text-sm text-zinc-500 py-8 text-center border border-dashed border-zinc-800 rounded-lg">
-            {searchActive ? (
-              <>
-                No matches for &quot;{searchQuery.trim()}&quot;
-                {searchFilterWithClause}. Try another keyword or clear filters.
-              </>
-            ) : (
-              <>
-                No goals or projects match your filters
-                {nonSearchForClause}. Adjust or clear filters.
-              </>
-            )}
-          </p>
+          <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-zinc-800 py-8 px-4 text-center">
+            <p className="text-sm text-zinc-500 max-w-lg">
+              {searchActive ? (
+                <>
+                  No matches for &quot;{searchQuery.trim()}&quot;
+                  {searchFilterWithClause}. Try another keyword or clear filters.
+                </>
+              ) : (
+                <>
+                  No goals or projects match your filters
+                  {nonSearchForClause}. Adjust or clear filters.
+                </>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+            >
+              <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Reset filters
+            </button>
+          </div>
         ) : (
           filteredHierarchy.map((company) => (
             <CompanySection

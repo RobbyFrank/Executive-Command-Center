@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import { X, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
 
 type MessageRole = "user" | "assistant";
@@ -288,6 +289,7 @@ export function AiCreateDialog({
           reviewLog: [],
         });
         onCreated?.(goal.id);
+        toast.success("Goal created");
       } else if (type === "project" && goalId) {
         const p = proposal as ProjectProposal;
         const project = await createProject({
@@ -319,6 +321,7 @@ export function AiCreateDialog({
           }
         }
         onCreated?.(project.id);
+        toast.success("Project created");
       }
       onClose();
     } catch (e) {

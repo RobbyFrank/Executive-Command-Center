@@ -1,7 +1,8 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { updateTag } from "next/cache";
 import { getRepository } from "@/server/repository";
+import { ECC_TRACKER_DATA_TAG } from "@/lib/cache-tags";
 import {
   deleteFileIfInUploads,
   saveUploadedImage,
@@ -9,10 +10,8 @@ import {
 
 const repo = getRepository();
 
-function revalidate() {
-  revalidatePath("/");
-  revalidatePath("/companies");
-  revalidatePath("/team");
+function revalidateTrackerPages() {
+  updateTag(ECC_TRACKER_DATA_TAG);
 }
 
 export type UploadResult = { ok: true } | { ok: false; error: string };
@@ -45,7 +44,7 @@ export async function uploadCompanyLogoForm(formData: FormData): Promise<UploadR
   }
 
   await repo.updateCompany(companyId, { logoPath: saved.webPath });
-  revalidate();
+  revalidateTrackerPages();
   return { ok: true };
 }
 
@@ -77,6 +76,6 @@ export async function uploadPersonProfileForm(formData: FormData): Promise<Uploa
   }
 
   await repo.updatePerson(personId, { profilePicturePath: saved.webPath });
-  revalidate();
+  revalidateTrackerPages();
   return { ok: true };
 }
