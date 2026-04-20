@@ -126,6 +126,32 @@ function readFreshEntry(k: string): CacheEntry | undefined {
   return entry;
 }
 
+/** Cached milestone on-time assessment (read-only); same shape as `assessMilestoneOnTimeLikelihood` success. */
+export type MilestoneLikelihoodCachedOk = OkResult;
+
+/**
+ * Read a milestone likelihood from the shared browser cache without triggering a fetch.
+ * Uses the minimal cache key (ignores `roadmapContext`) so it matches stored entries from any context.
+ */
+export function readCachedMilestoneLikelihood(args: {
+  slackUrl: string;
+  targetDate: string;
+  ownerAutonomy: number | null;
+  projectComplexity: number;
+}): MilestoneLikelihoodCachedOk | null {
+  const u = args.slackUrl.trim();
+  const d = args.targetDate.trim();
+  if (!u || !d) return null;
+  const mk = minimalLikelihoodKey(
+    u,
+    d,
+    args.ownerAutonomy,
+    args.projectComplexity
+  );
+  const hit = readFreshEntry(mk);
+  return hit ? withThreadSummaryLine(hit.result) : null;
+}
+
 function writeEntry(
   fullKey: string,
   minimalKey: string,

@@ -59,6 +59,9 @@ import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
 import { SlackChannelPicker } from "./SlackChannelPicker";
+import { GoalLikelihoodInline } from "./GoalLikelihoodInline";
+import { useGoalLikelihoodRollup } from "@/hooks/useGoalLikelihoodRollup";
+import { useGoalOneLiner } from "@/hooks/useGoalOneLiner";
 
 import { CollapsePanel } from "./CollapsePanel";
 import { ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX } from "@/lib/tracker-sticky-layout";
@@ -447,6 +450,22 @@ export function GoalSection({
   }, [goalLatestDueYmd]);
 
   const ownerPerson = people.find((p) => p.id === goal.ownerId);
+
+  const { rollup: goalLikelihoodRollup, loading: goalLikelihoodLoading } =
+    useGoalLikelihoodRollup(goal, people, !expanded);
+
+  const goalOneLinerEnabled =
+    !expanded && Boolean(goalLikelihoodRollup?.ready);
+  const {
+    summaryLine: goalOneLinerSummary,
+    loading: goalOneLinerLoading,
+    error: goalOneLinerError,
+  } = useGoalOneLiner(
+    goal.id,
+    goal.description,
+    goalLikelihoodRollup,
+    goalOneLinerEnabled
+  );
 
   const onNewProjectCreated = useCallback((id: string) => {
     setExpanded(true);
@@ -926,7 +945,31 @@ export function GoalSection({
           />
         </div>
 
-        <div className={ROADMAP_NEXT_MILESTONE_COL_CLASS} aria-hidden />
+        <div
+          className={cn(
+            ROADMAP_NEXT_MILESTONE_COL_CLASS,
+            !expanded && goalLikelihoodRollup != null && "min-w-0"
+          )}
+          aria-hidden={expanded || goalLikelihoodRollup == null}
+        >
+          {!expanded && goalLikelihoodRollup != null ? (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="min-w-0 max-w-full pr-1"
+            >
+              <GoalLikelihoodInline
+                metricsReady={goalLikelihoodRollup.ready}
+                onTimeLikelihood={goalLikelihoodRollup.onTimeLikelihood}
+                riskLevel={goalLikelihoodRollup.riskLevel}
+                aiConfidence={goalLikelihoodRollup.aiConfidence}
+                metricsLoading={goalLikelihoodLoading}
+                summaryLine={goalOneLinerSummary}
+                summaryLoading={goalOneLinerLoading}
+                summaryError={goalOneLinerError}
+              />
+            </div>
+          ) : null}
+        </div>
 
         <div className="min-w-2 flex-1" aria-hidden={true} />
 
