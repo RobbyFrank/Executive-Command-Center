@@ -66,7 +66,6 @@ import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 
 const ROADMAP_FOCUS_MODE_STORAGE_KEY = "ecc-roadmap-focus-mode";
 const ROADMAP_EXPAND_PRESET_STORAGE_KEY = "ecc-roadmap-expand-preset";
-const ROADMAP_SEARCH_DEBOUNCE_MS = 180;
 function parseStoredExpandPreset(raw: string): TrackerExpandPreset | undefined {
   if (raw === "") return null;
   if (
@@ -102,10 +101,11 @@ export function TrackerView({
 }: TrackerViewProps) {
   const initialFilters = initialFiltersProp ?? emptyRoadmapFilters();
 
-  const [searchQuery, setSearchQuery] = useState(
+  /** Text in the field while typing; filtering uses `appliedSearchQuery` (updated on blur). */
+  const [searchInput, setSearchInput] = useState(
     () => initialFilters.searchQuery
   );
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState(
     () => initialFilters.searchQuery
   );
   const [companyFilterIds, setCompanyFilterIds] = useState<string[]>(
@@ -157,7 +157,11 @@ export function TrackerView({
     [people, todayYmd]
   );
 
-  const searchActive = normalizeTrackerSearchQuery(searchQuery).length > 0;
+  const appliedSearchActive =
+    normalizeTrackerSearchQuery(appliedSearchQuery).length > 0;
+  const searchInputHasText =
+    normalizeTrackerSearchQuery(searchInput).length > 0;
+  const showSearchClear = appliedSearchActive || searchInputHasText;
   const companyFilterActive = companyFilterIds.length > 0;
   const ownerFilterActive = ownerFilterIds.length > 0;
   const statusTagFilterActive = statusTagFilterIds.length > 0;
@@ -165,7 +169,7 @@ export function TrackerView({
   const priorityFilterActive = priorityFilterIds.length > 0;
   const statusEnumFilterActive = statusEnumFilterIds.length > 0;
   const filterActive =
-    searchActive ||
+    appliedSearchActive ||
     companyFilterActive ||
     ownerFilterActive ||
     statusTagFilterActive ||
@@ -175,7 +179,7 @@ export function TrackerView({
 
   const activeFilterDimensionCount = useMemo(() => {
     let n = 0;
-    if (searchActive) n++;
+    if (appliedSearchActive) n++;
     if (companyFilterActive) n++;
     if (ownerFilterActive) n++;
     if (priorityFilterActive) n++;
@@ -184,7 +188,7 @@ export function TrackerView({
     if (dueDateFilterActive) n++;
     return n;
   }, [
-    searchActive,
+    appliedSearchActive,
     companyFilterActive,
     ownerFilterActive,
     priorityFilterActive,
@@ -194,8 +198,8 @@ export function TrackerView({
   ]);
 
   const resetFilters = useCallback(() => {
-    setSearchQuery("");
-    setDebouncedSearchQuery("");
+    setSearchInput("");
+    setAppliedSearchQuery("");
     setCompanyFilterIds([]);
     setOwnerFilterIds([]);
     setStatusTagFilterIds([]);
@@ -204,13 +208,6 @@ export function TrackerView({
     setStatusEnumFilterIds([]);
     toast.message("Filters cleared", { duration: 2200 });
   }, []);
-
-  useEffect(() => {
-    const id = window.setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, ROADMAP_SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(id);
-  }, [searchQuery]);
 
   /** Keep the address bar in sync for shareable bookmarks (no full navigation). */
   useEffect(() => {
@@ -229,7 +226,7 @@ export function TrackerView({
       dueDateFilterIds,
       priorityFilterIds,
       statusEnumFilterIds,
-      searchQuery,
+      searchQuery: appliedSearchQuery,
     });
 
     const cur = `${window.location.pathname}${window.location.search}`;
@@ -242,7 +239,7 @@ export function TrackerView({
     dueDateFilterIds,
     priorityFilterIds,
     statusEnumFilterIds,
-    searchQuery,
+    appliedSearchQuery,
   ]);
 
   useEffect(() => {
@@ -534,9 +531,9 @@ export function TrackerView({
       filterTrackerHierarchy(
         hierarchyAfterDueDate,
         people,
-        debouncedSearchQuery
+        appliedSearchQuery
       ),
-    [hierarchyAfterDueDate, people, debouncedSearchQuery]
+    [hierarchyAfterDueDate, people, appliedSearchQuery]
   );
 
   const companyFilterLabel = useMemo(() => {
@@ -671,32 +668,43 @@ export function TrackerView({
     <TrackerExpandProvider value={bulkValue}>
       <RoadmapViewProvider>
       <PageToolbar title="Roadmap">
-        <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
-          <Search
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search…"
-            className={cn(
-              "w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
-              "[&::-webkit-search-cancel-button]:appearance-none",
-              searchActive ? "pr-8" : "pr-3"
-            )}
-            aria-label="Search tracker"
-            autoComplete="off"
-          />
-          {searchActive ? (
+        <div
+          className={cn(
+            "group flex min-w-0 flex-1 max-w-[10rem] items-stretch overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/80 transition-[max-width,border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
+            "hover:border-zinc-600 hover:bg-zinc-900/95",
+            "focus-within:border-zinc-500/45 focus-within:bg-zinc-900/95",
+            /* Expand only when the text field is focused — not when the clear button is (avoids layout shift that drops the click). */
+            "has-[input:focus]:max-w-[19.2rem]"
+          )}
+        >
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onBlur={(e) => setAppliedSearchQuery(e.currentTarget.value)}
+              placeholder="Search…"
+              className={cn(
+                "min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-0",
+                "[&::-webkit-search-cancel-button]:appearance-none",
+                showSearchClear ? "pr-1.5" : "pr-3"
+              )}
+              aria-label="Search tracker"
+              autoComplete="off"
+            />
+          </div>
+          {showSearchClear ? (
             <button
               type="button"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              className="flex shrink-0 cursor-pointer items-center justify-center border-l border-zinc-700/80 px-2.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:bg-zinc-800 focus-visible:ring-0 group-hover:border-l-zinc-600/70 group-focus-within:border-l-zinc-600/70"
               aria-label="Clear search"
               onClick={() => {
-                setSearchQuery("");
-                setDebouncedSearchQuery("");
+                setSearchInput("");
+                setAppliedSearchQuery("");
               }}
             >
               <X className="h-3.5 w-3.5" aria-hidden />
@@ -762,9 +770,9 @@ export function TrackerView({
               }
               aria-pressed={myAssignmentsShortcutActive}
               className={cn(
-                "group relative shrink-0 rounded-full p-px transition-[box-shadow,ring-color] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+                "group relative shrink-0 rounded-full p-px transition-[box-shadow,ring-color] focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/25 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
                 myAssignmentsShortcutActive
-                  ? "shadow-[0_0_0_1px_rgba(16,185,129,0.55)] ring-1 ring-emerald-500/45"
+                  ? "shadow-[0_0_0_1px_rgba(16,185,129,0.55)] ring-1 ring-emerald-500/45 hover:shadow-[0_0_0_1px_rgba(16,185,129,0.65)]"
                   : "ring-1 ring-zinc-600 hover:ring-zinc-500 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
               )}
             >
@@ -804,7 +812,7 @@ export function TrackerView({
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-[border-color,background-color,color] duration-150 ease-out motion-reduce:transition-none hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:border-zinc-500/45 focus-visible:ring-1 focus-visible:ring-zinc-400/20 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               title="Clear search and all filters"
             >
               <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -826,10 +834,10 @@ export function TrackerView({
               title="When off: hides Done milestones, Done projects (except projects with no milestones), and goals that only have completed work. Goals with no projects always stay visible."
               onClick={() => setShowCompletedProjects((v) => !v)}
               className={cn(
-                "flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 motion-reduce:transition-none",
+                "flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-[border-color,background-color,color,box-shadow] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 motion-reduce:transition-none",
                 showCompletedProjects
-                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)]"
-                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200"
+                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)] hover:border-emerald-400/45 focus-visible:border-emerald-400/50 focus-visible:ring-emerald-400/15"
+                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
               )}
             >
               <span
@@ -863,10 +871,10 @@ export function TrackerView({
                   : "Focus — only one goal and one project expanded; opening another closes the rest"
             }
             className={cn(
-              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-40",
+              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-[border-color,background-color,color] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
               focusMode
-                ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:bg-cyan-950/55"
-                : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+                ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:border-cyan-400/45 hover:bg-cyan-950/55 focus-visible:border-cyan-400/45 focus-visible:ring-cyan-400/15"
+                : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
             )}
             aria-pressed={focusMode}
           >
@@ -905,9 +913,9 @@ export function TrackerView({
         ) : filterActive && filteredHierarchy.length === 0 ? (
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-zinc-800 py-8 px-4 text-center">
             <p className="text-sm text-zinc-500 max-w-lg">
-              {searchActive ? (
+              {appliedSearchActive ? (
                 <>
-                  No matches for &quot;{searchQuery.trim()}&quot;
+                  No matches for &quot;{appliedSearchQuery.trim()}&quot;
                   {searchFilterWithClause}. Try another keyword or clear filters.
                 </>
               ) : (
@@ -920,7 +928,7 @@ export function TrackerView({
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-[border-color,background-color,color] duration-150 ease-out motion-reduce:transition-none hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:border-zinc-500/45 focus-visible:ring-1 focus-visible:ring-zinc-400/20 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
             >
               <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
               Reset filters

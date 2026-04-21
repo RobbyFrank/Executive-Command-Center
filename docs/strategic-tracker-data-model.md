@@ -6,6 +6,8 @@ MLabs-internal roadmap app. For the doc index, see [strategic-tracker.md](strate
 
 **Company → Goal → Project → Milestone**
 
+**Project priority (Roadmap):** JSON stores `P0`–`P3`. The Roadmap UI and product copy use the labels **Urgent**, **High**, **Normal**, and **Low** (see `PRIORITY_MENU_LABEL` in `src/lib/prioritySort.ts` and `PriorityPillInline`). Prefer those names in documentation and AI prompts unless referring to the stored enum value.
+
 ## Company
 
 Each **Company** has:

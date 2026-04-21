@@ -7,7 +7,6 @@ import {
   Check,
   ChevronRight,
   Circle,
-  Flag,
   Folder,
   Loader2,
   Sparkles,
@@ -16,7 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { CompanyWithGoals, Person, Priority } from "@/lib/types/tracker";
+import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import type { SlackScrapeSuggestion } from "@/lib/schemas/tracker";
 import {
   resolveCompanyScrapeChannels,
@@ -38,11 +37,7 @@ import type {
 import { SlackLogo } from "./SlackLogo";
 import { cn } from "@/lib/utils";
 import { useSmoothText } from "@/hooks/useSmoothText";
-import {
-  PRIORITY_MENU_LABEL,
-  priorityFlagIconClass,
-  prioritySelectTextClass,
-} from "@/lib/prioritySort";
+import { PriorityPillInline } from "@/components/tracker/PriorityPillInline";
 import { AssistantPersonInline } from "@/components/ai-assistant/AssistantPersonInline";
 import { SlackScrapeEvidencePreview } from "./SlackScrapeEvidencePreview";
 import {
@@ -81,28 +76,6 @@ function slackScanModelPhaseFill(suggestionCount: number, streamCharLength: numb
   );
   const blended = 0.38 * fromKinds + 0.62 * fromLength;
   return Math.min(1, STREAMING_FILL_SPEED * blended);
-}
-
-function PriorityPill({ priority }: { priority: string }) {
-  const p = priority as Priority;
-  const label = PRIORITY_MENU_LABEL[p] ?? priority;
-  return (
-    <span
-      className={cn(
-        "inline-flex h-5 items-center gap-1 rounded border border-zinc-800 bg-zinc-900/60 px-1.5 text-[10px] font-semibold"
-      )}
-      title={`Priority · ${label}`}
-    >
-      <Flag
-        className={cn("h-3 w-3 shrink-0", priorityFlagIconClass(p))}
-        strokeWidth={2}
-        aria-hidden
-      />
-      <span className={cn("tracking-wide", prioritySelectTextClass(p))}>
-        {label}
-      </span>
-    </span>
-  );
 }
 
 function CategoryTag({
@@ -1132,7 +1105,7 @@ export function CompanyScrapeDialog({
                             >
                               <div className="flex flex-wrap items-center gap-2">
                                 <CategoryTag text={categorySignal} />
-                                <PriorityPill priority={s.goal.priority} />
+                                <PriorityPillInline priority={s.goal.priority} />
                               </div>
                               <p className="min-w-0 text-sm font-semibold leading-snug text-zinc-100">
                                 {s.goal.description}
@@ -1258,7 +1231,7 @@ export function CompanyScrapeDialog({
                                             <span className="truncate text-sm text-zinc-200">
                                               {p.name}
                                             </span>
-                                            <PriorityPill
+                                            <PriorityPillInline
                                               priority={p.priority}
                                             />
                                           </div>
@@ -1338,7 +1311,7 @@ export function CompanyScrapeDialog({
                           <div className="min-w-0 flex-1 space-y-1.5">
                             <div className="flex flex-wrap items-center gap-2">
                               <CategoryTag text={catText} />
-                              <PriorityPill priority={s.project.priority} />
+                              <PriorityPillInline priority={s.project.priority} />
                             </div>
                             <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                               <Target className="h-3 w-3 shrink-0" />

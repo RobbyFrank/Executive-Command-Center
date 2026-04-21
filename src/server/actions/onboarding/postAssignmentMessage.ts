@@ -115,7 +115,7 @@ export async function openBuddyMpimAndPostAssignment(input: {
   if (buddyIds.length === 0) {
     return {
       ok: false,
-      error: "Select at least one buddy with a Slack user id.",
+      error: "Select at least one onboarding partner with a Slack user id.",
     };
   }
 
@@ -143,7 +143,7 @@ export async function openBuddyMpimAndPostAssignment(input: {
   if (userIds.length > 8) {
     return {
       ok: false,
-      error: `Too many participants for a Slack group DM (got ${userIds.length}, max 8). Reduce buddies.`,
+      error: `Too many participants for a Slack group DM (got ${userIds.length}, max 8). Reduce the onboarding partner list.`,
     };
   }
 

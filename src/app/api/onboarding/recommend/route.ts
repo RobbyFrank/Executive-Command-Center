@@ -29,21 +29,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const personId =
-    body &&
-    typeof body === "object" &&
-    "personId" in body &&
-    typeof (body as { personId?: unknown }).personId === "string"
-      ? (body as { personId: string }).personId.trim()
-      : "";
+  const b = (body ?? {}) as {
+    personId?: unknown;
+    founderContext?: unknown;
+  };
+  const personId = typeof b.personId === "string" ? b.personId.trim() : "";
+  const founderContext =
+    typeof b.founderContext === "string" ? b.founderContext : undefined;
 
   if (!personId) {
     return NextResponse.json({ error: "personId is required" }, { status: 400 });
   }
 
   const [pilotResult, buddyResult] = await Promise.all([
-    recommendPilotProject(personId),
-    recommendOnboardingBuddies({ personId }),
+    recommendPilotProject(personId, { founderContext }),
+    recommendOnboardingBuddies({ personId, founderContext }),
   ]);
 
   if (!pilotResult.ok) {

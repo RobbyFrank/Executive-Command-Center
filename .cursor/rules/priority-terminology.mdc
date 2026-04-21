@@ -1,0 +1,10 @@
+---
+description: Use Roadmap priority labels (Urgent/High/Normal/Low) in copy and prompts, not P0–P3 codes.
+alwaysApply: true
+---
+
+# Project priority terminology
+
+- In **user-facing UI**, **documentation**, **AI system prompts**, and **assistant replies**, describe project priority using the same labels as the Roadmap: **Urgent**, **High**, **Normal**, and **Low** (see `PRIORITY_MENU_LABEL` in `src/lib/prioritySort.ts` and the flag styling in `priorityFlagIconClass` / `PriorityPillInline`).
+- **Do not** write P0, P1, P2, or P3 except when referring to the **stored JSON field** (`project.priority`) or code that maps those values.
+- When building prompts that include tracker data, you may pass the stored code internally but instruct the model to speak in **Urgent / High / Normal / Low** only.

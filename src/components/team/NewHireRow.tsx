@@ -148,14 +148,14 @@ function SkipNewHireConfirmPopover({
     ) : null;
 
   return (
-    <div className="relative inline-flex" ref={anchorRef}>
+    <div className="relative inline-flex shrink-0 self-stretch" ref={anchorRef}>
       <button
         type="button"
         onClick={() => {
           setOpen(!open);
           setError(null);
         }}
-        className="inline-flex items-center rounded-md border border-zinc-600 bg-zinc-900/90 px-2.5 py-1.5 text-xs font-medium text-zinc-400 shadow-sm transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/40"
+        className="inline-flex h-full min-h-[2.25rem] items-center justify-center rounded-md border border-zinc-600 bg-zinc-900/90 px-3 py-2 text-xs font-medium text-zinc-400 shadow-sm transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/40"
       >
         Skip
       </button>
@@ -184,7 +184,7 @@ export function NewHireRow({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-start justify-between gap-3 rounded-lg border px-4 py-3",
+        "flex h-full min-h-0 flex-col gap-3 rounded-lg border p-4",
         hasPilot
           ? "border-emerald-800/60 bg-emerald-950/25"
           : "border-amber-800/50 bg-amber-950/20"
@@ -199,10 +199,10 @@ export function NewHireRow({
           />
         </div>
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-sm font-medium text-zinc-100 truncate">
+          <p className="text-sm font-medium leading-snug text-zinc-100 line-clamp-2">
             {person.name}
           </p>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs leading-snug text-zinc-500">
             {(person.role ?? "").trim() || "Role not set"}
             {days !== null ? (
               <>
@@ -218,25 +218,28 @@ export function NewHireRow({
             ) : null}
           </p>
           {hasPilot ? (
-            <p className="text-xs font-medium text-emerald-400/90">
+            <p
+              className="text-xs font-medium leading-snug text-emerald-400/90 line-clamp-2"
+              title={pilots[0]!.name}
+            >
               Pilot:{" "}
               <span className="text-emerald-300/95">{pilots[0]!.name}</span>
             </p>
           ) : (
-            <p className="text-xs font-medium text-amber-400/90">
-              No pilot yet
-            </p>
+            <p className="text-xs font-medium text-amber-400/90">No pilot yet</p>
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-0.5">
+      <div className="mt-auto flex shrink-0 flex-row items-stretch gap-2 border-t border-zinc-800/60 pt-3">
         <button
           type="button"
           onClick={onRecommendPilot}
-          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-700 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+          className="inline-flex min-h-[2.25rem] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md bg-emerald-700 px-2 py-2 text-xs font-medium leading-tight text-white shadow-sm transition-colors hover:bg-emerald-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
         >
           <UserPlus className="h-3.5 w-3.5 shrink-0 opacity-95" aria-hidden />
-          Assign onboarding project
+          <span className="min-w-0 break-words text-center">
+            Assign onboarding project
+          </span>
         </button>
         <SkipNewHireConfirmPopover
           personName={person.name}

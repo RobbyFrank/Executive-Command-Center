@@ -90,6 +90,7 @@ export function countUnattendedNewHires(
 ): number {
   return people.filter((p) => {
     if (!isNewHire(p, todayYmd)) return false;
+    if (p.skippedFromNewHires) return false;
     return findPilotProjectsFor(p, projects).length === 0;
   }).length;
 }
@@ -105,6 +106,7 @@ export function buildOnboardingSignalLines(
   const lines: string[] = [];
   for (const p of people) {
     if (!isNewHire(p, todayYmd)) continue;
+    if (p.skippedFromNewHires) continue;
     if (findPilotProjectsFor(p, projects).length > 0) continue;
     const days = daysSinceJoined(p, todayYmd);
     if (days === null) continue;

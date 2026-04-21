@@ -45,3 +45,10 @@ export {
   type SlackUserMessageMatch,
   type SlackUserMessageKind,
 } from "./user-messages";
+export {
+  fetchUserChannelMemberships,
+  inviteUserToSlackChannel,
+  type InviteErrorCode,
+  type InviteOutcome,
+  type UserChannelMembership,
+} from "./memberships";

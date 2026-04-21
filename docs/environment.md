@@ -18,7 +18,7 @@ Copy `.env.example` to `.env.local` and set values below. The app does not commi
 | `ANTHROPIC_API_KEY` | Enables the **Assistant** (floating button), **Update with AI…**, **AI create**, company **Generate from website…**, Slack thread drafting/summaries, and milestone likelihood. Without it, those features return a configuration error. |
 | `ANTHROPIC_MODEL` | Optional override for the default Claude model (e.g. `claude-sonnet-4-6`). |
 | `ROBBY_CALENDLY_URL` | Optional; included in **new hire pilot** assignment Slack drafts when set (Team onboarding). |
-| `NADAV_SLACK_USER_ID` | Optional fallback Slack user id for **Nadav** (used by the new hire **buddy group DM** when no roster `Person.id === "nadav"` with `slackHandle` exists). Format: `U01234ABCDE`. |
+| `NADAV_SLACK_USER_ID` | Optional fallback Slack user id for **Nadav** (used by the new hire **onboarding-partner group DM** when no roster `Person.id === "nadav"` with `slackHandle` exists). Format: `U01234ABCDE`. |
 
 ## Images (optional)
 
@@ -83,7 +83,11 @@ Slack user-token scopes reused from the milestone-thread flow cover the digest a
 
 See [onboarding.md](onboarding.md) for the pilot recommender, cron detector, and Team flows. Reuses the same Slack user token and `ANTHROPIC_API_KEY` as other AI features.
 
-The **buddy group DM** action (Team → Assign onboarding project → assignment dialog → "Open new group DM with buddies + Nadav") opens a multi-person DM via `conversations.open` and posts as the OAuth user. Requires the user token to also have **`mpim:write`** (and ideally **`im:write`** for 1:1 fallback). Resolves Nadav from `Person.id === "nadav"`, then any founder named "Nadav", then `NADAV_SLACK_USER_ID` env override.
+The **onboarding-partner group DM** action (Team → Assign onboarding project → assignment dialog → "Open new group DM with onboarding partners + Nadav") opens a multi-person DM via `conversations.open` and posts as the OAuth user. Requires the user token to also have **`mpim:write`** (and ideally **`im:write`** for 1:1 fallback). Resolves Nadav from `Person.id === "nadav"`, then any founder named "Nadav", then `NADAV_SLACK_USER_ID` env override.
+
+**Optional channel invites after assignment:** To suggest channels using teammate membership signals, add user scopes that allow **`users.conversations`** for other users (typically **`users:read`**, **`channels:read`**, and **`groups:read`** alongside your existing history/write scopes — Slack returns `missing_scope` if the token cannot list that user’s channels). To run **`conversations.invite`** for the new hire after the assignment message posts, add **`channels:write.invites`** (public channels) and **`groups:write.invites`** (private channels). The inviting user must already be in each channel; private invites need the private-channel invite scope.
+
+**Create private channel from the recommender:** The pilot dialog can call **`conversations.create`** with `is_private=true`. Add the **`groups:write`** user scope on the Slack app (private channel creation), reinstall, and re-authorize OAuth.
 
 ## See also
 

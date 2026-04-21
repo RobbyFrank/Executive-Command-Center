@@ -18,7 +18,7 @@ Rules:
 - Address the new hire using their Slack user mention token exactly as given (e.g. <@U…>) once near the start.
 - Do not repeat boilerplate that already appeared in Nadav's welcome message (the background may include a snippet; skip overlapping instructions like the Slack guidelines video, typically ${SLACK_GUIDELINES_LOOM_URL}).
 - Mention the project name, the goal context in one short phrase, and what "done" means at a high level.
-- If buddy mentions are provided in the background, add ONE short line near the end naming them with their <@U…> mentions, framing them as accountability + go-to teammates. Example phrasing (do not copy verbatim): "Looping in <@U…> and <@U…> as your go-to teammates while you ramp up. Feel free to ping them with anything." Do not list buddies if none are provided.
+- If onboarding-partner mentions are provided in the background, add ONE short line near the end naming them with their <@U…> mentions, framing them as go-to teammates for accountability and support. Example phrasing (do not copy verbatim): "Looping in <@U…> and <@U…> as your onboarding partners while you ramp up. Feel free to ping them with anything." Do not use the word "buddy" or "buddies" in the output. Skip the line entirely if none are provided.
 - Keep it to 3-7 short lines. Optional: include a scheduling link line only if a Calendly URL is provided in the background.
 - Output only the message text to post (no quotes, no preamble).`;
 
@@ -32,7 +32,7 @@ export async function draftAssignmentMessage(input: {
   dmContextSummary: string;
   welcomeSnippet?: string;
   rosterHints: SlackMemberRosterHint[];
-  /** Optional teammates to call out as accountability partners (mentions + names). */
+  /** Optional teammates to call out as onboarding partners (mentions + names). */
   buddies?: { slackUserId: string; name: string; rationale?: string }[];
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const token = slackUserTokenForThreads();
@@ -54,7 +54,7 @@ export async function draftAssignmentMessage(input: {
   );
   const buddyLine =
     buddies.length > 0
-      ? `Buddy mentions to include in the closing line (use these EXACT tokens, in order): ${buddies
+      ? `Onboarding-partner mentions to include in the closing line (use these EXACT tokens, in order): ${buddies
           .map(
             (b) =>
               `<@${b.slackUserId.trim().toUpperCase()}> (${b.name}${
@@ -62,7 +62,7 @@ export async function draftAssignmentMessage(input: {
               })`
           )
           .join(", ")}`
-      : "No buddies provided — skip the buddy line.";
+      : "No onboarding partners provided — skip the onboarding-partner line.";
 
   const userPayload = [
     authorship,

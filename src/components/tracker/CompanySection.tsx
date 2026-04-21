@@ -30,6 +30,7 @@ import {
   ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
   TRACKER_GOALS_COLUMN_HEADER_HEIGHT_PX,
 } from "@/lib/tracker-sticky-layout";
+import { ROADMAP_COMPANY_STICKY_HEADER_CLASS } from "@/lib/tracker-roadmap-columns";
 import { CompanyEmptyGoalRowPlaceholder } from "./CompanyEmptyGoalRowPlaceholder";
 import { AddEntityMenuButton } from "./AddEntityMenuButton";
 import { CompanyScrapeButton } from "./CompanyScrapeButton";
@@ -243,10 +244,10 @@ export function CompanySection({
           "sticky z-[29] pt-3",
           /*
             Solid fill so content scrolls cleanly under the company header
-            (no backdrop-blur smear). Matches the toolbar/gap strip exactly
-            so the top-of-viewport sticky stack reads as one band.
+            (no backdrop-blur smear). Base matches the toolbar/gap strip; hover
+            lifts slightly so the row reads like goal/project hover.
           */
-          "bg-[var(--surface-toolbar)]"
+          ROADMAP_COMPANY_STICKY_HEADER_CLASS
         )}
         style={{ top: stickyStackBasePx }}
       >

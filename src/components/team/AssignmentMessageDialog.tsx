@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { CompanyWithGoals, Person, Project } from "@/lib/types/tracker";
-import { X, Loader2, Send, Users } from "lucide-react";
+import { X, Loader2, Send, Users, Hash, Check, CircleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -15,8 +15,15 @@ import {
   openBuddyMpimAndPostAssignment,
   postOnboardingAssignmentMessage,
 } from "@/server/actions/onboarding/postAssignmentMessage";
+import {
+  inviteNewHireToSlackChannels,
+  type ChannelInviteResult,
+} from "@/server/actions/onboarding/inviteNewHireToChannels";
 import { slackRosterHintsFromPeople } from "@/lib/slack-roster-hints";
-import type { SelectedBuddy } from "@/components/team/RecommendPilotDialog";
+import type {
+  SelectedBuddy,
+  SelectedChannel,
+} from "@/components/team/RecommendPilotDialog";
 
 function lookupGoalCompany(
   hierarchy: CompanyWithGoals[],
@@ -45,6 +52,7 @@ export function AssignmentMessageDialog({
   projects,
   hierarchy,
   buddies,
+  channels,
 }: {
   open: boolean;
   onClose: () => void;
@@ -55,8 +63,10 @@ export function AssignmentMessageDialog({
   people: Person[];
   projects: Project[];
   hierarchy: CompanyWithGoals[];
-  /** Selected accountability buddies (Slack ids + names) from the recommender. */
+  /** Selected onboarding partners (Slack ids + names) from the recommender. */
   buddies: SelectedBuddy[];
+  /** Channels the founder chose in the recommender dialog (may be empty). */
+  channels: SelectedChannel[];
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -72,6 +82,24 @@ export function AssignmentMessageDialog({
   );
   const canOpenBuddyMpim = buddiesWithSlack.length > 0;
   const [openNewMpim, setOpenNewMpim] = useState<boolean>(canOpenBuddyMpim);
+
+  /**
+   * Channels we will invite the new hire to when posting. Starts from the dialog-1 picks,
+   * stays editable here so the founder can drop any they reconsidered right before posting.
+   */
+  const [channelInvites, setChannelInvites] = useState<SelectedChannel[]>(
+    channels ?? []
+  );
+  /** Per-channel post-invite outcome surfaced inline after the post action. */
+  const [inviteResults, setInviteResults] = useState<ChannelInviteResult[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    setChannelInvites(channels ?? []);
+    setInviteResults([]);
+  }, [open, channels, projectId]);
+
+  const newHireHasSlackId = Boolean((newHire.slackHandle ?? "").trim());
+  const canInviteChannels = channelInvites.length > 0 && newHireHasSlackId;
 
   useEffect(() => {
     setOpenNewMpim(canOpenBuddyMpim);
@@ -173,6 +201,28 @@ export function AssignmentMessageDialog({
     }
   }, [draft, loading, newHire, people, reviseFeedback]);
 
+  /**
+   * Fire-and-surface helper: runs `conversations.invite` for each selected channel. Does
+   * not throw — results are stored in `inviteResults` so the UI can show per-channel status.
+   * Returns `true` iff every invite succeeded (used to decide whether to auto-close).
+   */
+  const runChannelInvites = useCallback(async (): Promise<boolean> => {
+    if (!canInviteChannels) {
+      setInviteResults([]);
+      return true;
+    }
+    const uid = (newHire.slackHandle ?? "").trim();
+    const r = await inviteNewHireToSlackChannels({
+      newHireSlackUserId: uid,
+      channels: channelInvites.map((c) => ({
+        channelId: c.channelId,
+        channelName: c.channelName,
+      })),
+    });
+    setInviteResults(r.results);
+    return r.results.every((x) => x.ok);
+  }, [canInviteChannels, channelInvites, newHire.slackHandle]);
+
   const handlePost = useCallback(async () => {
     const text = draft.trim();
     if (!text) {
@@ -189,7 +239,7 @@ export function AssignmentMessageDialog({
           return;
         }
         if (buddiesWithSlack.length === 0) {
-          toast.error("No buddies with Slack ids selected.");
+          toast.error("No onboarding partners with Slack ids selected.");
           return;
         }
         const r = await openBuddyMpimAndPostAssignment({
@@ -203,12 +253,15 @@ export function AssignmentMessageDialog({
           toast.error(r.error);
           return;
         }
+        const invitesAllOk = await runChannelInvites();
         toast.success(
           r.alreadyOpen
             ? "Reused existing group DM and posted"
             : "Opened group DM and posted"
         );
-        onClose();
+        if (invitesAllOk) {
+          onClose();
+        }
         router.refresh();
         return;
       }
@@ -229,8 +282,11 @@ export function AssignmentMessageDialog({
         toast.error(r.error);
         return;
       }
+      const invitesAllOk = await runChannelInvites();
       toast.success("Posted to Slack");
-      onClose();
+      if (invitesAllOk) {
+        onClose();
+      }
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Post failed");
@@ -246,6 +302,7 @@ export function AssignmentMessageDialog({
     openNewMpim,
     projectId,
     router,
+    runChannelInvites,
   ]);
 
   if (!mounted || !open) return null;
@@ -325,7 +382,7 @@ export function AssignmentMessageDialog({
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-sky-200/95 inline-flex items-center gap-1.5">
                   <Users className="h-3 w-3" aria-hidden />
-                  Open new group DM with buddies + Nadav
+                  Open new group DM with onboarding partners + Nadav
                 </p>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
                   {buddiesWithSlack.map((b) => b.name).join(", ")}{" "}
@@ -334,6 +391,88 @@ export function AssignmentMessageDialog({
                 </p>
               </div>
             </label>
+          ) : null}
+
+          {channelInvites.length > 0 ? (
+            <div className="rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
+              <p className="text-xs font-medium text-zinc-200 inline-flex items-center gap-1.5">
+                <Hash className="h-3 w-3 text-zinc-400" aria-hidden />
+                Invite {newHire.name.split(/\s+/)[0] || "new hire"} to {channelInvites.length}{" "}
+                channel{channelInvites.length === 1 ? "" : "s"} after posting
+              </p>
+              {!newHireHasSlackId ? (
+                <p className="mt-1 text-[11px] text-amber-400/90">
+                  New hire is missing a Slack user id — invites cannot be sent.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] leading-snug text-zinc-500">
+                  Uses <code className="text-zinc-400">conversations.invite</code> on your
+                  user token. Slack needs you to already be a member of each channel.
+                </p>
+              )}
+              <ul className="mt-2 space-y-1.5">
+                {channelInvites.map((c) => {
+                  const outcome = inviteResults.find(
+                    (r) => r.channelId === c.channelId
+                  );
+                  return (
+                    <li
+                      key={c.channelId}
+                      className="flex items-start gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5"
+                    >
+                      <Hash
+                        className="mt-0.5 h-3 w-3 shrink-0 text-zinc-500"
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium text-zinc-100">
+                          #{c.channelName || c.channelId}
+                        </p>
+                        {c.rationale ? (
+                          <p className="line-clamp-2 text-[11px] leading-snug text-zinc-500">
+                            {c.rationale}
+                          </p>
+                        ) : null}
+                        {outcome ? (
+                          outcome.ok ? (
+                            <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-emerald-400/95">
+                              <Check className="h-3 w-3" aria-hidden />
+                              {outcome.alreadyInChannel
+                                ? "Already in channel"
+                                : "Invited"}
+                            </p>
+                          ) : (
+                            <p className="mt-0.5 inline-flex items-start gap-1 text-[11px] text-amber-400/95">
+                              <CircleAlert
+                                className="mt-[1px] h-3 w-3 shrink-0"
+                                aria-hidden
+                              />
+                              <span className="min-w-0 leading-snug">
+                                {outcome.error}
+                              </span>
+                            </p>
+                          )
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setChannelInvites((prev) =>
+                            prev.filter((x) => x.channelId !== c.channelId)
+                          )
+                        }
+                        disabled={posting}
+                        className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                        aria-label={`Remove #${c.channelName} from invites`}
+                        title="Remove from this post"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           ) : null}
         </div>
 

@@ -116,7 +116,9 @@ import {
 import { NewHireRow } from "@/components/team/NewHireRow";
 import {
   RecommendPilotDialog,
+  type AssignedPilotProject,
   type SelectedBuddy,
+  type SelectedChannel,
 } from "@/components/team/RecommendPilotDialog";
 import { AssignmentMessageDialog } from "@/components/team/AssignmentMessageDialog";
 import {
@@ -287,13 +289,26 @@ function TeamRosterManagerInner({
   );
   const slackRosterRowRefMap = useRef(new Map<string, HTMLTableRowElement>());
   const [recommendPerson, setRecommendPerson] = useState<Person | null>(null);
-  const [assignmentFlow, setAssignmentFlow] = useState<{
+  /**
+   * After the recommender assigns one or more pilots, we open {@link AssignmentMessageDialog}
+   * once per project. `items[0]` is always the active dialog; closing advances the queue.
+   */
+  const [assignmentQueue, setAssignmentQueue] = useState<{
     newHire: Person;
-    projectId: string;
-    assignmentKind: "owner" | "assignee" | "new_project";
     dmContextSummary: string;
     buddies: SelectedBuddy[];
+    channels: SelectedChannel[];
+    items: AssignedPilotProject[];
   } | null>(null);
+
+  const advanceAssignmentQueue = useCallback(() => {
+    setAssignmentQueue((q) => {
+      if (!q) return null;
+      const rest = q.items.slice(1);
+      if (rest.length === 0) return null;
+      return { ...q, items: rest };
+    });
+  }, []);
 
   const { stickyTopPx } = useRoadmapView();
   /** Same rule as {@link RoadmapStickyBelowToolbarGap} — avoids wrong offsets before toolbar measures. */
@@ -759,40 +774,31 @@ function TeamRosterManagerInner({
           people={mergedPeople}
           projects={initialProjects}
           hierarchy={hierarchy}
-          onAssignedExisting={(ctx) => {
-            setAssignmentFlow({
+          onBatchAssigned={(ctx) => {
+            setAssignmentQueue({
               newHire: ctx.newHire,
-              projectId: ctx.projectId,
-              assignmentKind: ctx.assignmentKind,
               dmContextSummary: ctx.recommendation.dmContextSummary,
               buddies: ctx.buddies,
-            });
-            setRecommendPerson(null);
-          }}
-          onNewProjectCreated={(ctx) => {
-            setAssignmentFlow({
-              newHire: ctx.newHire,
-              projectId: ctx.projectId,
-              assignmentKind: "new_project",
-              dmContextSummary: ctx.recommendation.dmContextSummary,
-              buddies: ctx.buddies,
+              channels: ctx.channels,
+              items: ctx.assigned,
             });
             setRecommendPerson(null);
           }}
         />
       ) : null}
-      {assignmentFlow ? (
+      {assignmentQueue && assignmentQueue.items.length > 0 ? (
         <AssignmentMessageDialog
           open
-          onClose={() => setAssignmentFlow(null)}
-          newHire={assignmentFlow.newHire}
-          projectId={assignmentFlow.projectId}
-          assignmentKind={assignmentFlow.assignmentKind}
-          dmContextSummary={assignmentFlow.dmContextSummary}
+          onClose={advanceAssignmentQueue}
+          newHire={assignmentQueue.newHire}
+          projectId={assignmentQueue.items[0].projectId}
+          assignmentKind={assignmentQueue.items[0].assignmentKind}
+          dmContextSummary={assignmentQueue.dmContextSummary}
           people={mergedPeople}
           projects={initialProjects}
           hierarchy={hierarchy}
-          buddies={assignmentFlow.buddies}
+          buddies={assignmentQueue.buddies}
+          channels={assignmentQueue.channels}
         />
       ) : null}
       <SlackImportDialog
@@ -982,7 +988,7 @@ function TeamRosterManagerInner({
             First 30 days on the team. Sorted with no pilot project first, then
             by days since join date.
           </p>
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {newHiresSorted.map((p) => (
               <NewHireRow
                 key={p.id}

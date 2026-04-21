@@ -3,13 +3,14 @@ import type { BuddyRecommendation } from "@/lib/schemas/onboarding";
 import { getRepository } from "@/server/repository";
 import { claudePlainText } from "@/server/actions/slack/thread-ai-shared";
 import { fetchIntroContextForNewHire } from "@/server/actions/onboarding/fetchIntroContext";
-import { isFounderPerson } from "@/lib/autonomyRoster";
+import { clampAutonomy, isFounderPerson } from "@/lib/autonomyRoster";
 import {
   daysSinceJoined,
   isNewHire,
 } from "@/lib/onboarding";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
-import type { Goal, Person, Project } from "@/lib/types/tracker";
+import type { Goal, Person, Priority, Project } from "@/lib/types/tracker";
+import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
 
 function extractJsonObject(raw: string): string {
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -58,16 +59,18 @@ function compactProjectsForBuddyPrompt(
     const pilot = projects.find((p) => p.id === pilotProjectId);
     if (pilot) {
       const g = goalById.get(pilot.goalId);
+      const pr = pilot.priority as Priority;
+      const priorityLabel = PRIORITY_MENU_LABEL[pr] ?? pilot.priority;
       return [
         "PILOT PROJECT (the new hire's first assignment):",
-        `projectId=${pilot.id} | name=${JSON.stringify(pilot.name)} | priority=${pilot.priority} | complexity=${pilot.complexityScore} | goal=${JSON.stringify(g?.description.slice(0, 120) ?? "")}`,
+        `projectId=${pilot.id} | name=${JSON.stringify(pilot.name)} | priority=${pilot.priority} (Roadmap label: ${priorityLabel}) | complexity=${pilot.complexityScore} | goal=${JSON.stringify(g?.description.slice(0, 120) ?? "")}`,
       ].join("\n");
     }
   }
   return "PILOT PROJECT: not selected yet (recommend based on department / goal overlap only).";
 }
 
-const BUDDY_SYSTEM = `You are helping MLabs leadership pair a brand-new hire (autonomy 0) with **1 or 2 experienced teammates** who can mentor them, monitor their pilot project, and provide accountability.
+const BUDDY_SYSTEM = `You are helping MLabs leadership pair a brand-new hire (autonomy 0) with **1 or 2 experienced teammates** (called "onboarding partners") who can mentor them, monitor their pilot project, and provide accountability.
 
 Output ONLY a fenced JSON block (no other text):
 \`\`\`json
@@ -81,8 +84,9 @@ Output ONLY a fenced JSON block (no other text):
 \`\`\`
 
 Rules:
+- If FOUNDER DIRECTION is provided below, treat it as the strongest signal: pair partners who complement or reinforce the direction the founder has set for this new hire. Prefer teammates who already work in that area.
 - Pick **1 or 2** people total. Default to 2 unless only one is clearly suitable.
-- Prefer people in the **same department** as the new hire AND who have **non-trivial tenure** (older join date / autonomy >= 3) so they can actually mentor.
+- **Only** return candidates whose roster autonomy score is **3, 4, or 5** after clamping (exclude 0–2 entirely). Prefer the **same department** as the new hire and meaningful tenure.
 - Boost candidates who **own or are assigned to** projects under the same goal/company as the pilot project.
 - Exclude founders (id "robby" or "nadav" or department "Founders"); they are already in the loop.
 - Exclude anyone who is themselves still a new hire (tenure < 30d).
@@ -96,6 +100,8 @@ export async function recommendOnboardingBuddies(input: {
   personId: string;
   /** Optional: when set, prioritize candidates linked to this project's goal/company. */
   pilotProjectId?: string;
+  /** Optional free-text direction from the founder (same value fed to the pilot recommender). */
+  founderContext?: string;
 }): Promise<
   | { ok: true; recommendation: BuddyRecommendation }
   | { ok: false; error: string }
@@ -114,17 +120,26 @@ export async function recommendOnboardingBuddies(input: {
     if (isFounderPerson(p)) return false;
     if ((p.department ?? "").trim().toLowerCase() === "founders") return false;
     if (isNewHire(p, todayYmd)) return false;
+    const a = clampAutonomy(p.autonomyScore);
+    if (a < 3) return false;
     return true;
   });
 
   if (eligible.length === 0) {
-    return { ok: false, error: "No eligible teammates to suggest as buddies." };
+    return {
+      ok: false,
+      error: "No eligible teammates to suggest as onboarding partners.",
+    };
   }
 
   const intro = await fetchIntroContextForNewHire(
     person.slackHandle,
     data.people,
-    { maxMessages: 50 }
+    {
+      maxMessages: 50,
+      welcomeSlackChannelId: person.welcomeSlackChannelId,
+      welcomeSlackUrl: person.welcomeSlackUrl,
+    }
   );
 
   const rosterBlock = eligible
@@ -137,11 +152,21 @@ export async function recommendOnboardingBuddies(input: {
     input.pilotProjectId?.trim() || null
   );
 
+  const founderContextRaw = (input.founderContext ?? "").trim();
+  const founderContext =
+    founderContextRaw.length > 2000
+      ? founderContextRaw.slice(0, 2000)
+      : founderContextRaw;
+
   const userBlock = [
     `Today (UTC): ${new Date().toISOString().slice(0, 10)}`,
     `New hire: ${person.name} (id=${person.id})`,
     `Role: ${(person.role ?? "").trim() || "(not set)"}`,
     `Department: ${(person.department ?? "").trim() || "(not set)"}`,
+    "",
+    founderContext
+      ? `FOUNDER DIRECTION (highest priority signal for pairing):\n${founderContext}`
+      : "FOUNDER DIRECTION: (none provided).",
     "",
     pilotBlock,
     "",
@@ -168,7 +193,7 @@ export async function recommendOnboardingBuddies(input: {
   } catch (e) {
     return {
       ok: false,
-      error: `Could not parse buddy recommendation: ${e instanceof Error ? e.message : String(e)}`,
+      error: `Could not parse onboarding partner recommendation: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
 
@@ -181,7 +206,7 @@ export async function recommendOnboardingBuddies(input: {
     return {
       ok: false,
       error:
-        "AI returned no valid buddy candidates from the eligible roster. Try Refresh.",
+        "AI returned no valid onboarding partner candidates from the eligible roster. Try Refresh.",
     };
   }
 

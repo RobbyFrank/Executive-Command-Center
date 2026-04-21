@@ -139,8 +139,8 @@ export const ROADMAP_PROJECT_INNER_ROW_NEUTRAL_CLASS = "bg-zinc-950/55";
 export const ROADMAP_GOAL_HEADER_SURFACE_CLASS =
   "bg-[var(--surface-group-header)]";
 
-/** Goal header hover — subtle lift without returning to the old bright gray. */
-export const ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS = "hover:bg-[#1a1a20]";
+/** Goal header hover — slightly lighter than {@link ROADMAP_GOAL_HEADER_SURFACE_CLASS} / `--surface-group-header`. */
+export const ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS = "hover:bg-[#1e1e26]";
 
 /**
  * Neutral goal block outer (no at-risk / spotlight) — shell fill aligned with
@@ -149,4 +149,11 @@ export const ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS = "hover:bg-[#1a1a20]";
  */
 export const ROADMAP_GOAL_OUTER_NEUTRAL_CLASS =
   "bg-zinc-900/45 ring-1 ring-black/25 border-l-[3px] border-l-zinc-600/60";
+
+/**
+ * Roadmap company title row (sticky under toolbar) — `--surface-toolbar` with a subtle hover
+ * lift so it reads like goal/project rows.
+ */
+export const ROADMAP_COMPANY_STICKY_HEADER_CLASS =
+  "bg-[var(--surface-toolbar)] transition-colors duration-150 motion-reduce:transition-none hover:bg-[#0f0f15]";
 

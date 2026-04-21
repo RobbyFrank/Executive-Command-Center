@@ -44,13 +44,13 @@ export async function POST(req: Request) {
     });
   }
 
-  const personId =
-    body &&
-    typeof body === "object" &&
-    "personId" in body &&
-    typeof (body as { personId?: unknown }).personId === "string"
-      ? (body as { personId: string }).personId.trim()
-      : "";
+  const b = (body ?? {}) as {
+    personId?: unknown;
+    founderContext?: unknown;
+  };
+  const personId = typeof b.personId === "string" ? b.personId.trim() : "";
+  const founderContext =
+    typeof b.founderContext === "string" ? b.founderContext : undefined;
 
   if (!personId) {
     return new Response(JSON.stringify({ error: "personId is required" }), {
@@ -81,6 +81,7 @@ export async function POST(req: Request) {
       try {
         const loaded = await loadPilotRecommendationContext(personId, {
           onProgress: sendStatus,
+          founderContext,
         });
         if (!loaded.ok) {
           sendFooter({ ok: false, error: loaded.error });
@@ -107,11 +108,12 @@ export async function POST(req: Request) {
           return;
         }
 
-        sendStatus("Suggesting onboarding buddies (second AI call)…");
+        sendStatus("Suggesting onboarding partners (second AI call)…");
         const buddyResult = await recommendOnboardingBuddies({
           personId,
           pilotProjectId:
             firstPilotProjectIdForBuddies(fin.recommendation) ?? undefined,
+          founderContext,
         });
 
         sendFooter({
