@@ -123,9 +123,8 @@ export function RoadmapExpandModeSelect({
         className={cn(
           filterSelectTriggerButtonClass(open, expandPreset !== null),
           "inline-flex max-w-full min-h-[2.25rem] w-max items-center py-1.5 pl-2.5 pr-2 font-medium transition-colors",
-          viewLocked
-            ? "cursor-default border-zinc-600/90 bg-zinc-900/90 text-zinc-100"
-            : "hover:border-zinc-600 hover:bg-zinc-800",
+          viewLocked &&
+            "cursor-default border-zinc-600/90 bg-zinc-900/90 text-zinc-100",
           current.value === null ? "text-zinc-500" : "text-zinc-100"
         )}
       >

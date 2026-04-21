@@ -1,4 +1,5 @@
 import { slackTokenForConversationsList } from "./tokens";
+import { isExecutiveSlackChannelName } from "./channelNamePolicy";
 
 export type SlackChannel = {
   id: string;
@@ -109,7 +110,9 @@ function mergeMappedSlackChannels(raws: SlackApiChannel[]): SlackChannel[] {
   const byId = new Map<string, SlackChannel>();
   for (const raw of raws) {
     const ch = mapChannel(raw);
-    if (ch) byId.set(ch.id, ch);
+    if (!ch) continue;
+    if (isExecutiveSlackChannelName(ch.name)) continue;
+    byId.set(ch.id, ch);
   }
   const collected = [...byId.values()];
   collected.sort((a, b) => a.name.localeCompare(b.name));

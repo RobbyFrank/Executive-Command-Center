@@ -4,9 +4,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { CompanyWithGoals, Person, Project } from "@/lib/types/tracker";
-import { X, Loader2, Send, Users, Hash, Check, CircleAlert } from "lucide-react";
+import {
+  X,
+  Loader2,
+  Send,
+  Users,
+  Hash,
+  Check,
+  CircleAlert,
+  ArrowLeft,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { SlackDraftMessagePreview } from "@/components/tracker/SlackDraftMessagePreview";
+import { getSlackThreadPosterPreviewIdentity } from "@/server/actions/slack";
 import {
   draftAssignmentMessage,
   reviseAssignmentMessage,
@@ -44,6 +55,7 @@ function lookupGoalCompany(
 export function AssignmentMessageDialog({
   open,
   onClose,
+  onBack,
   newHire,
   projectId,
   assignmentKind,
@@ -56,6 +68,8 @@ export function AssignmentMessageDialog({
 }: {
   open: boolean;
   onClose: () => void;
+  /** Return to the onboarding recommender without posting (restores prior step in parent). */
+  onBack?: () => void;
   newHire: Person;
   projectId: string;
   assignmentKind: "owner" | "assignee" | "new_project";
@@ -75,6 +89,11 @@ export function AssignmentMessageDialog({
   const [posting, setPosting] = useState(false);
   const [reviseFeedback, setReviseFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [poster, setPoster] = useState<{
+    displayName: string;
+    avatarSrc: string | null;
+  } | null>(null);
+  const [previewAt, setPreviewAt] = useState(() => new Date());
 
   const buddiesWithSlack = useMemo(
     () => buddies.filter((b) => b.slackUserId.trim().length > 0),
@@ -109,6 +128,27 @@ export function AssignmentMessageDialog({
     setMounted(true);
   }, []);
 
+  const rosterHints = useMemo(
+    () => slackRosterHintsFromPeople(people),
+    [people]
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setPoster(null);
+      return;
+    }
+    setPreviewAt(new Date());
+    let cancelled = false;
+    void (async () => {
+      const id = await getSlackThreadPosterPreviewIdentity();
+      if (!cancelled) setPoster(id);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const loadDraft = useCallback(async () => {
     const pid = projectId.trim();
     if (!pid) return;
@@ -126,7 +166,6 @@ export function AssignmentMessageDialog({
     setLoading(true);
     setError(null);
     try {
-      const rosterHints = slackRosterHintsFromPeople(people);
       const r = await draftAssignmentMessage({
         newHire,
         pilotProjectName: project.name,
@@ -136,7 +175,7 @@ export function AssignmentMessageDialog({
         assignmentKind:
           assignmentKind === "new_project" ? "new_project" : assignmentKind,
         dmContextSummary,
-        rosterHints,
+        rosterHints: slackRosterHintsFromPeople(people),
         buddies: buddiesWithSlack.map((b) => ({
           slackUserId: b.slackUserId,
           name: b.name,
@@ -180,12 +219,11 @@ export function AssignmentMessageDialog({
     setLoading(true);
     setError(null);
     try {
-      const rosterHints = slackRosterHintsFromPeople(people);
       const r = await reviseAssignmentMessage({
         currentDraft: draft,
         feedback: fb,
         newHire,
-        rosterHints,
+        rosterHints: slackRosterHintsFromPeople(people),
       });
       if (!r.ok) {
         setError(r.error);
@@ -316,7 +354,7 @@ export function AssignmentMessageDialog({
     >
       <div className="absolute inset-0" onClick={() => !posting && onClose()} />
       <div
-        className="relative z-10 flex max-h-[min(90vh,640px)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl"
+        className="relative z-10 flex max-h-[min(94vh,920px)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
@@ -337,7 +375,7 @@ export function AssignmentMessageDialog({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-4">
           {loading && !draft ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
@@ -346,13 +384,36 @@ export function AssignmentMessageDialog({
           {error ? (
             <p className="text-sm text-red-400/90">{error}</p>
           ) : null}
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={12}
-            className="w-full rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
-            placeholder="Draft Slack message…"
-          />
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-stretch">
+            <div className="flex min-h-0 min-w-0 flex-col gap-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                Edit
+              </p>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={14}
+                className="min-h-[min(42vh,22rem)] w-full flex-1 resize-y rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 lg:min-h-[380px]"
+                placeholder="Draft Slack message…"
+              />
+            </div>
+            <div className="flex min-h-0 min-w-0 flex-col gap-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                Slack preview
+              </p>
+              <div className="min-h-[min(42vh,22rem)] flex-1 overflow-y-auto rounded-md lg:min-h-[380px]">
+                <SlackDraftMessagePreview
+                  text={draft}
+                  people={people}
+                  rosterHints={rosterHints}
+                  posterDisplayName={poster?.displayName ?? "You"}
+                  posterAvatarSrc={poster?.avatarSrc ?? null}
+                  postedAt={previewAt}
+                  compact
+                />
+              </div>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             <input
               type="text"
@@ -476,7 +537,21 @@ export function AssignmentMessageDialog({
           ) : null}
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-zinc-800 px-4 py-3">
+          {onBack ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (posting) return;
+                onBack();
+              }}
+              disabled={posting}
+              className="mr-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              Back
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}

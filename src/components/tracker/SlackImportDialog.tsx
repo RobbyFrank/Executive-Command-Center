@@ -12,6 +12,7 @@ import { Check, Loader2, Search, User, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { SlackMember } from "@/lib/slack";
+import type { Person } from "@/lib/types/tracker";
 import {
   fetchSlackMembers,
   importSlackMembers,
@@ -43,6 +44,12 @@ export function SlackImportDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
+  /** Determinate progress while importing (one server round-trip per person). */
+  const [importProgress, setImportProgress] = useState<{
+    current: number;
+    total: number;
+    name: string;
+  } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   /** When false, rows already on the roster are hidden so the list focuses on new imports. */
   const [showExistingMembers, setShowExistingMembers] = useState(false);
@@ -56,6 +63,7 @@ export function SlackImportDialog({
     setSearchQuery("");
     setSelectedIds(new Set());
     setImportError(null);
+    setImportProgress(null);
     setShowExistingMembers(false);
     setLoading(true);
 
@@ -176,21 +184,35 @@ export function SlackImportDialog({
 
     setImporting(true);
     setImportError(null);
+    setImportProgress(null);
+    const total = payload.length;
+    const importedAcc: Person[] = [];
+    const avatarWarningsAcc: string[] = [];
     try {
-      const r = await importSlackMembers(payload);
-      if (!r.ok) {
-        setImportError(r.error);
-        return;
+      for (let i = 0; i < payload.length; i++) {
+        const m = payload[i]!;
+        const name =
+          m.realName.trim() ||
+          m.displayName.trim() ||
+          `Slack user ${m.id}`;
+        setImportProgress({ current: i + 1, total, name });
+        const r = await importSlackMembers([m]);
+        if (!r.ok) {
+          setImportError(r.error);
+          return;
+        }
+        importedAcc.push(...r.imported);
+        avatarWarningsAcc.push(...r.avatarWarnings);
       }
-      if (r.avatarWarnings.length > 0) {
+      if (avatarWarningsAcc.length > 0) {
         toast.warning("Some profile photos could not be saved", {
-          description: r.avatarWarnings.slice(0, 3).join(" · "),
+          description: avatarWarningsAcc.slice(0, 3).join(" · "),
         });
       }
       toast.success(
-        r.imported.length === 1
+        importedAcc.length === 1
           ? "Imported 1 team member"
-          : `Imported ${r.imported.length} team members`
+          : `Imported ${importedAcc.length} team members`
       );
       router.refresh();
       onClose();
@@ -199,6 +221,7 @@ export function SlackImportDialog({
         e instanceof Error ? e.message : "Import failed unexpectedly."
       );
     } finally {
+      setImportProgress(null);
       setImporting(false);
     }
   }, [members, selectedIds, existingSlackIds, router, onClose]);
@@ -209,7 +232,9 @@ export function SlackImportDialog({
     <>
       <div
         className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={() => {
+          if (!importing) onClose();
+        }}
         aria-hidden
       />
 
@@ -218,6 +243,7 @@ export function SlackImportDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Import team members from Slack"
+        aria-busy={loading || importing}
         className="fixed left-1/2 top-1/2 z-50 flex max-h-[min(92vh,960px)] w-[min(1120px,calc(100vw-2.5rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
       >
         {/* Header */}
@@ -235,7 +261,8 @@ export function SlackImportDialog({
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45"
+            disabled={importing}
+            className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/45 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -339,9 +366,20 @@ export function SlackImportDialog({
         {/* Member list */}
         <div className="min-h-0 flex-1 overflow-auto px-8 pb-6">
           {loading ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-28 text-base text-zinc-500">
-              <Loader2 className="h-10 w-10 animate-spin text-zinc-500" aria-hidden />
-              Loading workspace members…
+            <div className="flex max-w-lg flex-col items-center justify-center gap-4 px-6 py-28 text-center">
+              <Loader2
+                className="h-10 w-10 animate-spin text-zinc-500"
+                aria-hidden
+              />
+              <div className="space-y-2 text-base text-zinc-400">
+                <p className="font-medium text-zinc-200">
+                  Loading workspace members…
+                </p>
+                <p className="text-sm leading-relaxed text-zinc-500">
+                  Fetching the directory from Slack, applying the billing filter, and loading join
+                  dates from profiles. Large workspaces can take up to a minute.
+                </p>
+              </div>
             </div>
           ) : fetchError ? (
             <p className="px-8 py-12 text-base leading-relaxed text-red-400/95">
@@ -481,10 +519,45 @@ export function SlackImportDialog({
           </div>
         ) : null}
 
+        {importing && importProgress ? (
+          <div
+            className="border-t border-zinc-800 bg-zinc-950/40 px-8 py-4"
+            role="status"
+            aria-live="polite"
+            aria-label="Import progress"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+              <p className="min-w-0 text-sm text-zinc-300">
+                <span className="font-medium text-zinc-100">
+                  Importing{" "}
+                  <span className="break-words">{importProgress.name}</span>
+                </span>
+                <span className="tabular-nums text-zinc-500">
+                  {" "}
+                  — {importProgress.current} of {importProgress.total}
+                </span>
+              </p>
+              <p className="shrink-0 text-xs text-zinc-500">
+                Creating the roster row, inferring role from Slack history when possible, and saving
+                the profile photo.
+              </p>
+            </div>
+            <progress
+              className="mt-3 h-2 w-full overflow-hidden rounded-full accent-emerald-600 [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-zinc-800 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-emerald-600"
+              value={importProgress.current}
+              max={importProgress.total}
+            />
+          </div>
+        ) : null}
+
         {/* Footer */}
         <div className="flex flex-col gap-4 border-t border-zinc-800 px-8 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-zinc-500">
-            {selectedImportableCount > 0 ? (
+            {importing && importProgress ? (
+              <span className="tabular-nums text-zinc-400">
+                {importProgress.current} / {importProgress.total} complete
+              </span>
+            ) : selectedImportableCount > 0 ? (
               <span>
                 <span className="tabular-nums text-base font-semibold text-zinc-200">
                   {selectedImportableCount}
@@ -500,7 +573,8 @@ export function SlackImportDialog({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-5 py-2.5 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              disabled={importing}
+              className="rounded-lg px-5 py-2.5 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Cancel
             </button>
@@ -518,7 +592,13 @@ export function SlackImportDialog({
               {importing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  Importing…
+                  {importProgress ? (
+                    <span className="tabular-nums">
+                      {importProgress.current}/{importProgress.total}
+                    </span>
+                  ) : (
+                    "Importing…"
+                  )}
                 </>
               ) : (
                 <>

@@ -209,7 +209,12 @@ export function OwnerPickerCell({
                   autonomyRing ? "ring-amber-500/75" : "ring-zinc-700",
                 )}
               />
-              {avatarOnly ? <OwnerAutonomyBadge person={person} /> : null}
+              {avatarOnly ? (
+                <OwnerAutonomyBadge
+                  person={person}
+                  emphasizeUnassessed={false}
+                />
+              ) : null}
             </span>
             {!compactAvatar && displayName ? (
               <span className="min-w-0 truncate text-[11px] leading-tight text-zinc-100">
@@ -220,7 +225,7 @@ export function OwnerPickerCell({
         ) : compactAvatar ? (
           <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-zinc-200 ring-2 ring-zinc-700">
             {((displayName ?? person.name).trim().charAt(0) || "?").toUpperCase()}
-            <OwnerAutonomyBadge person={person} />
+            <OwnerAutonomyBadge person={person} emphasizeUnassessed={false} />
           </span>
         ) : (
           <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">

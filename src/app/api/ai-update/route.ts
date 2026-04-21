@@ -7,6 +7,10 @@ import {
   aiRateLimitExceededResponse,
   checkAiRateLimit,
 } from "@/lib/ai-rate-limit";
+import {
+  GOAL_AI_PROPOSAL_FIELDS_BLOCK,
+  PROJECT_AI_PROPOSAL_FIELDS_BLOCK,
+} from "@/lib/ai-create-prompt";
 
 function formatMilestones(ms: Milestone[]): string {
   if (ms.length === 0) return "(No milestones.)";
@@ -83,51 +87,78 @@ function buildProjectUpdateContext(
 }
 
 const GOAL_UPDATE_JSON_FIELDS = `
-The JSON object MUST contain exactly these keys (string values, may be empty):
-- measurableTarget: The measurable outcome / "Description" field in the UI
-- whyItMatters: Why this goal matters
-- currentValue: Current state vs the target
+The JSON object MUST contain exactly these keys (same shape as "Draft a new goal with AI"):
+${GOAL_AI_PROPOSAL_FIELDS_BLOCK}
 `.trim();
 
 const PROJECT_UPDATE_JSON_FIELDS = `
-The JSON object MUST contain exactly these keys (string values, may be empty):
-- description: What the project delivers
-- definitionOfDone: Done when / completion criteria
+The JSON object MUST contain exactly these keys (same shape as "Draft a new project with AI"):
+${PROJECT_AI_PROPOSAL_FIELDS_BLOCK}
+
+For REVISING an existing project: include every milestone from CURRENT FIELD VALUES in \`milestones\` unless the user explicitly asks to add, remove, or reorder them. You may have fewer than 3 or more than 6 milestones when that matches reality. Preserve \`targetDate\` values unless the user asks to change dates.
 `.trim();
 
-function buildUpdateSystemPrompt(
-  type: "goal" | "project",
+function buildGoalUpdateSystemPrompt(
   trackerJson: string,
   entityContextBlock: string,
   currentFieldsJson: string,
 ): string {
-  const fieldsBlock =
-    type === "goal" ? GOAL_UPDATE_JSON_FIELDS : PROJECT_UPDATE_JSON_FIELDS;
-
-  return `You are a concise executive writing assistant that helps UPDATE existing ${type} text fields in a portfolio tracker.
+  return `You are a concise executive writing assistant that helps REVISE existing goal text fields in a portfolio tracker.
 
 Today's date is ${new Date().toISOString().slice(0, 10)}.
 
 ${entityContextBlock}
 
-CURRENT FIELD VALUES (these are what the user may want to revise — preserve meaning unless the conversation calls for change):
+CURRENT FIELD VALUES (baseline when the user opened this dialog — repeat unchanged keys verbatim unless the user asks to change them in this session):
 ${currentFieldsJson}
 
-TASK:
-- Ask 2-3 short, smart questions ONE at a time to understand what changed (progress, strategy shift, blockers, new facts from milestones/projects).
-- Each question should be 1-2 sentences max.
-- Use the hierarchy context above (projects, milestones, company/goal) to ask specific questions when helpful.
-- After enough information (2-3 user replies after your first question), output your final proposal.
+TASK — do NOT run an interview. The client loaded the dialog with the goal already shown as-is; every call to you is a REVISION request:
+- Treat every user message as revision feedback on the goal in CURRENT FIELD VALUES. Apply the requested change and output an updated proposal (short lead-in sentence + fenced JSON).
+- Preserve unchanged fields verbatim from CURRENT FIELD VALUES (description, priority, measurableTarget, whyItMatters, currentValue). Only modify what the user asked to change plus tightly related dependencies.
+- Do NOT ask clarifying questions unless the user's request is genuinely impossible to apply — in that case ask ONE short question and stop.
+- Do NOT output a proposal that simply echoes CURRENT FIELD VALUES unchanged; the user always asked for something specific.
 
-STYLE RULES — match the tone of existing goals/projects in the tracker data below:
+STYLE RULES — match the tone of existing goals in the tracker data below:
 - Concise, actionable, readable. No filler or marketing language.
 
 FINAL OUTPUT RULES:
-- When ready, write a short sentence like "Here's the updated copy:" followed by a fenced JSON block.
+- Write a short sentence like "Here's the updated copy:" followed by a fenced JSON block.
 - The JSON block MUST be valid JSON wrapped in \`\`\`json ... \`\`\` fences.
-- ${fieldsBlock}
+- ${GOAL_UPDATE_JSON_FIELDS}
 - Include ALL keys every time. For fields that should stay unchanged, repeat the current text verbatim from CURRENT FIELD VALUES.
-- Do NOT include any other keys (no id, priority, milestones, etc.).
+- Do NOT include any other keys (no id, status, milestones, etc.).
+
+FULL TRACKER DATA (for style and cross-references):
+${trackerJson}`;
+}
+
+function buildProjectUpdateSystemPrompt(
+  trackerJson: string,
+  entityContextBlock: string,
+  currentFieldsJson: string,
+): string {
+  return `You are a concise executive writing assistant that helps REVISE an existing project in a portfolio tracker — the same JSON proposal workflow as "Draft a new project with AI", but applied to a project that already exists.
+
+Today's date is ${new Date().toISOString().slice(0, 10)}.
+
+${entityContextBlock}
+
+CURRENT FIELD VALUES (baseline when the user opened this dialog — repeat unchanged keys verbatim unless the user asks to change them in this session):
+${currentFieldsJson}
+
+TASK — do NOT run an interview. The client loaded the dialog with the project already shown as-is; every call to you is a REVISION request:
+- Treat every user message as revision feedback on the project in CURRENT FIELD VALUES. Apply the requested change and output an updated proposal (short lead-in sentence + fenced JSON).
+- Preserve unchanged fields verbatim from CURRENT FIELD VALUES (priority, complexity, milestone names and targetDates, description, definitionOfDone, name). Only modify what the user asked to change plus tightly related dependencies.
+- Do NOT ask clarifying questions unless the user's request is genuinely impossible to apply — in that case ask ONE short question and stop.
+- Do NOT output a proposal that simply echoes CURRENT FIELD VALUES unchanged; the user always asked for something specific.
+
+STYLE RULES — match the tone of existing projects in the tracker data below:
+- Concise, actionable, readable. No filler or marketing language.
+
+FINAL OUTPUT RULES:
+- The JSON block MUST be valid JSON wrapped in \`\`\`json ... \`\`\` fences.
+- ${PROJECT_UPDATE_JSON_FIELDS}
+- Do NOT include id, goalId, status, ownerId, or other database fields.
 
 FULL TRACKER DATA (for style and cross-references):
 ${trackerJson}`;
@@ -216,12 +247,18 @@ export async function POST(req: Request) {
 
   const currentFieldsJson = JSON.stringify(currentFields, null, 2);
 
-  const systemPrompt = buildUpdateSystemPrompt(
-    type,
-    JSON.stringify(data),
-    entityContextBlock,
-    currentFieldsJson,
-  );
+  const systemPrompt =
+    type === "goal"
+      ? buildGoalUpdateSystemPrompt(
+          JSON.stringify(data),
+          entityContextBlock,
+          currentFieldsJson,
+        )
+      : buildProjectUpdateSystemPrompt(
+          JSON.stringify(data),
+          entityContextBlock,
+          currentFieldsJson,
+        );
 
   const anthropic = new Anthropic({ apiKey });
 
@@ -231,16 +268,20 @@ export async function POST(req: Request) {
   }
 
   if (messages.length === 0) {
+    // Defense in depth — the client never auto-calls this route anymore, but
+    // if somehow it does we return the current values as-is.
     messages.push({
       role: "user",
       content:
-        "I want to update these fields with your help. Ask me your first question.",
+        type === "goal"
+          ? "Output the goal JSON matching CURRENT FIELD VALUES exactly (no questions, no changes)."
+          : "Output the full project proposal JSON matching CURRENT FIELD VALUES exactly (no questions, no changes).",
     });
   }
 
   const stream = anthropic.messages.stream({
     model: getAnthropicModel(),
-    max_tokens: 2048,
+    max_tokens: 4096,
     system: systemPrompt,
     messages,
   });

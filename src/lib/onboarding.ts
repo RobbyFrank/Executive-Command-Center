@@ -49,6 +49,19 @@ export function findPilotProjectsFor(
 }
 
 /**
+ * New hire (≤30 days since join) with at least one pilot project — shown in the roster with an
+ * Onboarding label and discoverable via the Team "Onboarding" filter.
+ */
+export function isActiveOnboardingEmployee(
+  person: Person,
+  projects: Project[],
+  todayYmd: string
+): boolean {
+  if (!isNewHire(person, todayYmd)) return false;
+  return findPilotProjectsFor(person, projects).length > 0;
+}
+
+/**
  * True when someone on the project is still a new hire (≤30 days since join) and the project
  * was created within 30 days after their join date.
  */

@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { Hash, Loader2, Pencil, Plus, X } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 import {
   channelMatchesCompanyTerms,
   companyFilterTerms,
@@ -160,8 +161,9 @@ export function SlackChannelPicker({
   }, [onSave, close]);
 
   const companyScoped = useMemo(() => {
-    if (!relevantOnly || !hasCompanyFilter) return channels;
-    return channels.filter((ch) => channelMatchesCompanyTerms(ch, companyTerms));
+    const visible = channels.filter((ch) => !isExecutiveSlackChannelName(ch.name));
+    if (!relevantOnly || !hasCompanyFilter) return visible;
+    return visible.filter((ch) => channelMatchesCompanyTerms(ch, companyTerms));
   }, [channels, relevantOnly, hasCompanyFilter, companyTerms]);
 
   const filtered = useMemo(() => {

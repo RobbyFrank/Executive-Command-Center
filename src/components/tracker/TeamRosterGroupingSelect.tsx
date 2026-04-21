@@ -105,7 +105,6 @@ export function TeamRosterGroupingSelect({
         className={cn(
           filterSelectTriggerButtonClass(open, false),
           "inline-flex max-w-full min-h-[2.25rem] w-max items-center py-1.5 pl-2.5 pr-2 font-medium transition-colors",
-          !disabled && "hover:border-zinc-600 hover:bg-zinc-800",
           "text-zinc-100",
           disabled && "cursor-not-allowed opacity-50"
         )}

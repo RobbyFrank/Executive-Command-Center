@@ -10,7 +10,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, RefreshCw, Send, Trash2 } from "lucide-react";
+import {
+  MoreHorizontal,
+  RefreshCw,
+  Send,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import type { Person } from "@/lib/types/tracker";
 import { isFounderPerson } from "@/lib/autonomyRoster";
 import { deletePerson } from "@/server/actions/tracker";
@@ -37,6 +43,8 @@ interface TeamRosterRowMenuProps {
   canManageLoginPasswords?: boolean;
   loginPasswordSet?: boolean;
   onSendNewPassword?: () => void;
+  /** Opens the pilot / assignment recommender (Team onboarding flow). */
+  onOnboardEmployee?: () => void;
 }
 
 export function TeamRosterRowMenu({
@@ -46,6 +54,7 @@ export function TeamRosterRowMenu({
   canManageLoginPasswords,
   loginPasswordSet,
   onSendNewPassword,
+  onOnboardEmployee,
 }: TeamRosterRowMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -70,8 +79,12 @@ export function TeamRosterRowMenu({
     Boolean(loginPasswordSet) &&
     typeof onSendNewPassword === "function";
 
+  const showOnboardEmployee =
+    typeof onOnboardEmployee === "function" && !founder;
+
   /** Founder status is set only via data / tooling, not this menu. */
-  const hasAnyRowAction = sendLoginInRowMenu || hasSlackId || !founder;
+  const hasAnyRowAction =
+    sendLoginInRowMenu || showOnboardEmployee || hasSlackId || !founder;
 
   useEffect(() => {
     setMounted(true);
@@ -184,6 +197,20 @@ export function TeamRosterRowMenu({
                   >
                     <Send className="h-3.5 w-3.5 shrink-0 opacity-70" />
                     <span className="flex-1">Send new password</span>
+                  </button>
+                ) : null}
+                {showOnboardEmployee ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => {
+                      close();
+                      onOnboardEmployee?.();
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <UserPlus className="h-3.5 w-3.5 shrink-0 text-emerald-400/90" />
+                    <span className="flex-1">Onboard employee</span>
                   </button>
                 ) : null}
                 {hasSlackId ? (

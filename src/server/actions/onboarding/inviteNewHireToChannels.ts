@@ -4,6 +4,7 @@ import {
   inviteUserToSlackChannel,
   type InviteErrorCode,
 } from "@/lib/slack/memberships";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 
 export type ChannelInviteResult =
   | {
@@ -49,6 +50,7 @@ export async function inviteNewHireToSlackChannels(input: {
   for (const ch of channels) {
     if (seen.has(ch.channelId)) continue;
     seen.add(ch.channelId);
+    if (isExecutiveSlackChannelName(ch.channelName)) continue;
 
     const r = await inviteUserToSlackChannel(ch.channelId, uid);
     if (r.ok) {

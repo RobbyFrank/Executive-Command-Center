@@ -1,4 +1,10 @@
-import type { EmploymentKind, Person, PersonWorkload } from "@/lib/types/tracker";
+import type {
+  EmploymentKind,
+  Person,
+  PersonWorkload,
+  Project,
+} from "@/lib/types/tracker";
+import { isActiveOnboardingEmployee } from "@/lib/onboarding";
 import {
   FOUNDERS_DEPARTMENT,
   isFounderPerson,
@@ -28,7 +34,8 @@ export type TeamRosterFilterOmit =
   | "employment"
   | "workload"
   | "company"
-  | "missing";
+  | "missing"
+  | "onboarding";
 
 export interface TeamRosterFilterState {
   searchQuery: string;
@@ -38,6 +45,8 @@ export interface TeamRosterFilterState {
   workloadIds: TeamWorkloadFilterId[];
   companyIds: string[];
   missingDetailIds: TeamMissingDetailId[];
+  /** When true, only people in active onboarding (new hire + pilot project). */
+  onboardingOnly: boolean;
 }
 
 const EMPTY_STATE: TeamRosterFilterState = {
@@ -47,6 +56,7 @@ const EMPTY_STATE: TeamRosterFilterState = {
   workloadIds: [],
   companyIds: [],
   missingDetailIds: [],
+  onboardingOnly: false,
 };
 
 export function teamRosterSearchText(p: Person): string {
@@ -135,14 +145,21 @@ function matchesCompany(
   return (w?.projectCompanyIds ?? []).some((cid) => set.has(cid));
 }
 
+export type TeamRosterOnboardingContext = {
+  projects: Project[];
+  todayYmd: string;
+};
+
 /**
  * Apply Team roster filters. Pass `omit` to skip one dimension (faceted counts).
+ * When `state.onboardingOnly` is true, pass `onboarding` so the onboarding filter can run.
  */
 export function applyTeamRosterFilters(
   people: Person[],
   workloadById: Map<string, PersonWorkload>,
   state: TeamRosterFilterState,
-  omit?: TeamRosterFilterOmit
+  omit?: TeamRosterFilterOmit,
+  onboarding?: TeamRosterOnboardingContext | null
 ): Person[] {
   const search =
     omit === "search" ? "" : state.searchQuery;
@@ -156,6 +173,11 @@ export function applyTeamRosterFilters(
     omit === "company" ? [] : state.companyIds;
   const miss =
     omit === "missing" ? [] : state.missingDetailIds;
+  const onboardingActive =
+    omit !== "onboarding" &&
+    state.onboardingOnly &&
+    onboarding !== undefined &&
+    onboarding !== null;
 
   return people.filter((p) => {
     if (!personMatchesTeamSearch(p, search)) return false;
@@ -164,6 +186,12 @@ export function applyTeamRosterFilters(
     if (!matchesWorkload(workloadById.get(p.id), wl)) return false;
     if (!matchesCompany(p, co, workloadById)) return false;
     if (!matchesMissing(p, miss)) return false;
+    if (
+      onboardingActive &&
+      !isActiveOnboardingEmployee(p, onboarding.projects, onboarding.todayYmd)
+    ) {
+      return false;
+    }
     return true;
   });
 }
@@ -241,7 +269,8 @@ export function isTeamRosterFilterActive(state: TeamRosterFilterState): boolean 
     state.employmentKinds.length > 0 ||
     state.workloadIds.length > 0 ||
     state.companyIds.length > 0 ||
-    state.missingDetailIds.length > 0
+    state.missingDetailIds.length > 0 ||
+    state.onboardingOnly
   );
 }
 

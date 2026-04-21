@@ -93,6 +93,7 @@ import {
   TEAM_MISSING_OPTIONS,
   TEAM_WORKLOAD_OPTIONS,
   type TeamRosterFilterState,
+  type TeamRosterOnboardingContext,
 } from "@/lib/team-roster-filter";
 import { normalizeTrackerSearchQuery as normalizeSearch } from "@/lib/tracker-search-filter";
 import { formatUsdCompactK, formatUsdWhole } from "@/lib/formatUsd";
@@ -111,6 +112,7 @@ import {
 import {
   daysSinceJoined,
   findPilotProjectsFor,
+  isActiveOnboardingEmployee,
   isNewHire,
 } from "@/lib/onboarding";
 import { NewHireRow } from "@/components/team/NewHireRow";
@@ -132,6 +134,7 @@ import {
   TeamRosterActionsMenu,
   type SlackRefreshScope,
 } from "./TeamRosterActionsMenu";
+import { TeamOnboardingFilterSelect } from "./TeamOnboardingFilterSelect";
 import { TeamRosterGroupingSelect } from "./TeamRosterGroupingSelect";
 import {
   ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX,
@@ -236,8 +239,8 @@ interface TeamRosterManagerProps {
 /** Shared chrome for **Import from Slack** and **Refresh all from Slack** — matches Roadmap secondary actions. */
 const TEAM_SLACK_ACTION_BUTTON_CLASS =
   "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-sm font-medium text-zinc-200 shadow-sm " +
-  "transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 " +
+  "transition-[border-color,background-color,color] duration-150 ease-out hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 motion-reduce:transition-none " +
+  "focus-visible:outline-none focus-visible:border-zinc-500/45 focus-visible:ring-1 focus-visible:ring-zinc-400/20 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 " +
   "disabled:cursor-not-allowed disabled:opacity-40";
 
 const TEAM_SLACK_ACTION_ICON_CLASS = "h-4 w-4 shrink-0 opacity-90";
@@ -269,6 +272,8 @@ function TeamRosterManagerInner({
   const [filterState, setFilterState] = useState<TeamRosterFilterState>(() =>
     emptyTeamRosterFilterState()
   );
+  /** Draft text in the search field; filtering uses `filterState.searchQuery` (updated on blur). */
+  const [searchInput, setSearchInput] = useState("");
   const [rosterSortMode, setRosterSortMode] =
     useState<TeamRosterSortMode>("autonomy");
   /** When true, founders are excluded from the roster and filter counts. */
@@ -407,15 +412,23 @@ function TeamRosterManagerInner({
     return m;
   }, [workloads]);
 
+  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
+
+  const onboardingFilterContext = useMemo<TeamRosterOnboardingContext>(
+    () => ({ projects: initialProjects, todayYmd }),
+    [initialProjects, todayYmd]
+  );
+
   const peopleForDeptFacet = useMemo(
     () =>
       applyTeamRosterFilters(
         peopleForRosterView,
         workloadByPersonId,
         filterState,
-        "department"
+        "department",
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
   const peopleForEmpFacet = useMemo(
     () =>
@@ -423,9 +436,10 @@ function TeamRosterManagerInner({
         peopleForRosterView,
         workloadByPersonId,
         filterState,
-        "employment"
+        "employment",
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
   const peopleForWlFacet = useMemo(
     () =>
@@ -433,9 +447,10 @@ function TeamRosterManagerInner({
         peopleForRosterView,
         workloadByPersonId,
         filterState,
-        "workload"
+        "workload",
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
   const peopleForCoFacet = useMemo(
     () =>
@@ -443,9 +458,10 @@ function TeamRosterManagerInner({
         peopleForRosterView,
         workloadByPersonId,
         filterState,
-        "company"
+        "company",
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
   const peopleForMissFacet = useMemo(
     () =>
@@ -453,9 +469,21 @@ function TeamRosterManagerInner({
         peopleForRosterView,
         workloadByPersonId,
         filterState,
-        "missing"
+        "missing",
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
+  );
+  const peopleForOnboardingFacet = useMemo(
+    () =>
+      applyTeamRosterFilters(
+        peopleForRosterView,
+        workloadByPersonId,
+        filterState,
+        "onboarding",
+        onboardingFilterContext
+      ),
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
 
   const filteredPeople = useMemo(
@@ -463,23 +491,27 @@ function TeamRosterManagerInner({
       applyTeamRosterFilters(
         peopleForRosterView,
         workloadByPersonId,
-        filterState
+        filterState,
+        undefined,
+        onboardingFilterContext
       ),
-    [peopleForRosterView, workloadByPersonId, filterState]
+    [peopleForRosterView, workloadByPersonId, filterState, onboardingFilterContext]
   );
 
-  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
+  const onboardingFilterOptionCount = useMemo(() => {
+    return peopleForOnboardingFacet.filter((p) =>
+      isActiveOnboardingEmployee(p, initialProjects, todayYmd)
+    ).length;
+  }, [peopleForOnboardingFacet, initialProjects, todayYmd]);
 
   const newHiresSorted = useMemo(() => {
     const list = peopleForRosterView.filter(
-      (p) => isNewHire(p, todayYmd) && !p.skippedFromNewHires
+      (p) =>
+        isNewHire(p, todayYmd) &&
+        !p.skippedFromNewHires &&
+        findPilotProjectsFor(p, initialProjects).length === 0
     );
     return [...list].sort((a, b) => {
-      const aPilots = findPilotProjectsFor(a, initialProjects).length;
-      const bPilots = findPilotProjectsFor(b, initialProjects).length;
-      const aNo = aPilots === 0 ? 0 : 1;
-      const bNo = bPilots === 0 ? 0 : 1;
-      if (aNo !== bNo) return aNo - bNo;
       const da = daysSinceJoined(a, todayYmd);
       const db = daysSinceJoined(b, todayYmd);
       if (da === null && db === null) return 0;
@@ -494,19 +526,23 @@ function TeamRosterManagerInner({
     [filterState]
   );
 
-  const searchActive =
+  const appliedSearchActive =
     normalizeSearch(filterState.searchQuery).length > 0;
+  const searchInputHasText =
+    normalizeSearch(searchInput).length > 0;
+  const showSearchClear = appliedSearchActive || searchInputHasText;
 
   const teamActiveFilterDimensionCount = useMemo(() => {
     let n = 0;
-    if (searchActive) n++;
+    if (appliedSearchActive) n++;
     if (filterState.departmentValues.length > 0) n++;
     if (filterState.employmentKinds.length > 0) n++;
     if (filterState.workloadIds.length > 0) n++;
     if (filterState.companyIds.length > 0) n++;
     if (filterState.missingDetailIds.length > 0) n++;
+    if (filterState.onboardingOnly) n++;
     return n;
-  }, [searchActive, filterState]);
+  }, [appliedSearchActive, filterState]);
 
   const departmentFacetOptions = useMemo(() => {
     const keys = teamRosterDepartmentFilterOptions(mergedPeople);
@@ -614,6 +650,7 @@ function TeamRosterManagerInner({
   );
 
   const resetFilters = useCallback(() => {
+    setSearchInput("");
     setFilterState(emptyTeamRosterFilterState());
   }, []);
 
@@ -790,6 +827,11 @@ function TeamRosterManagerInner({
         <AssignmentMessageDialog
           open
           onClose={advanceAssignmentQueue}
+          onBack={() => {
+            const hire = assignmentQueue.newHire;
+            setAssignmentQueue(null);
+            setRecommendPerson(hire);
+          }}
           newHire={assignmentQueue.newHire}
           projectId={assignmentQueue.items[0].projectId}
           assignmentKind={assignmentQueue.items[0].assignmentKind}
@@ -817,34 +859,48 @@ function TeamRosterManagerInner({
       ) : null}
       <div className="min-w-0 min-h-0 max-w-full">
       <PageToolbar title="Team">
-        <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
-          <Search
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={filterState.searchQuery}
-            onChange={(e) =>
-              setFilterState((s) => ({ ...s, searchQuery: e.target.value }))
-            }
-            placeholder="Search name, role, department, email, phone…"
-            className={cn(
-              "w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
-              "[&::-webkit-search-cancel-button]:appearance-none",
-              searchActive ? "pr-8" : "pr-3"
-            )}
-            aria-label="Search team"
-            autoComplete="off"
-          />
-          {searchActive ? (
+        <div
+          className={cn(
+            "group flex min-w-0 flex-1 max-w-[10rem] items-stretch overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/80 transition-[max-width,border-color,background-color] duration-200 ease-out motion-reduce:transition-none",
+            "hover:border-zinc-600 hover:bg-zinc-900/95",
+            "focus-within:border-zinc-500/45 focus-within:bg-zinc-900/95",
+            "has-[input:focus]:max-w-[19.2rem]"
+          )}
+        >
+          <div className="relative flex min-w-0 flex-1 items-center">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"
+              aria-hidden
+            />
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onBlur={(e) =>
+                setFilterState((s) => ({
+                  ...s,
+                  searchQuery: e.currentTarget.value,
+                }))
+              }
+              placeholder="Search name, role, department, email, phone…"
+              className={cn(
+                "min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-0",
+                "[&::-webkit-search-cancel-button]:appearance-none",
+                showSearchClear ? "pr-1.5" : "pr-3"
+              )}
+              aria-label="Search team"
+              autoComplete="off"
+            />
+          </div>
+          {showSearchClear ? (
             <button
               type="button"
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              className="flex shrink-0 cursor-pointer items-center justify-center border-l border-zinc-700/80 px-2.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:bg-zinc-800 focus-visible:ring-0 group-hover:border-l-zinc-600/70 group-focus-within:border-l-zinc-600/70"
               aria-label="Clear search"
-              onClick={() =>
-                setFilterState((s) => ({ ...s, searchQuery: "" }))
-              }
+              onClick={() => {
+                setSearchInput("");
+                setFilterState((s) => ({ ...s, searchQuery: "" }));
+              }}
             >
               <X className="h-3.5 w-3.5" aria-hidden />
             </button>
@@ -928,6 +984,21 @@ function TeamRosterManagerInner({
           />
         </div>
 
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[11rem]">
+          <TeamOnboardingFilterSelect
+            value={filterState.onboardingOnly ? "onboarding" : "all"}
+            onChange={(v) =>
+              setFilterState((s) => ({
+                ...s,
+                onboardingOnly: v === "onboarding",
+              }))
+            }
+            allCount={peopleForOnboardingFacet.length}
+            onboardingCount={onboardingFilterOptionCount}
+            disabled={slackBulkRefreshRunning}
+          />
+        </div>
+
         {filterActive ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <span
@@ -940,7 +1011,7 @@ function TeamRosterManagerInner({
             <button
               type="button"
               onClick={resetFilters}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-[border-color,background-color,color] duration-150 ease-out motion-reduce:transition-none hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:border-zinc-500/45 focus-visible:ring-1 focus-visible:ring-zinc-400/20 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
               title="Clear search and all team filters"
             >
               <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -951,14 +1022,14 @@ function TeamRosterManagerInner({
 
         <label
           htmlFor="team-roster-hide-founders"
-          className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-within:ring-2 focus-within:ring-emerald-500/35 focus-within:ring-offset-2 focus-within:ring-offset-zinc-950"
+          className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-[border-color,background-color,color] duration-150 ease-out motion-reduce:transition-none hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-within:border-zinc-500/45 focus-within:ring-1 focus-within:ring-zinc-400/20 focus-within:ring-offset-2 focus-within:ring-offset-zinc-950"
         >
           <input
             id="team-roster-hide-founders"
             type="checkbox"
             checked={hideFounders}
             onChange={(e) => setHideFounders(e.target.checked)}
-            className="h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-900 text-amber-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-0"
+            className="h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-900 text-amber-500 focus:outline-none focus:ring-2 focus:ring-zinc-400/30 focus:ring-offset-0"
           />
           <span>Hide founders</span>
         </label>
@@ -985,8 +1056,9 @@ function TeamRosterManagerInner({
         <section className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-4 space-y-3">
           <h2 className="text-base font-semibold text-zinc-200">New hires</h2>
           <p className="text-xs text-zinc-500">
-            First 30 days on the team. Sorted with no pilot project first, then
-            by days since join date.
+            First 30 days on the team, still needing a pilot project. Newest
+            join dates first. After you assign a pilot, they move to the roster
+            below with an Onboarding label.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {newHiresSorted.map((p) => (
@@ -1011,7 +1083,7 @@ function TeamRosterManagerInner({
             {peopleForRosterView.length}
           </span>{" "}
           members
-          {searchActive ? (
+          {appliedSearchActive ? (
             <>
               {" "}
               matching &quot;{filterState.searchQuery.trim()}&quot;
@@ -1031,7 +1103,7 @@ function TeamRosterManagerInner({
       >
         {filterActive && filteredPeople.length === 0 ? (
           <p className="text-sm text-zinc-500 py-10 px-4 text-center border-b border-zinc-800">
-            {searchActive ? (
+            {appliedSearchActive ? (
               <>
                 No team members match &quot;{filterState.searchQuery.trim()}
                 &quot; with the current filters. Try another keyword or reset filters.
@@ -1290,6 +1362,7 @@ function TeamRosterManagerInner({
                                   }
                                   displayTitle="Autonomy level (0–5) — click to change"
                                   overlaySelectQuiet
+                                  overlaySelectMenuMinWidth={300}
                                   className="group/status w-max min-w-0"
                                 />
                               </div>
@@ -1297,15 +1370,30 @@ function TeamRosterManagerInner({
                           )}
                         </div>
                         <div className="flex min-w-0 flex-1 flex-col gap-px">
-                          <InlineEditCell
-                            value={person.name}
-                            onSave={(name) => updatePerson(person.id, { name })}
-                            displayClassName={ROADMAP_ENTITY_TITLE_DISPLAY_CLASS}
-                            collapsedButtonClassName="!min-h-0 !py-0 leading-snug"
-                            startInEditMode={
-                              person.id === newPersonNameFocusId
-                            }
-                          />
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                            <InlineEditCell
+                              value={person.name}
+                              onSave={(name) => updatePerson(person.id, { name })}
+                              displayClassName={ROADMAP_ENTITY_TITLE_DISPLAY_CLASS}
+                              collapsedButtonClassName="!min-h-0 !py-0 leading-snug"
+                              startInEditMode={
+                                person.id === newPersonNameFocusId
+                              }
+                            />
+                            {!isFounderPerson(person) &&
+                            isActiveOnboardingEmployee(
+                              person,
+                              initialProjects,
+                              todayYmd
+                            ) ? (
+                              <span
+                                className="inline-flex shrink-0 items-center rounded-md border border-emerald-500/55 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.15)] ring-1 ring-emerald-400/25"
+                                title="New hire with an onboarding pilot project"
+                              >
+                                Onboarding
+                              </span>
+                            ) : null}
+                          </div>
                           <InlineEditCell
                             value={person.role}
                             onSave={(role) => updatePerson(person.id, { role })}
@@ -1375,13 +1463,24 @@ function TeamRosterManagerInner({
                                     30
                                   );
                             return (
-                              <span className="inline-flex min-w-0 items-center gap-1.5">
-                                <span className="shrink-0 tabular-nums">
+                              <span
+                                className={cn(
+                                  "inline-flex min-w-0 items-center",
+                                  upcoming ? "gap-2" : "gap-1.5",
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "shrink-0 tabular-nums",
+                                    upcoming &&
+                                      "font-medium text-zinc-100",
+                                  )}
+                                >
                                   {formatTeamTenureFromJoinYmd(v)}
                                 </span>
                                 {upcoming ? (
                                   <span
-                                    className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums text-amber-200/95 bg-amber-500/15 ring-1 ring-amber-400/35"
+                                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-400/40 bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-amber-50 shadow-sm ring-1 ring-amber-300/30"
                                     title={
                                       upcoming.daysUntil === 0
                                         ? `${upcoming.yearOrdinal}-year work anniversary today — ${formatCalendarDateHint(upcoming.anniversaryYmd)}`
@@ -1394,7 +1493,8 @@ function TeamRosterManagerInner({
                                     }
                                   >
                                     <Cake
-                                      className="h-3 w-3 text-amber-300/90"
+                                      className="h-3.5 w-3.5 shrink-0 text-amber-200"
+                                      strokeWidth={2}
                                       aria-hidden
                                     />
                                     <span>{upcoming.yearOrdinal}y</span>
@@ -1408,7 +1508,7 @@ function TeamRosterManagerInner({
                               ? `${formatCalendarDateHint(person.joinDate)} — click to change join date`
                               : "Join date — click to set"
                           }
-                          displayClassName="text-zinc-400 tabular-nums"
+                          displayClassName="text-zinc-300 tabular-nums"
                         />
                       )}
                     </td>
@@ -1593,6 +1693,12 @@ function TeamRosterManagerInner({
                         person={person}
                         onSlackRefreshStart={onSlackMenuRefreshStart}
                         onSlackRefreshResult={onSlackMenuRefreshResult}
+                        {...(!isFounderPerson(person)
+                          ? {
+                              onOnboardEmployee: () =>
+                                setRecommendPerson(person),
+                            }
+                          : {})}
                         {...(canManageLoginPasswords &&
                         isFounderPerson(person) &&
                         (person as PersonWithLoginFlag).loginPasswordSet

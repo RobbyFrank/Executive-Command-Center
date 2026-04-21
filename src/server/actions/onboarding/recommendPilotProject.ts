@@ -18,6 +18,7 @@ import type {
   Priority,
 } from "@/lib/types/tracker";
 import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 
 function extractJsonObject(raw: string): string {
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -118,7 +119,7 @@ CHANNEL RULES (suggestedChannels):
   2. Channels whose name/topic/purpose matches the **pilot project's company / goal** (a Sales hire on a VoiceDrop pilot ⇒ VoiceDrop channels).
   3. Channels where the **recommended onboarding partners** or **same-department teammates** are members (see TEAM CHANNEL MEMBERSHIPS). Bias toward channels the team actually uses.
   4. Boost when FOUNDER DIRECTION is provided — if the founder says "focus on outbound", prefer #outbound / #sdr / #prospecting channels over generic ones.
-- **Never** suggest: #general, announcements/all-hands, #random, or any channel whose name/topic suggests broadcast/admin-only. These are either joined automatically or should not get new-hire invitations.
+- **Never** suggest: #general, announcements/all-hands, #random, any channel whose **name** contains "executive" (leadership-only spaces), or any channel whose name/topic suggests broadcast/admin-only. These are either joined automatically or should not get new-hire invitations.
 - Do not suggest archived channels or DM/MPIM channels (the catalog already excludes them).
 - Keep each rationale concrete — name the role, company, or teammate that justifies the pick.`;
 
@@ -148,6 +149,7 @@ const CHANNEL_SUGGESTION_DENY_WORDS = [
 ];
 
 function channelIsDenylisted(ch: { name: string; topic?: string; purpose?: string }): boolean {
+  if (isExecutiveSlackChannelName(ch.name)) return true;
   const hay = [ch.name, ch.topic ?? "", ch.purpose ?? ""].join(" ").toLowerCase();
   return CHANNEL_SUGGESTION_DENY_WORDS.some((w) => hay.includes(w));
 }

@@ -65,7 +65,8 @@ export function buildParentContextBlock(
   return `${companyBlock}\n\n${goalBlock}`;
 }
 
-const GOAL_FIELDS_DESCRIPTION = `
+/** Shared with `POST /api/ai-update` for goal revisions — same JSON shape as create. */
+export const GOAL_AI_PROPOSAL_FIELDS_BLOCK = `
 Goal fields you must populate:
 - description: The goal name/title. Short, outcome-oriented. e.g. "Reduce churn to <3% monthly"
 - priority: One of P0, P1, P2, P3 (P0 = highest)
@@ -74,7 +75,10 @@ Goal fields you must populate:
 - currentValue: Where things stand right now relative to the goal
 `.trim();
 
-const PROJECT_FIELDS_DESCRIPTION = `
+const GOAL_FIELDS_DESCRIPTION = GOAL_AI_PROPOSAL_FIELDS_BLOCK;
+
+/** Shared with `POST /api/ai-update` for project revisions — same JSON shape as create. */
+export const PROJECT_AI_PROPOSAL_FIELDS_BLOCK = `
 Project fields you must populate:
 - name: The project name. Short, action-oriented. e.g. "Onboarding flow redesign"
 - priority: One of P0, P1, P2, P3 (P0 = highest)
@@ -85,6 +89,8 @@ Project fields you must populate:
   - name: Short deliverable name, e.g. "API endpoints implemented"
   - targetDate: ISO date string (YYYY-MM-DD). Space milestones realistically from today, accounting for the project complexity.
 `.trim();
+
+const PROJECT_FIELDS_DESCRIPTION = PROJECT_AI_PROPOSAL_FIELDS_BLOCK;
 
 export type AutoMode = "none" | "ideas" | "expand";
 

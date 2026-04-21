@@ -1,5 +1,6 @@
 import type { Company, Goal } from "@/lib/types/tracker";
 import type { SlackChannel } from "@/lib/slack";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 
 /** Lowercase substrings to match in channel name, topic, or purpose (non-empty only). */
 export function companyFilterTerms(
@@ -67,6 +68,7 @@ export function resolveCompanyScrapeChannels({
   const byId = new Map<string, CompanyScrapeChannelRow>();
 
   for (const ch of allChannels) {
+    if (isExecutiveSlackChannelName(ch.name)) continue;
     if (!channelMatchesCompanyTerms(ch, terms)) continue;
     byId.set(ch.id, {
       id: ch.id,
@@ -88,9 +90,11 @@ export function resolveCompanyScrapeChannels({
       continue;
     }
     const chMeta = allChannels.find((c) => c.id === cid);
+    const linkedName = chMeta?.name ?? (g.slackChannel.trim() || cid);
+    if (isExecutiveSlackChannelName(linkedName)) continue;
     byId.set(cid, {
       id: cid,
-      name: chMeta?.name ?? (g.slackChannel.trim() || cid),
+      name: linkedName,
       isPrivate: chMeta?.isPrivate,
       linkedToGoalIds: [g.id],
       matchedByName: false,

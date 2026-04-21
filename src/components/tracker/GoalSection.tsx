@@ -1573,6 +1573,8 @@ export function GoalSection({
         <AiUpdateDialog
           type="goal"
           goalId={goal.id}
+          description={goal.description}
+          priority={goal.priority}
           measurableTarget={goal.measurableTarget}
           whyItMatters={goal.whyItMatters}
           currentValue={goal.currentValue}

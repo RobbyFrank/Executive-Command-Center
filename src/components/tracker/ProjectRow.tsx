@@ -1620,8 +1620,12 @@ export function ProjectRow({
         <AiUpdateDialog
           type="project"
           projectId={project.id}
+          name={project.name}
+          priority={project.priority}
           description={project.description}
           definitionOfDone={project.definitionOfDone}
+          complexityScore={project.complexityScore}
+          milestones={project.milestones}
           onClose={() => setAiUpdateOpen(false)}
         />
       )}

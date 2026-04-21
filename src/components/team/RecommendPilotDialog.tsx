@@ -10,7 +10,13 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import type { CompanyWithGoals, Person, Project } from "@/lib/types/tracker";
+import type {
+  Company,
+  CompanyWithGoals,
+  Goal,
+  Person,
+  Project,
+} from "@/lib/types/tracker";
 import type {
   BuddyRecommendation,
   NewPilotProjectProposal,
@@ -148,6 +154,130 @@ function resolveGoalIdForNewProject(
   return co.goals[0]?.id ?? null;
 }
 
+function lookupCompanyForGoal(
+  hierarchy: CompanyWithGoals[],
+  goalId: string
+): Company | null {
+  const gid = goalId.trim();
+  if (!gid) return null;
+  for (const co of hierarchy) {
+    if (co.goals.some((g) => g.id === gid)) return co;
+  }
+  return null;
+}
+
+function lookupCompanyById(
+  hierarchy: CompanyWithGoals[],
+  companyId: string
+): Company | null {
+  const id = companyId.trim();
+  if (!id) return null;
+  return hierarchy.find((c) => c.id === id) ?? null;
+}
+
+function lookupGoalById(
+  hierarchy: CompanyWithGoals[],
+  goalId: string
+): Goal | null {
+  const gid = goalId.trim();
+  if (!gid) return null;
+  for (const co of hierarchy) {
+    const g = co.goals.find((x) => x.id === gid);
+    if (g) return g;
+  }
+  return null;
+}
+
+/**
+ * Goal row for an AI new-project proposal — matches {@link resolveGoalIdForNewProject}
+ * (explicit id when valid, else company’s first goal).
+ */
+function goalForNewProjectProposal(
+  hierarchy: CompanyWithGoals[],
+  proposal: NewPilotProjectProposal
+): Goal | null {
+  const cid = proposal.suggestedCompanyId.trim();
+  if (!cid) return null;
+  const co = hierarchy.find((c) => c.id === cid);
+  if (!co) return null;
+  const gid = proposal.suggestedGoalId.trim();
+  if (gid) {
+    const g = co.goals.find((x) => x.id === gid);
+    if (g) return g;
+  }
+  return co.goals[0] ?? null;
+}
+
+/** Two-letter fallback when a company has no logo (words → first letters; one word → first two chars). */
+function companyLogoInitials(name: string): string {
+  const t = name.trim();
+  if (!t) return "?";
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    const a = words[0][0] ?? "";
+    const b = words[1][0] ?? "";
+    return (a + b).toUpperCase() || "?";
+  }
+  return t.slice(0, Math.min(2, t.length)).toUpperCase() || "?";
+}
+
+/**
+ * Company → Goal stack for pilot cards (tracker projects and AI “new project” ideas).
+ * Project title is rendered separately below with a “Project” label.
+ */
+function PilotProjectCompanyGoalHeader({
+  company,
+  goal,
+}: {
+  company: Company | null;
+  goal: Goal | null;
+}) {
+  const logo = company?.logoPath?.trim() ?? "";
+  const name = company?.name?.trim() ?? "";
+  const initials = company ? companyLogoInitials(name || "?") : "?";
+  return (
+    <div className="mb-3 flex min-w-0 gap-2">
+      {company && logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logo}
+          alt=""
+          className="h-7 w-7 shrink-0 rounded-md object-cover ring-1 ring-zinc-700"
+        />
+      ) : (
+        <span
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-[9px] font-semibold uppercase text-zinc-500 ring-1 ring-zinc-700"
+          aria-hidden
+        >
+          {company ? initials : "?"}
+        </span>
+      )}
+      <div className="min-w-0 flex-1 space-y-1">
+        {!company ? (
+          <p className="truncate text-[11px] font-medium text-zinc-500">
+            Company unavailable
+          </p>
+        ) : (
+          <p className="truncate text-[11px] font-semibold text-zinc-200">
+            {name || "Company"}
+          </p>
+        )}
+        {goal ? (
+          <p
+            className="line-clamp-2 text-[11px] leading-snug text-zinc-400"
+            title={goal.description}
+          >
+            <span className="font-semibold text-zinc-500">Goal · </span>
+            {goal.description}
+          </p>
+        ) : company ? (
+          <p className="text-[11px] text-zinc-500">Goal unavailable</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 const PLACEHOLDER_SNIP = 96;
 
 function truncatePlaceholderSnippet(s: string, max: number): string {
@@ -254,6 +384,8 @@ export type SelectedChannel = {
   rationale: string;
   /** True if user added it via the dropdown rather than the AI list. */
   isManual: boolean;
+  /** From Slack catalog / create flow when known. */
+  isPrivate?: boolean;
 };
 
 /**
@@ -319,6 +451,13 @@ export function RecommendPilotDialog({
    * `ownerId` set (the dialog sets it on creation) so Continue just forwards the ids.
    */
   const [createdProjectIds, setCreatedProjectIds] = useState<string[]>([]);
+  /**
+   * Maps each “new project” card index (0 = primary proposal, 1+ = extras) to the tracker
+   * project id once {@link AiCreateDialog} finishes — drives per-card queued UI.
+   */
+  const [newPilotQueuedByCardIndex, setNewPilotQueuedByCardIndex] = useState<
+    Record<number, string>
+  >({});
   /** Loading state for the final batch assignment (while we setOwnerId on each existing). */
   const [continuing, setContinuing] = useState(false);
 
@@ -355,6 +494,10 @@ export function RecommendPilotDialog({
   const [unselectedAiChannelIds, setUnselectedAiChannelIds] = useState<
     Set<string>
   >(new Set());
+  /** Channel ids the founder has unchecked among manually added channels (cards stay visible). */
+  const [unselectedManualChannelIds, setUnselectedManualChannelIds] = useState<
+    Set<string>
+  >(new Set());
   /** Channels manually added via the dropdown (dedup'd against AI picks in the merged list). */
   const [manualChannels, setManualChannels] = useState<SelectedChannel[]>([]);
   /** Controls the Create private channel modal (conversations.create). */
@@ -364,6 +507,8 @@ export function RecommendPilotDialog({
     goalId: string;
     seedName: string;
     seedDod: string;
+    /** Which new-project card opened this flow (for queued state after create). */
+    sourceCardIndex: number;
   } | null>(null);
   /** Raw model output while `/api/onboarding/recommend/stream` is in flight. */
   const [streaming, setStreaming] = useState("");
@@ -411,10 +556,12 @@ export function RecommendPilotDialog({
       setHasStarted(false);
       setFounderContext("");
       setUnselectedAiChannelIds(new Set());
+      setUnselectedManualChannelIds(new Set());
       setManualChannels([]);
       setCreateChannelOpen(false);
       setSelectedExistingProjectIds(new Set());
       setCreatedProjectIds([]);
+      setNewPilotQueuedByCardIndex({});
       setContinuing(false);
     }
   }, [open]);
@@ -590,6 +737,7 @@ export function RecommendPilotDialog({
         )
       );
       setUnselectedAiChannelIds(new Set());
+      setUnselectedManualChannelIds(new Set());
       setManualChannels([]);
       setStreaming("");
     } catch (e) {
@@ -623,6 +771,7 @@ export function RecommendPilotDialog({
     setExtraError(null);
     extraAttemptedRef.current = false;
     setUnselectedAiChannelIds(new Set());
+    setUnselectedManualChannelIds(new Set());
     setManualChannels([]);
     void fetchRecommendation();
   }, [open, hasStarted, fetchRecommendation]);
@@ -791,17 +940,40 @@ export function RecommendPilotDialog({
           channelName: c.channelName,
           rationale: c.rationale,
           isManual: false,
+          isPrivate: c.isPrivate,
         })
       );
-    const aiIds = new Set(ai.map((x) => x.channelId));
-    const manual = manualChannels.filter((m) => !aiIds.has(m.channelId));
+    const suggestedIds = new Set(
+      (recommendation.suggestedChannels ?? [])
+        .map((c) => c.channelId.trim())
+        .filter(Boolean)
+    );
+    const manual = manualChannels
+      .filter((m) => !suggestedIds.has(m.channelId.trim()))
+      .filter((m) => !unselectedManualChannelIds.has(m.channelId.trim()));
     return [...ai, ...manual];
-  }, [recommendation, unselectedAiChannelIds, manualChannels]);
+  }, [
+    recommendation,
+    unselectedAiChannelIds,
+    unselectedManualChannelIds,
+    manualChannels,
+  ]);
 
   const toggleAiSuggestedChannel = useCallback((channelId: string) => {
     const id = channelId.trim();
     if (!id) return;
     setUnselectedAiChannelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleManualPickedChannel = useCallback((channelId: string) => {
+    const id = channelId.trim();
+    if (!id) return;
+    setUnselectedManualChannelIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -832,17 +1004,32 @@ export function RecommendPilotDialog({
           {
             channelId: id,
             channelName: ch.name,
-            rationale: "Added manually.",
+            rationale: "Added manually from the workspace list.",
             isManual: true,
+            isPrivate: ch.isPrivate,
           },
         ];
+      });
+      setUnselectedManualChannelIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
       });
     },
     [recommendation]
   );
 
   const removeManualChannelRow = useCallback((channelId: string) => {
-    setManualChannels((prev) => prev.filter((x) => x.channelId !== channelId));
+    const id = channelId.trim();
+    if (!id) return;
+    setManualChannels((prev) => prev.filter((x) => x.channelId !== id));
+    setUnselectedManualChannelIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
 
   const selectedChannelIdsSet = useMemo(
@@ -1025,7 +1212,11 @@ export function RecommendPilotDialog({
   ]);
 
   const openNewProjectAi = useCallback(
-    (rec: OnboardingRecommendation, proposal?: NewPilotProjectProposal) => {
+    (
+      rec: OnboardingRecommendation,
+      sourceCardIndex: number,
+      proposal?: NewPilotProjectProposal
+    ) => {
       const np = proposal ?? rec.newProjectProposal;
       const goalId = resolveGoalIdForNewProject(
         hierarchy,
@@ -1040,6 +1231,7 @@ export function RecommendPilotDialog({
         goalId,
         seedName: np.suggestedName,
         seedDod: np.suggestedDefinitionOfDone,
+        sourceCardIndex,
       });
     },
     [hierarchy]
@@ -1058,6 +1250,7 @@ export function RecommendPilotDialog({
             suggestedDefinitionOfDone: aiCreate.seedDod,
           }}
           onCreated={async (projectId) => {
+            const slot = aiCreate?.sourceCardIndex;
             try {
               await updateProject(projectId, { ownerId: newHire.id });
             } catch (e) {
@@ -1069,6 +1262,12 @@ export function RecommendPilotDialog({
             setCreatedProjectIds((prev) =>
               prev.includes(projectId) ? prev : [...prev, projectId]
             );
+            if (typeof slot === "number") {
+              setNewPilotQueuedByCardIndex((prev) => ({
+                ...prev,
+                [slot]: projectId,
+              }));
+            }
             setAiCreate(null);
             toast.success("New pilot added to queue");
             router.refresh();
@@ -1102,7 +1301,7 @@ export function RecommendPilotDialog({
             if (!hasStarted) onClose();
           }}
         />
-        <div className="relative z-10 flex min-h-0 max-h-[min(94vh,920px)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+        <div className="relative z-10 flex min-h-0 max-h-[min(97vh,1040px)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
@@ -1433,83 +1632,131 @@ export function RecommendPilotDialog({
                       </div>
                       <p className="mb-2 text-[11px] leading-snug text-zinc-500">
                         AI suggestions use role, pilot company, and channels your teammates are in.
-                        Uncheck any you do not want. Add more from the workspace list.
+                        Uncheck any you do not want. Add more from the workspace list — they appear
+                        as the same cards below.
                       </p>
-                      {(recommendation.suggestedChannels ?? []).length > 0 ? (
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                          {(recommendation.suggestedChannels ?? []).map((c) => {
-                            const checked = !unselectedAiChannelIds.has(
-                              c.channelId
-                            );
-                            return (
-                              <label
-                                key={c.channelId}
-                                className={cn(
-                                  "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
-                                  checked
-                                    ? "border-zinc-600 bg-zinc-900/60"
-                                    : "border-zinc-800 bg-zinc-950/30 opacity-70"
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-950 text-emerald-600"
-                                  checked={checked}
-                                  onChange={() =>
-                                    toggleAiSuggestedChannel(c.channelId)
-                                  }
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-xs font-medium text-zinc-100">
-                                    #{c.channelName || c.channelId}
-                                    {c.isPrivate ? (
-                                      <span className="ml-1.5 text-[10px] font-normal text-zinc-500">
-                                        Private
-                                      </span>
-                                    ) : null}
-                                  </p>
-                                  <p
-                                    className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500"
-                                    title={c.rationale}
-                                  >
-                                    {c.rationale}
-                                  </p>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-zinc-500">
-                          No channel suggestions this run (Slack catalog or signals may be
-                          unavailable).
-                        </p>
-                      )}
-                      {manualChannels.length > 0 ? (
-                        <ul className="mt-2 space-y-1">
-                          {manualChannels.map((m) => (
-                            <li
-                              key={m.channelId}
-                              className="flex items-center justify-between gap-2 rounded border border-zinc-800 bg-zinc-950/40 px-2 py-1.5 text-xs"
-                            >
-                              <span className="min-w-0 truncate text-zinc-200">
-                                #{m.channelName}
-                                <span className="ml-2 text-[10px] text-zinc-500">
-                                  Manual
-                                </span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => removeManualChannelRow(m.channelId)}
-                                className="shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                                aria-label={`Remove #${m.channelName}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      {(() => {
+                        const suggested = recommendation.suggestedChannels ?? [];
+                        const suggestedIds = new Set(
+                          suggested.map((c) => c.channelId.trim()).filter(Boolean)
+                        );
+                        const manualOnly = manualChannels.filter(
+                          (m) => !suggestedIds.has(m.channelId.trim())
+                        );
+                        const hasCards =
+                          suggested.length > 0 || manualOnly.length > 0;
+                        if (!hasCards) {
+                          return (
+                            <p className="text-xs text-zinc-500">
+                              No channel suggestions this run (Slack catalog or signals may be
+                              unavailable). Use{" "}
+                              <span className="text-zinc-400">Add channel…</span> to pick from the
+                              workspace.
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {suggested.map((c) => {
+                              const checked = !unselectedAiChannelIds.has(
+                                c.channelId
+                              );
+                              return (
+                                <label
+                                  key={c.channelId}
+                                  className={cn(
+                                    "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
+                                    checked
+                                      ? "border-zinc-600 bg-zinc-900/60"
+                                      : "border-zinc-800 bg-zinc-950/30 opacity-70"
+                                  )}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-950 text-emerald-600"
+                                    checked={checked}
+                                    onChange={() =>
+                                      toggleAiSuggestedChannel(c.channelId)
+                                    }
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-zinc-100">
+                                      #{c.channelName || c.channelId}
+                                      {c.isPrivate ? (
+                                        <span className="ml-1.5 text-[10px] font-normal text-zinc-500">
+                                          Private
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                    <p
+                                      className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500"
+                                      title={c.rationale}
+                                    >
+                                      {c.rationale}
+                                    </p>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                            {manualOnly.map((m) => {
+                              const checked = !unselectedManualChannelIds.has(
+                                m.channelId
+                              );
+                              return (
+                                <label
+                                  key={m.channelId}
+                                  className={cn(
+                                    "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
+                                    checked
+                                      ? "border-zinc-600 bg-zinc-900/60"
+                                      : "border-zinc-800 bg-zinc-950/30 opacity-70"
+                                  )}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-950 text-emerald-600"
+                                    checked={checked}
+                                    onChange={() =>
+                                      toggleManualPickedChannel(m.channelId)
+                                    }
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="min-w-0 flex-1 text-xs font-medium text-zinc-100">
+                                        #{m.channelName || m.channelId}
+                                        {m.isPrivate ? (
+                                          <span className="ml-1.5 text-[10px] font-normal text-zinc-500">
+                                            Private
+                                          </span>
+                                        ) : null}
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          removeManualChannelRow(m.channelId);
+                                        }}
+                                        className="shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                                        title="Remove from list"
+                                        aria-label={`Remove #${m.channelName} from list`}
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                    <p
+                                      className="mt-0.5 line-clamp-2 text-[11px] text-zinc-500"
+                                      title={m.rationale}
+                                    >
+                                      {m.rationale}
+                                    </p>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <AddChannelPicker
                           selectedChannelIds={selectedChannelIdsSet}
@@ -1552,6 +1799,12 @@ export function RecommendPilotDialog({
                   >
                     {visibleExistingCandidates.map((c) => {
                       const proj = projects.find((p) => p.id === c.projectId.trim());
+                      const company = proj
+                        ? lookupCompanyForGoal(hierarchy, proj.goalId)
+                        : null;
+                      const goal = proj
+                        ? lookupGoalById(hierarchy, proj.goalId)
+                        : null;
                       const roster = proj
                         ? projectRosterPeople(proj, peopleById)
                         : [];
@@ -1578,10 +1831,19 @@ export function RecommendPilotDialog({
                               : "border-zinc-800 bg-zinc-900/40 hover:border-zinc-600 hover:bg-zinc-900/60"
                           )}
                         >
+                          <PilotProjectCompanyGoalHeader
+                            company={company}
+                            goal={goal}
+                          />
                           <div className="flex items-start justify-between gap-2">
-                            <p className="line-clamp-2 min-h-[2.5rem] flex-1 text-sm font-medium text-zinc-100">
-                              {proj?.name ?? "(No match)"}
-                            </p>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                                Project
+                              </p>
+                              <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-zinc-100">
+                                {proj?.name ?? "(No match)"}
+                              </p>
+                            </div>
                             <span
                               className={cn(
                                 "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border",
@@ -1662,10 +1924,30 @@ export function RecommendPilotDialog({
                         baseProposal,
                         ...extraProposals,
                       ];
-                      return newCards.map((proposal, idx) => (
+                      return newCards.map((proposal, idx) => {
+                        const proposalCompany = lookupCompanyById(
+                          hierarchy,
+                          proposal.suggestedCompanyId
+                        );
+                        const proposalGoal = goalForNewProjectProposal(
+                          hierarchy,
+                          proposal
+                        );
+                        const queuedProjectId =
+                          newPilotQueuedByCardIndex[idx] ?? "";
+                        const queuedProject = queuedProjectId
+                          ? projects.find((p) => p.id === queuedProjectId)
+                          : undefined;
+                        const isQueued = Boolean(queuedProjectId);
+                        return (
                         <div
                           key={`new-${idx}-${proposal.suggestedName}`}
-                          className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/40 p-3"
+                          className={cn(
+                            "flex min-h-0 flex-col overflow-hidden rounded-lg border p-3",
+                            isQueued
+                              ? "border-emerald-600/70 bg-emerald-950/20 ring-1 ring-emerald-500/40"
+                              : "border-zinc-800 bg-zinc-900/40"
+                          )}
                         >
                           <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                             <Sparkles
@@ -1674,27 +1956,63 @@ export function RecommendPilotDialog({
                             />
                             {idx === 0 ? "New project" : `New project ${idx + 1}`}
                           </p>
-                          <p className="line-clamp-2 text-sm font-medium text-zinc-100">
-                            {proposal.suggestedName}
-                          </p>
+                          <PilotProjectCompanyGoalHeader
+                            company={proposalCompany}
+                            goal={proposalGoal}
+                          />
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                              Project
+                            </p>
+                            <p className="line-clamp-2 min-h-[2.5rem] text-sm font-medium text-zinc-100">
+                              {proposal.suggestedName}
+                            </p>
+                          </div>
                           <p
                             className="mt-2 line-clamp-3 text-xs leading-snug text-zinc-500"
                             title={proposal.rationale}
                           >
                             {proposal.rationale}
                           </p>
-                          <button
-                            type="button"
-                            disabled={continuing || aiCreate !== null}
-                            onClick={() =>
-                              openNewProjectAi(recommendation, proposal)
-                            }
-                            className="mt-3 w-full rounded-md border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-40"
-                          >
-                            Create with AI…
-                          </button>
+                          {isQueued ? (
+                            <div className="mt-3 space-y-1 rounded-md border border-emerald-500/35 bg-emerald-950/25 px-2.5 py-2">
+                              <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-300/95">
+                                <Check
+                                  className="h-3.5 w-3.5 shrink-0"
+                                  aria-hidden
+                                />
+                                Added to queue
+                              </p>
+                              <p
+                                className="line-clamp-2 text-[11px] leading-snug text-zinc-400"
+                                title={
+                                  queuedProject?.name ??
+                                  proposal.suggestedName
+                                }
+                              >
+                                {queuedProject?.name ??
+                                  `${proposal.suggestedName} (syncing…)`}
+                              </p>
+                              <p className="text-[10px] text-zinc-500">
+                                Included when you continue — same as a selected
+                                existing pilot.
+                              </p>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={continuing || aiCreate !== null}
+                              onClick={() =>
+                                openNewProjectAi(recommendation, idx, proposal)
+                              }
+                              className="mt-3 w-full rounded-md border border-zinc-600 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-40"
+                            >
+                              Create with AI…
+                            </button>
+                          )}
                         </div>
-                      ));
+                        );
+                      });
                     })()}
 
                     {extraLoading &&

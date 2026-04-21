@@ -33,6 +33,8 @@ import {
   filterSelectTriggerButtonClass,
 } from "./filter-select-trigger";
 import { firstNameFromFullName } from "@/lib/personDisplayName";
+import { isNewHire } from "@/lib/onboarding";
+import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 
 const EMPLOYMENT_OPTIONS = [
   {
@@ -148,6 +150,8 @@ export function OwnerFilterMultiSelect({
   const listId = useId();
   const searchFieldId = `${listId}-name-search`;
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
 
   const departmentsSorted = useMemo(() => {
     const s = new Set<string>();
@@ -531,7 +535,19 @@ export function OwnerFilterMultiSelect({
                         >
                           <PersonAvatar person={person} selected={selected} />
                           <span className="flex min-w-0 flex-col gap-0">
-                            <span>{firstNameFromFullName(person.name)}</span>
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="min-w-0 truncate font-medium">
+                                {firstNameFromFullName(person.name)}
+                              </span>
+                              {isNewHire(person, todayYmd) ? (
+                                <span
+                                  className="shrink-0 rounded border border-amber-500/45 bg-amber-500/12 px-1 py-px text-[9px] font-bold uppercase leading-none tracking-wide text-amber-200/95"
+                                  title="Joined in the last 30 days"
+                                >
+                                  New
+                                </span>
+                              ) : null}
+                            </span>
                             {person.department?.trim() ? (
                               <span className="text-[11px] text-zinc-500 truncate">
                                 {person.department.trim()}

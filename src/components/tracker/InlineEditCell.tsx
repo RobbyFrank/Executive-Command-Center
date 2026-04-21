@@ -130,6 +130,11 @@ interface InlineEditCellProps {
    */
   overlaySelectQuiet?: boolean;
   /**
+   * Overlay `select` only: minimum width (px) of the floating listbox. The trigger is often
+   * narrower than the option labels (e.g. Team ownership badge); default keeps small controls compact.
+   */
+  overlaySelectMenuMinWidth?: number;
+  /**
    * Overlay `select` only: center the trigger (e.g. Priority flag) under the column header; avoids
    * left bias from asymmetric padding reserved for the hover chevron.
    */
@@ -175,6 +180,7 @@ export function InlineEditCell({
   emphasizeEmpty = false,
   dateMin,
   overlaySelectQuiet = false,
+  overlaySelectMenuMinWidth = 160,
   centerSelectTrigger = false,
   collapsedSuffix,
 }: InlineEditCellProps) {
@@ -219,8 +225,7 @@ export function InlineEditCell({
     const el = overlaySelectContainerRef.current;
     if (!el || typeof window === "undefined") return;
     const rect = el.getBoundingClientRect();
-    const minW = 160; // min-w-[10rem]
-    const width = Math.max(rect.width, minW);
+    const width = Math.max(rect.width, overlaySelectMenuMinWidth);
     const top = rect.bottom + 2;
     const left = rect.left;
     const maxHeight = Math.min(
@@ -228,7 +233,7 @@ export function InlineEditCell({
       Math.max(120, window.innerHeight - top - 12)
     );
     setOverlayMenuPlacement({ top, left, width, maxHeight });
-  }, []);
+  }, [overlaySelectMenuMinWidth]);
 
   useLayoutEffect(() => {
     if (!overlaySelectOpen) {
@@ -397,7 +402,7 @@ export function InlineEditCell({
                     role="option"
                     aria-selected={selected}
                     className={cn(
-                      "flex w-full min-w-0 cursor-pointer items-center px-1.5 py-1 text-left text-sm transition-colors",
+                      "flex w-full min-w-0 cursor-pointer items-center px-1.5 py-2 text-left text-sm transition-colors",
                       "hover:bg-zinc-800/95 focus:bg-zinc-800/95 focus:outline-none",
                       selected && "bg-zinc-800/60"
                     )}

@@ -32,7 +32,12 @@ When the chat is empty, the panel streams **four** bubble cards in a **masonry**
 
 ## AI field update (goals/projects)
 
-`POST /api/ai-update` accepts `{ type: 'goal' | 'project', goalId? | projectId?, currentFields, message?, history? }` and streams a conversational update flow; the model asks short questions then returns a fenced JSON object with the textarea fields to change. The client (`AiUpdateDialog`) shows **before/after** per field and applies patches via `updateGoal` / `updateProject`. Same Anthropic streaming pattern as `POST /api/ai-create`.
+`POST /api/ai-update` accepts `{ type: 'goal' | 'project', goalId? | projectId?, currentFields, message?, history? }` and streams with the same Anthropic pattern as `POST /api/ai-create`.
+
+Both goal and project variants follow the **same pattern**: no AI call on open — the dialog loads instantly with the current entity already shown as the proposal, and streaming only runs after the user types a revision and clicks **Revise with AI**. The user revises until satisfied, then clicks **Apply changes** (or **Cancel**).
+
+- **Goals**: Proposal shape is `{ measurableTarget, whyItMatters, currentValue }`; the card shows **before/after** per field (unchanged fields dim). **Apply changes** patches via `updateGoal`.
+- **Projects**: Proposal shape matches **Draft a new project with AI** (`name`, `priority`, `description`, `definitionOfDone`, `complexityScore`, `milestones`). **Apply changes** runs `updateProject` plus milestone create/update/delete by index (completed milestones are never deleted when the proposal shortens the list; a missing `milestones` key leaves milestones untouched).
 
 ## AI create (new goals/projects)
 

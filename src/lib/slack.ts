@@ -12,6 +12,7 @@
  */
 
 import { SLACK_CHANNELS_LIST_CACHE_TTL_MS } from "@/lib/slackChannelsCacheConstants";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 
 /**
  * Set `SLACK_JOIN_DATE_DEBUG=1` in `.env.local` to print join-date resolution to the **Node /
@@ -582,7 +583,9 @@ function mergeMappedSlackChannels(raws: SlackApiChannel[]): SlackChannel[] {
   const byId = new Map<string, SlackChannel>();
   for (const raw of raws) {
     const ch = mapChannel(raw);
-    if (ch) byId.set(ch.id, ch);
+    if (!ch) continue;
+    if (isExecutiveSlackChannelName(ch.name)) continue;
+    byId.set(ch.id, ch);
   }
   const collected = [...byId.values()];
   collected.sort((a, b) => a.name.localeCompare(b.name));

@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronDown, Hash, Loader2, Plus, Sparkles } from "lucide-react";
 import type { SlackChannel } from "@/lib/slack";
+import { isExecutiveSlackChannelName } from "@/lib/slack/channelNamePolicy";
 import { fetchSlackChannelsList } from "@/server/actions/slack";
 import {
   getFreshSlackChannelsListCache,
@@ -150,17 +151,17 @@ export function AddChannelPicker({
 
   const filtered = useMemo(() => {
     const hiddenIds = selectedChannelIds;
-    const remaining = channels.filter((c) => !hiddenIds.has(c.id));
+    const remaining = channels.filter(
+      (c) => !hiddenIds.has(c.id) && !isExecutiveSlackChannelName(c.name)
+    );
     const q = search.trim().toLowerCase();
-    if (!q) return remaining.slice(0, 500);
-    return remaining
-      .filter(
-        (ch) =>
-          ch.name.toLowerCase().includes(q) ||
-          ch.topic.toLowerCase().includes(q) ||
-          ch.purpose.toLowerCase().includes(q)
-      )
-      .slice(0, 500);
+    if (!q) return remaining;
+    return remaining.filter(
+      (ch) =>
+        ch.name.toLowerCase().includes(q) ||
+        ch.topic.toLowerCase().includes(q) ||
+        ch.purpose.toLowerCase().includes(q)
+    );
   }, [channels, selectedChannelIds, search]);
 
   return (

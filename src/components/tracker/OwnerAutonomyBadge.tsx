@@ -23,6 +23,11 @@ interface OwnerAutonomyBadgeProps {
    * (e.g. inside an overlay trigger).
    */
   anchored?: boolean;
+  /**
+   * Extra amber ring on autonomy **0** ("?") to signal a separate click target. Team roster uses
+   * this; Roadmap owner cells are not clickable on the badge alone, so pass `false` there.
+   */
+  emphasizeUnassessed?: boolean;
 }
 
 /**
@@ -42,9 +47,11 @@ export function OwnerAutonomyBadge({
   ringClassName = "ring-zinc-900",
   className,
   anchored = true,
+  emphasizeUnassessed = true,
 }: OwnerAutonomyBadgeProps) {
   const founder = isFounderPerson(person);
   const level = clampAutonomy(person.autonomyScore);
+  const unassessed = !founder && level === 0;
 
   const positionClass = anchored
     ? size === "roster"
@@ -54,10 +61,16 @@ export function OwnerAutonomyBadge({
 
   const dims =
     size === "roster"
-      ? "h-5 w-5 min-h-5 min-w-5 text-[10px]"
+      ? unassessed
+        ? "h-6 w-6 min-h-6 min-w-6 text-[12px]"
+        : "h-5 w-5 min-h-5 min-w-5 text-[10px]"
       : size === "sm"
-        ? "h-4 w-4 min-h-4 min-w-4 text-[10px]"
-        : "h-[18px] w-[18px] min-h-[18px] min-w-[18px] text-[11px]";
+        ? unassessed
+          ? "h-[18px] w-[18px] min-h-[18px] min-w-[18px] text-[11px]"
+          : "h-4 w-4 min-h-4 min-w-4 text-[10px]"
+        : unassessed
+          ? "h-5 w-5 min-h-5 min-w-5 text-[11px]"
+          : "h-[18px] w-[18px] min-h-[18px] min-w-[18px] text-[11px]";
 
   let palette: string;
   let glyph: string;
@@ -68,7 +81,7 @@ export function OwnerAutonomyBadge({
     glyph = "\u265B";
     title = "Founder";
   } else if (level === 0) {
-    palette = "bg-zinc-600 text-white";
+    palette = "bg-zinc-500 text-white";
     glyph = "?";
     title = `Autonomy ${AUTONOMY_GROUP_LABEL[0].title}`;
   } else if (level >= 4) {
@@ -88,11 +101,16 @@ export function OwnerAutonomyBadge({
   return (
     <span
       className={cn(
-        "pointer-events-none inline-flex items-center justify-center rounded-full font-bold tabular-nums leading-none shadow-sm ring-2",
+        "pointer-events-none inline-flex items-center justify-center rounded-full font-bold tabular-nums leading-none ring-2",
+        unassessed ? "shadow-md" : "shadow-sm",
         positionClass,
         dims,
         palette,
         ringClassName,
+        /** Draw the eye to the control — parent wraps this in a clickable overlay on Team. */
+        emphasizeUnassessed &&
+          unassessed &&
+          "ring-amber-400/85 ring-offset-2 ring-offset-zinc-950 contrast-more:ring-amber-300",
         className,
       )}
       aria-label={title}

@@ -163,7 +163,7 @@ export function TeamFacetMultiSelect({
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={searchPlaceholder}
                     autoComplete="off"
-                    className="w-full rounded-md border border-zinc-700 bg-zinc-950/80 py-1.5 pl-8 pr-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+                    className="w-full rounded-md border border-zinc-700 bg-zinc-950/80 py-1.5 pl-8 pr-2 text-sm text-zinc-100 placeholder:text-zinc-600 transition-[border-color,background-color] duration-150 ease-out motion-reduce:transition-none hover:border-zinc-600 focus:outline-none focus-visible:border-zinc-500/45 focus-visible:ring-1 focus-visible:ring-zinc-400/20 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   />
                 </div>
               </div>
