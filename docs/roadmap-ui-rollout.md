@@ -1,5 +1,7 @@
 # Roadmap UI improvements — rollout steps
 
+Shared dashboard chrome: `PageToolbar` (sticky title bar), `EmptyState` (dashed empty card), and CSS variables `--surface-toolbar` / `--surface-group-header` in `src/app/globals.css` — used by Roadmap, Team, and Companies for consistent layout and surfaces.
+
 Implement and review **one step at a time** (merge or test after each).
 
 | Step | What | Key files |

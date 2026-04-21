@@ -225,6 +225,109 @@ export function formatRelativeCalendarDate(
  * Signed calendar offset: `-3D` = 3 days ago, `5D` = in 5 days, `2W`, `-1M`, `1Y`.
  * Invalid / empty input: returns `null`.
  */
+
+/**
+ * Team roster: compact time-on-team from a **join** `YYYY-MM-DD`.
+ * Past joins: `5d`, `3w`, `6mo`, `3y`. Today → `0d`. Future start dates: `in 5d`, `in 2mo`, etc.
+ */
+export function formatTeamTenureFromJoinYmd(ymd: string, now = new Date()): string {
+  const target = parseCalendarDateString(ymd);
+  if (!target) return "—";
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = calendarDaysBetween(target, today);
+
+  if (diff === 0) return "0d";
+
+  if (diff > 0) {
+    const abs = diff;
+    if (abs < 14) return `in ${abs}d`;
+    if (abs < 60) {
+      const w = Math.max(1, Math.round(abs / 7));
+      return w === 1 ? "in 1w" : `in ${w}w`;
+    }
+    if (abs < 365) {
+      const mo = Math.max(1, Math.round(abs / 30));
+      return mo === 1 ? "in 1mo" : `in ${mo}mo`;
+    }
+    const y = Math.max(1, Math.round(abs / 365));
+    return y === 1 ? "in 1y" : `in ${y}y`;
+  }
+
+  const abs = -diff;
+  if (abs < 14) return `${abs}d`;
+  if (abs < 60) {
+    const w = Math.max(1, Math.round(abs / 7));
+    return `${w}w`;
+  }
+  if (abs < 365) {
+    const mo = Math.max(1, Math.round(abs / 30));
+    return `${mo}mo`;
+  }
+  const y = Math.max(1, Math.round(abs / 365));
+  return `${y}y`;
+}
+
+export type UpcomingJoinAnniversary = {
+  /** Whole calendar days from `now` until the anniversary (0 = today). */
+  daysUntil: number;
+  /** 1 = first work anniversary, 2 = second, … */
+  yearOrdinal: number;
+  /** That anniversary as `YYYY-MM-DD` (local). */
+  anniversaryYmd: string;
+};
+
+function calendarDateToYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Month/day of `join` in `year`, using Feb 28 when join was Feb 29 and `year` is not a leap year. */
+function joinAnniversaryInYear(join: Date, year: number): Date {
+  const month = join.getMonth();
+  const day = join.getDate();
+  if (month === 1 && day === 29) {
+    const febLast = new Date(year, 2, 0).getDate();
+    return new Date(year, month, Math.min(day, febLast));
+  }
+  return new Date(year, month, day);
+}
+
+/**
+ * Next calendar work anniversary (whole-year milestone) is within `withinDays` days of `now` (inclusive).
+ * Join must be on or before `now`. Future join dates → `null`.
+ */
+export function getUpcomingJoinAnniversaryWithin(
+  joinYmd: string,
+  withinDays: number,
+  now = new Date()
+): UpcomingJoinAnniversary | null {
+  const join = parseCalendarDateString(joinYmd);
+  if (!join) return null;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (calendarDaysBetween(join, today) > 0) return null;
+
+  const y = today.getFullYear();
+  let ann = joinAnniversaryInYear(join, y);
+  if (calendarDaysBetween(ann, today) < 0) {
+    ann = joinAnniversaryInYear(join, y + 1);
+  }
+
+  const daysUntil = calendarDaysBetween(ann, today);
+  if (daysUntil < 0 || daysUntil > withinDays) return null;
+
+  const yearOrdinal = ann.getFullYear() - join.getFullYear();
+  if (yearOrdinal < 1) return null;
+
+  return {
+    daysUntil,
+    yearOrdinal,
+    anniversaryYmd: calendarDateToYmd(ann),
+  };
+}
+
 export function formatRelativeCalendarDateCompact(
   ymd: string,
   now = new Date()

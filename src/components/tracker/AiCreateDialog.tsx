@@ -7,10 +7,16 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { X, Loader2, Check } from "lucide-react";
+import { X, Loader2, Check, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { createGoal, createProject, createMilestone } from "@/server/actions/tracker";
+import { StreamingText } from "@/components/ui/StreamingText";
+import {
+  CATEGORY_META,
+  normalizeIdeaCategory,
+  type IdeaCategory,
+} from "@/lib/ideaCategory";
 
 type MessageRole = "user" | "assistant";
 interface Message {
@@ -42,18 +48,117 @@ interface ProjectProposal {
 
 type Proposal = GoalProposal | ProjectProposal;
 
-function tryParseProposal(text: string): Proposal | null {
-  const fenceMatch = text.match(/```json\s*([\s\S]*?)```/);
-  if (!fenceMatch) return null;
+interface Idea {
+  title: string;
+  rationale: string;
+  category: IdeaCategory;
+}
+
+interface IdeaShortlist {
+  ideas: Idea[];
+}
+
+type FencedPayload =
+  | { kind: "proposal"; proposal: Proposal }
+  | { kind: "ideas"; ideas: IdeaShortlist["ideas"] }
+  | null;
+
+function tryParseFenced(text: string): FencedPayload {
+  // Accept either a fully-closed ```json ... ``` block (the happy path)
+  // or a fenced-open-but-unclosed tail (`max_tokens` truncation, dropped
+  // trailing ticks). We also try bare JSON if no fence markers at all —
+  // Claude occasionally forgets the fence when the system prompt is long.
+  let jsonText: string | null = null;
+  const closed = text.match(/```json\s*([\s\S]*?)```/);
+  if (closed) {
+    jsonText = closed[1].trim();
+  } else {
+    const open = text.match(/```json\s*([\s\S]*)$/);
+    if (open) jsonText = open[1].replace(/```\s*$/, "").trim();
+  }
+  if (!jsonText) {
+    // Bare JSON fallback: take the outermost {...} block if it looks
+    // like an ideas/proposal object.
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first !== -1 && last > first) {
+      const slice = text.slice(first, last + 1).trim();
+      if (/"(?:ideas|description|name)"\s*:/.test(slice)) {
+        jsonText = slice;
+      }
+    }
+  }
+  if (!jsonText) return null;
   try {
-    return JSON.parse(fenceMatch[1].trim()) as Proposal;
+    const parsed = JSON.parse(jsonText) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { ideas?: unknown }).ideas)
+    ) {
+      const rawIdeas = (parsed as { ideas: unknown[] }).ideas;
+      const ideas: Idea[] = [];
+      for (const item of rawIdeas) {
+        if (!item || typeof item !== "object") continue;
+        const it = item as {
+          title?: unknown;
+          rationale?: unknown;
+          category?: unknown;
+        };
+        if (typeof it.title !== "string" || !it.title.trim()) continue;
+        ideas.push({
+          title: it.title.trim(),
+          rationale:
+            typeof it.rationale === "string" ? it.rationale.trim() : "",
+          category: normalizeIdeaCategory(it.category),
+        });
+      }
+      if (!ideas.length) return null;
+      return { kind: "ideas", ideas };
+    }
+    return { kind: "proposal", proposal: parsed as Proposal };
   } catch {
     return null;
   }
 }
 
+function tryParseProposal(text: string): Proposal | null {
+  const payload = tryParseFenced(text);
+  return payload && payload.kind === "proposal" ? payload.proposal : null;
+}
+
 function stripJsonFence(text: string): string {
   return text.replace(/```json[\s\S]*?```/, "").trim();
+}
+
+/**
+ * Splits the model reply at the first fenced-code marker so the human lead-in
+ * (e.g. "Here are a few directions…") can stay above the scrolling JSON
+ * block while the fence is still open during streaming.
+ */
+function splitLeadInAndFencedBlock(text: string): {
+  leadIn: string;
+  fenced: string;
+} {
+  const idx = text.indexOf("```");
+  if (idx === -1) {
+    return { leadIn: text, fenced: "" };
+  }
+  return {
+    leadIn: text.slice(0, idx).trimEnd(),
+    fenced: text.slice(idx).trimStart(),
+  };
+}
+
+/**
+ * When the user clicks an idea from the Think-for-me shortlist, we send a
+ * verbose instructional prompt so the model produces a full proposal. That
+ * prompt is ugly in the chat transcript, so we detect it and render a short
+ * "You picked: …" line instead.
+ */
+function extractPickedIdeaTitle(content: string): string | null {
+  const m = content.match(/^I'll go with idea #\d+:\s*"([^"]+)"/);
+  return m ? m[1] : null;
 }
 
 const GOAL_FIELD_LABELS: Record<string, string> = {
@@ -76,6 +181,11 @@ interface AiCreateDialogProps {
   type: "goal" | "project";
   companyId?: string;
   goalId?: string;
+  /** When creating a project from onboarding, pre-seeds the first AI turn. */
+  projectSeed?: {
+    suggestedName?: string;
+    suggestedDefinitionOfDone?: string;
+  };
   onCreated?: (id: string) => void;
   onClose: () => void;
 }
@@ -84,6 +194,7 @@ export function AiCreateDialog({
   type,
   companyId,
   goalId,
+  projectSeed,
   onCreated,
   onClose,
 }: AiCreateDialogProps) {
@@ -96,8 +207,24 @@ export function AiCreateDialog({
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [reviseFeedback, setReviseFeedback] = useState("");
+  // True while a revision is in-flight so we hide the previous proposal card
+  // and only show the new one as it streams in.
+  const [isRevising, setIsRevising] = useState(false);
+  // Shortlist from the initial auto-brainstorm stage. When non-null, the dialog
+  // shows a picker and clicking one expands it into a full proposal.
+  const [ideas, setIdeas] = useState<IdeaShortlist["ideas"] | null>(null);
+  // Index of the idea currently being expanded (so we can show a spinner
+  // on just that row instead of the whole list).
+  const [expandingIdeaIndex, setExpandingIdeaIndex] = useState<number | null>(
+    null,
+  );
+  // Soft-hides the shortlist while an expansion is streaming so the user
+  // can focus on the proposal being generated. Re-shown automatically if
+  // the stream fails before producing a parseable proposal.
+  const [hideIdeas, setHideIdeas] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const jsonStreamScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const reviseInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -120,6 +247,12 @@ export function AiCreateDialog({
   }, [messages, streaming, loading]);
 
   useEffect(() => {
+    const el = jsonStreamScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [streaming]);
+
+  useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && !loading && !creating) onClose();
     }
@@ -134,7 +267,13 @@ export function AiCreateDialog({
   }, []);
 
   const sendMessage = useCallback(
-    async (userMessage: string) => {
+    async (
+      userMessage: string,
+      opts?: {
+        autoMode?: "ideas" | "expand";
+        resetConversation?: boolean;
+      },
+    ) => {
       streamAbortRef.current?.abort();
       const ac = new AbortController();
       streamAbortRef.current = ac;
@@ -143,11 +282,18 @@ export function AiCreateDialog({
       setError(null);
       setStreaming("");
 
+      // When starting a fresh auto flow we restart the conversation even if
+      // the user had answered a question or two. This guarantees the server
+      // hits its "no history, no message" auto-seed branch.
+      const resetHistory = opts?.resetConversation === true;
+      const baseMessages: Message[] = resetHistory ? [] : messages;
       const newMessages: Message[] = userMessage
-        ? [...messages, { role: "user" as const, content: userMessage }]
-        : [...messages];
+        ? [...baseMessages, { role: "user" as const, content: userMessage }]
+        : [...baseMessages];
 
-      if (userMessage) {
+      if (resetHistory) {
+        setMessages(userMessage ? newMessages : []);
+      } else if (userMessage) {
         setMessages(newMessages);
       }
 
@@ -168,6 +314,10 @@ export function AiCreateDialog({
             goalId,
             message: userMessage || undefined,
             history: userMessage ? history.slice(0, -1) : history,
+            // "Think for me" (stage A): tells the API to return a shortlist
+            // of ideas instead of a full proposal. Stage B expansions are
+            // plain follow-up messages with no autoMode.
+            autoMode: opts?.autoMode,
           }),
           signal: ac.signal,
         });
@@ -201,15 +351,48 @@ export function AiCreateDialog({
 
         if (ac.signal.aborted) return;
 
-        const parsed = tryParseProposal(full);
-        if (parsed) {
-          setProposal(parsed);
+        const parsed = tryParseFenced(full);
+        if (process.env.NODE_ENV !== "production") {
+          // Dev-only: surface the raw Claude reply + parse result so it's
+          // easy to see why an ideas/proposal didn't render.
+          console.debug("[ai-create] reply", {
+            autoMode: opts?.autoMode,
+            length: full.length,
+            parsedKind: parsed?.kind ?? null,
+            preview: full.slice(0, 400),
+          });
+        }
+        if (parsed?.kind === "ideas") {
+          setIdeas(parsed.ideas);
+          // Clear any previous proposal so the picker is the only thing visible.
+          setProposal(null);
+          focusReviseAfter = false;
+        } else if (parsed?.kind === "proposal") {
+          setProposal(parsed.proposal);
+          // Once we expand into a proposal, the idea shortlist is no longer
+          // relevant; hide it so the proposal card takes center stage.
+          setIdeas(null);
           focusReviseAfter = true;
         } else if (userMessage && proposal) {
           setError(
             "Could not parse a revised proposal from the response. The previous proposal is unchanged.",
           );
           focusReviseAfter = true;
+        } else if (opts?.autoMode === "ideas") {
+          // Claude finished but didn't emit a parseable `{"ideas": [...]}`
+          // block. Don't leave the user staring at an empty dialog —
+          // surface the raw reply (so they can see what went wrong) and
+          // an actionable error. The assistant message is still pushed
+          // below, so `stripJsonFence(reply)` will render in the chat.
+          setError(
+            full.trim().length === 0
+              ? "The AI returned an empty response. Close and reopen this dialog, or try again in a moment."
+              : "The AI didn't return a usable shortlist. Close and reopen for a fresh brainstorm, or describe your own direction below and press Send.",
+          );
+        } else if (opts?.autoMode === "expand") {
+          setError(
+            "The AI didn't return a proposal for that idea. Pick another direction or describe your own below.",
+          );
         }
 
         setMessages((prev) => [
@@ -229,6 +412,11 @@ export function AiCreateDialog({
         // A superseded call's finally must not clobber the new call's loading=true.
         if (streamAbortRef.current === ac) {
           setLoading(false);
+          setIsRevising(false);
+          setExpandingIdeaIndex(null);
+          // Re-show the shortlist if we didn't successfully produce a
+          // proposal (e.g. error / abort / unparseable response).
+          setHideIdeas(false);
           setTimeout(() => {
             if (focusReviseAfter) {
               reviseInputRef.current?.focus();
@@ -242,24 +430,80 @@ export function AiCreateDialog({
     [messages, type, companyId, goalId, proposal],
   );
 
-  // Auto-start: ask the first question. React 18 Strict Mode runs setup → cleanup → setup;
+  // Auto-start. React 18 Strict Mode runs setup → cleanup → setup;
   // cleanup aborts the in-flight request, so this must run again — do not use a "once" ref guard.
+  //
+  // Default behavior: jump straight into a shortlist of ideas so the user
+  // sees concrete directions immediately. They can refine via the textarea,
+  // press Send with an empty field while the list is visible for a fresh
+  // shortlist, or pick a card. The exception is the onboarding project
+  // seed path — when the caller passes a concrete pilot name + definition
+  // of done, we respect that intent and draft a proposal from it instead.
   useEffect(() => {
-    void sendMessage("");
+    const seedName = projectSeed?.suggestedName?.trim();
+    if (type === "project" && seedName) {
+      const seeded = [
+        "Please draft a project proposal aligned with this pilot idea:",
+        `Name: ${seedName}`,
+        `Definition of done: ${(projectSeed?.suggestedDefinitionOfDone ?? "").trim()}`,
+        "Keep complexity low (1-2) and priority P1 or P2 unless the goal clearly requires otherwise.",
+      ].join("\n");
+      void sendMessage(seeded);
+      return;
+    }
+    void sendMessage("", { autoMode: "ideas", resetConversation: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only on mount; sendMessage changes with every message
   }, []);
 
   const handleSend = useCallback(() => {
     const q = input.trim();
-    if (!q || loading) return;
+    if (loading) return;
+    if (!q && !ideas) return;
     setInput("");
+    // Empty Send while the shortlist is up: new brainstorm (replaces the
+    // old "Think for me" control).
+    if (!q && ideas) {
+      setError(null);
+      setIdeas(null);
+      setHideIdeas(false);
+      setProposal(null);
+      void sendMessage("", { autoMode: "ideas", resetConversation: true });
+      return;
+    }
+    // If the shortlist is currently visible, soft-hide it during the
+    // stream so the user can focus on the AI's response. `sendMessage`'s
+    // finally block restores it if the stream doesn't produce a proposal.
+    if (ideas) setHideIdeas(true);
     void sendMessage(q);
-  }, [input, loading, sendMessage]);
+  }, [input, loading, ideas, sendMessage]);
+
+  /**
+   * Called when the user picks one of the AI's shortlisted ideas. Sends
+   * a follow-up with `autoMode: "expand"` so the server skips questions and
+   * emits the full proposal JSON directly.
+   */
+  const handleExpandIdea = useCallback(
+    (index: number) => {
+      if (loading || creating) return;
+      const idea = ideas?.[index];
+      if (!idea) return;
+      setExpandingIdeaIndex(index);
+      setHideIdeas(true);
+      setError(null);
+      const expandPrompt =
+        `I'll go with idea #${index + 1}: "${idea.title}"` +
+        (idea.rationale ? ` (${idea.rationale})` : "") +
+        `. Expand this into a full ${type} proposal using the FINAL OUTPUT RULES. Do not ask any more questions; infer the remaining details from the tracker context.`;
+      void sendMessage(expandPrompt, { autoMode: "expand" });
+    },
+    [ideas, loading, creating, sendMessage, type],
+  );
 
   const handleRevise = useCallback(() => {
     const q = reviseFeedback.trim();
     if (!q || loading) return;
     setError(null);
+    setIsRevising(true);
     void sendMessage(q);
   }, [reviseFeedback, loading, sendMessage]);
 
@@ -334,12 +578,24 @@ export function AiCreateDialog({
   const fieldLabels =
     type === "goal" ? GOAL_FIELD_LABELS : PROJECT_FIELD_LABELS;
 
+  /** Same wording as `AddEntityMenuButton` so the dialog matches the entry point. */
+  const dialogTitle =
+    type === "goal"
+      ? "Draft a new goal with AI…"
+      : "Draft a new project with AI…";
+
   const currentStreaming = streaming;
   const streamingProposal = currentStreaming
     ? tryParseProposal(currentStreaming)
     : null;
-  /** Prefer live parse while streaming so revisions update the card as soon as JSON is complete. */
-  const displayProposal = streamingProposal ?? proposal;
+  /**
+   * Prefer live parse while streaming so revisions update the card as soon as JSON is complete.
+   * While a revision is in-flight, hide the previous proposal entirely — only surface the new
+   * one once its JSON has finished streaming (streamingProposal !== null).
+   */
+  const displayProposal = isRevising
+    ? streamingProposal
+    : (streamingProposal ?? proposal);
 
   const layer = (
     <>
@@ -354,13 +610,13 @@ export function AiCreateDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`AI create ${type}`}
-        className="fixed left-1/2 top-1/2 z-[230] flex max-h-[min(600px,85vh)] w-[min(480px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/50"
+        aria-label={dialogTitle}
+        className="fixed left-1/2 top-1/2 z-[230] flex max-h-[min(760px,92vh)] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/50"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700/80 px-4 py-2.5">
           <h2 className="text-sm font-semibold text-zinc-100">
-            AI &middot; New {type}
+            {dialogTitle}
           </h2>
           <button
             type="button"
@@ -372,25 +628,54 @@ export function AiCreateDialog({
           </button>
         </div>
 
-        {/* Chat area */}
+        {/* Chat area — tightens spacing while the idea picker is visible, since
+            each card is already its own distinct block and doesn't need the
+            larger between-message gap. */}
         <div
           ref={scrollRef}
-          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm"
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-4 text-sm",
+            ideas && !displayProposal
+              ? "space-y-2 py-2"
+              : "space-y-3 py-3",
+          )}
         >
-          {messages.map((m, i) => (
+          {messages.map((m, i) => {
+            const pickedTitle =
+              m.role === "user" ? extractPickedIdeaTitle(m.content) : null;
+            // While the idea picker is visible, suppress the assistant's
+            // "Here are a few directions…" lead-in: the "Pick a direction"
+            // header above the grid already communicates the same thing and
+            // the duplicated bubble eats vertical space.
+            const hideAssistantBubble =
+              m.role === "assistant" && ideas && !displayProposal && !hideIdeas;
+            if (hideAssistantBubble) return null;
+            return (
             <div key={i}>
               {m.role === "user" ? (
-                <div className="flex gap-2.5 rounded-md bg-zinc-800 px-3 py-2 text-zinc-200">
-                  <span
-                    className="shrink-0 select-none font-semibold tabular-nums text-zinc-400"
-                    aria-hidden
-                  >
-                    A
-                  </span>
-                  <div className="min-w-0 flex-1 whitespace-pre-wrap break-words [text-wrap:pretty]">
-                    {m.content}
+                pickedTitle ? (
+                  <div className="flex items-center gap-2 text-xs text-zinc-500">
+                    <Check className="h-3.5 w-3.5 text-emerald-500/80" aria-hidden />
+                    <span>
+                      You picked{" "}
+                      <span className="font-medium text-zinc-300">
+                        {pickedTitle}
+                      </span>
+                    </span>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex gap-2.5 rounded-md bg-zinc-800 px-3 py-2 text-zinc-200">
+                    <span
+                      className="shrink-0 select-none font-semibold tabular-nums text-zinc-400"
+                      aria-hidden
+                    >
+                      A
+                    </span>
+                    <div className="min-w-0 flex-1 whitespace-pre-wrap break-words [text-wrap:pretty]">
+                      {m.content}
+                    </div>
+                  </div>
+                )
               ) : (
                 <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950 px-3 py-2 text-zinc-300">
                   <span
@@ -405,10 +690,20 @@ export function AiCreateDialog({
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
-          {/* Streaming text (before it's committed to messages) */}
-          {loading && currentStreaming && (
+          {/* Streaming text (before it's committed to messages). We show it
+              during the ideas fetch too — the user should see Claude's
+              lead-in streaming rather than a silent "Brainstorming…" that
+              then disappears. Once a ``` fence opens, the lead-in stays
+              above a scrollable fenced region so it does not scroll away
+              with the JSON. */}
+          {loading && currentStreaming && (() => {
+            const { leadIn, fenced } = splitLeadInAndFencedBlock(currentStreaming);
+            const leadStreaming = !fenced;
+            const leadText = leadStreaming ? currentStreaming : leadIn;
+            return (
             <div className="flex gap-2.5 rounded-md border border-zinc-700/60 bg-zinc-950 px-3 py-2 text-zinc-300">
               <span
                 className="shrink-0 select-none font-semibold tabular-nums text-amber-500/90"
@@ -416,17 +711,140 @@ export function AiCreateDialog({
               >
                 Q
               </span>
-              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words [text-wrap:pretty]">
-                {stripJsonFence(currentStreaming)}
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <StreamingText
+                  text={leadText}
+                  isStreaming={loading && leadStreaming}
+                  className="min-w-0 whitespace-pre-wrap break-words [text-wrap:pretty]"
+                  caretClassName="bg-amber-400/70"
+                />
+                {fenced ? (
+                  <div
+                    ref={jsonStreamScrollRef}
+                    className="max-h-[min(260px,38vh)] overflow-y-auto rounded-md border border-zinc-800/80 bg-zinc-900/80 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-400"
+                  >
+                    <StreamingText
+                      text={fenced}
+                      isStreaming={loading}
+                      className="block min-w-0 whitespace-pre-wrap break-words"
+                      caretClassName="bg-amber-400/70"
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Thinking indicator */}
           {loading && !currentStreaming && (
             <div className="flex items-center gap-2 text-zinc-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Thinking…
+            </div>
+          )}
+
+          {/* Idea shortlist picker — shown after the auto-brainstorm returns a list.
+              Hidden once an idea has been expanded into a proposal.
+              Rationale appears in a hover/focus tooltip overlay on the card. */}
+          {ideas && !displayProposal && !hideIdeas && (
+            <div>
+              <div className="mb-3 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-amber-400/90">
+                <Wand2 className="h-3.5 w-3.5" aria-hidden />
+                Pick a direction
+              </div>
+              <ol className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-3">
+                {ideas.map((idea, i) => {
+                  const meta = CATEGORY_META[idea.category];
+                  const Icon = meta.icon;
+                  const isBusy = expandingIdeaIndex === i;
+                  const disabled = loading || creating;
+                  const ariaLabel = idea.rationale
+                    ? `Expand idea: ${idea.title}. ${idea.rationale}`
+                    : `Expand idea: ${idea.title}`;
+                  return (
+                    <li key={i} className="min-w-0 overflow-visible">
+                      <div
+                        role="button"
+                        tabIndex={disabled ? -1 : 0}
+                        aria-disabled={disabled || undefined}
+                        aria-label={ariaLabel}
+                        onClick={() => {
+                          if (disabled) return;
+                          handleExpandIdea(i);
+                        }}
+                        onKeyDown={(e) => {
+                          if (disabled) return;
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleExpandIdea(i);
+                          }
+                        }}
+                        className={cn(
+                          "group relative flex h-full w-full cursor-pointer flex-col overflow-visible rounded-lg border p-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-zinc-400/45",
+                          isBusy
+                            ? "border-amber-500/60 bg-amber-950/30 ring-1 ring-amber-500/30"
+                            : cn(
+                                "border-zinc-800 bg-zinc-950/60 ring-1 ring-transparent",
+                                meta.ring,
+                              ),
+                          disabled && !isBusy
+                            ? "cursor-not-allowed opacity-50"
+                            : "",
+                        )}
+                      >
+                        <div className="flex items-center gap-3.5">
+                          <span
+                            className={cn(
+                              "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+                              meta.tile,
+                            )}
+                            aria-hidden
+                          >
+                            {isBusy ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Icon className="h-4 w-4" />
+                            )}
+                          </span>
+                          <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+                            <span
+                              className={cn(
+                                "inline-flex w-fit items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                                meta.pill,
+                              )}
+                            >
+                              {meta.label}
+                            </span>
+                            <span className="text-sm font-semibold leading-snug text-zinc-100 [text-wrap:balance]">
+                              {idea.title}
+                            </span>
+                          </span>
+                        </div>
+                        {idea.rationale ? (
+                          <div
+                            role="tooltip"
+                            className={cn(
+                              // Below the card so the direction title is never covered (in-card overlay did).
+                              "pointer-events-none absolute inset-x-2 top-full z-20 mt-1.5 max-h-[min(12rem,42vh)] overflow-y-auto rounded-md border border-zinc-700/85 bg-zinc-900/95 p-2.5 shadow-lg backdrop-blur-sm",
+                              "opacity-0 transition-[opacity,box-shadow] duration-150 ease-out motion-reduce:transition-none",
+                              "group-hover:opacity-100 group-hover:shadow-xl",
+                              "group-focus-within:opacity-100 group-focus-within:shadow-xl",
+                            )}
+                          >
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                              Why it matters
+                            </p>
+                            <p className="text-xs leading-relaxed text-zinc-300 [text-wrap:pretty]">
+                              {idea.rationale}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
             </div>
           )}
 
@@ -496,7 +914,7 @@ export function AiCreateDialog({
                 <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Revise with AI
                 </p>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-stretch">
                   <input
                     ref={reviseInputRef}
                     type="text"
@@ -509,7 +927,7 @@ export function AiCreateDialog({
                     }}
                     placeholder="e.g. Make priority P0, shorten the title, add a milestone for QA…"
                     disabled={loading || creating}
-                    className="min-h-[2.75rem] min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                    className="min-h-11 min-w-0 flex-1 self-stretch rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                     aria-label="Feedback to revise the proposal"
                   />
                   <button
@@ -519,7 +937,7 @@ export function AiCreateDialog({
                     }
                     onClick={handleRevise}
                     className={cn(
-                      "inline-flex shrink-0 items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium sm:min-w-[7.5rem]",
+                      "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-stretch rounded-md border px-4 text-sm font-medium sm:min-w-[7.5rem]",
                       loading
                         ? "cursor-wait border-zinc-500 bg-zinc-800 text-zinc-200"
                         : "border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40",
@@ -568,9 +986,9 @@ export function AiCreateDialog({
               </div>
             </div>
           ) : (
-            <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 items-stretch gap-2">
               <label htmlFor="ai-create-answer" className="sr-only">
-                Your answer (Shift+Enter for a new line)
+                Direction or refinement for the AI (Shift+Enter for a new line)
               </label>
               <textarea
                 id="ai-create-answer"
@@ -583,22 +1001,27 @@ export function AiCreateDialog({
                     handleSend();
                   }
                 }}
-                rows={4}
-                placeholder="Your answer… (Shift+Enter for a new line)"
+                rows={ideas ? 1 : 3}
+                placeholder={
+                  ideas
+                    ? "Refine these, ask for a different angle—or leave blank and Send for new directions…"
+                    : "Describe the direction you want, or leave blank and hit Send to let AI propose…"
+                }
                 disabled={loading}
                 spellCheck
-                className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                className={cn(
+                  "box-border min-w-0 flex-1 resize-y self-stretch rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50",
+                  ideas ? "min-h-11 max-h-40" : "min-h-[5.5rem] max-h-48",
+                )}
               />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={loading || !input.trim()}
-                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Send
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={loading || (!input.trim() && !ideas)}
+                className="inline-flex min-h-11 min-w-[5.25rem] shrink-0 items-center justify-center self-stretch rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Send
+              </button>
             </div>
           )}
         </div>

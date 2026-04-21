@@ -4,3 +4,10 @@
  * so any mutation invalidates the whole tag.
  */
 export const ECC_TRACKER_DATA_TAG = "ecc-tracker-data";
+
+/**
+ * Initial "ideas shortlist" response for `/api/ai-create` (draft goal/project with AI).
+ * Revalidated on a 10-minute TTL and when goals/projects change in substantive ways
+ * (see `revalidateAiCreateIdeasCache` in `server/actions/tracker.ts`).
+ */
+export const ECC_AI_CREATE_IDEAS_TAG = "ecc-ai-create-ideas";

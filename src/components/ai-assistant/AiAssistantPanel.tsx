@@ -6,6 +6,8 @@ import {
   AArrowUp,
   AtSign,
   Eraser,
+  Loader2,
+  Square,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,6 +18,7 @@ import type {
   AssistantEntityOption,
 } from "@/lib/types/assistant-entities";
 import { AssistantMarkdown } from "./AssistantMarkdown";
+import { useSmoothText } from "@/hooks/useSmoothText";
 import {
   AssistantMentionPicker,
   countFlatItems,
@@ -121,6 +124,263 @@ function isMentionTriggerPosition(value: string, atIndex: number): boolean {
   return /\s/.test(prev) || prev === "(";
 }
 
+function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" &&
+      e instanceof DOMException &&
+      e.name === "AbortError") ||
+    (e instanceof Error && e.name === "AbortError")
+  );
+}
+
+export type SuggestionCategory =
+  | "risk"
+  | "growth"
+  | "team"
+  | "product"
+  | "strategy"
+  | "ops";
+
+export type Suggestion = {
+  short: string;
+  full: string;
+  category: SuggestionCategory;
+};
+
+const SUGGESTION_CATEGORIES: ReadonlySet<SuggestionCategory> = new Set([
+  "risk",
+  "growth",
+  "team",
+  "product",
+  "strategy",
+  "ops",
+]);
+
+function normalizeCategory(raw: unknown): SuggestionCategory {
+  if (typeof raw === "string") {
+    const lower = raw.trim().toLowerCase() as SuggestionCategory;
+    if (SUGGESTION_CATEGORIES.has(lower)) return lower;
+  }
+  return "strategy";
+}
+
+/**
+ * Parses the JSONL suggestion stream incrementally. Each non-empty, parseable
+ * line becomes one suggestion; the trailing (possibly half-written) line is
+ * discarded so the UI never shows a half-typed card. The server may emit
+ * occasional stray prose — we silently skip anything that doesn't parse or is
+ * missing required fields.
+ */
+function parseStreamedSuggestions(raw: string): Suggestion[] {
+  const lines = raw.split(/\r?\n/);
+  const out: Suggestion[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const cleaned = trimmed.replace(/^[,\[\]\s]+|[,\s]+$/g, "");
+    if (!cleaned.startsWith("{") || !cleaned.endsWith("}")) continue;
+    try {
+      const parsed = JSON.parse(cleaned) as {
+        short?: unknown;
+        full?: unknown;
+        category?: unknown;
+      };
+      const short =
+        typeof parsed.short === "string" ? parsed.short.trim() : "";
+      const full = typeof parsed.full === "string" ? parsed.full.trim() : "";
+      if (!short || !full) continue;
+      out.push({
+        short,
+        full,
+        category: normalizeCategory(parsed.category),
+      });
+    } catch {
+      /* partial or invalid JSON line */
+    }
+  }
+  return out;
+}
+
+function mergeSuggestions(
+  prev: Suggestion[],
+  incoming: Suggestion[],
+  maxAdd: number,
+): Suggestion[] {
+  const seen = new Set(prev.map((s) => s.short));
+  const out = [...prev];
+  let added = 0;
+  for (const s of incoming) {
+    if (added >= maxAdd) break;
+    if (!seen.has(s.short)) {
+      seen.add(s.short);
+      out.push(s);
+      added++;
+    }
+  }
+  return out;
+}
+
+/** Full merged list (initial + “more”) for empty-chat restore after closing the panel. */
+const SUGGESTION_LIST_CACHE_KEY = "ecc-assistant-suggestion-list-v1";
+
+type StoredSuggestionListPayload = {
+  revision: number;
+  entityKey: string;
+  items: Suggestion[];
+};
+
+function entityKeyFromTag(tag: AssistantEntityTag | null): string {
+  return tag ? `${tag.type}:${tag.id}` : "none";
+}
+
+function readCachedSuggestionList(
+  entityKey: string,
+  revision: number,
+): Suggestion[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SUGGESTION_LIST_CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as StoredSuggestionListPayload;
+    if (
+      typeof data.revision !== "number" ||
+      data.revision !== revision ||
+      typeof data.entityKey !== "string" ||
+      data.entityKey !== entityKey
+    ) {
+      return null;
+    }
+    if (!Array.isArray(data.items)) return null;
+    const out: Suggestion[] = [];
+    for (const item of data.items) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const short = typeof o.short === "string" ? o.short.trim() : "";
+      const full = typeof o.full === "string" ? o.full.trim() : "";
+      if (!short || !full) continue;
+      out.push({
+        short,
+        full,
+        category: normalizeCategory(o.category),
+      });
+    }
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSuggestionList(
+  entityKey: string,
+  revision: number,
+  items: Suggestion[],
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: StoredSuggestionListPayload = { revision, entityKey, items };
+    localStorage.setItem(SUGGESTION_LIST_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+type CategoryTheme = {
+  badge: string;
+  card: string;
+  hover: string;
+  accent: string;
+  label: string;
+};
+
+const CATEGORY_THEMES: Record<SuggestionCategory, CategoryTheme> = {
+  risk: {
+    badge: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+    card: "border-rose-900/40 bg-gradient-to-br from-rose-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover:
+      "hover:border-rose-700/70 hover:from-rose-950/70 hover:shadow-rose-900/20",
+    accent: "text-rose-400/90",
+    label: "Risk",
+  },
+  growth: {
+    badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    card: "border-emerald-900/40 bg-gradient-to-br from-emerald-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover:
+      "hover:border-emerald-700/70 hover:from-emerald-950/70 hover:shadow-emerald-900/20",
+    accent: "text-emerald-400/90",
+    label: "Growth",
+  },
+  team: {
+    badge: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+    card: "border-sky-900/40 bg-gradient-to-br from-sky-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover: "hover:border-sky-700/70 hover:from-sky-950/70 hover:shadow-sky-900/20",
+    accent: "text-sky-400/90",
+    label: "Team",
+  },
+  product: {
+    badge: "bg-violet-500/15 text-violet-300 border-violet-500/30",
+    card: "border-violet-900/40 bg-gradient-to-br from-violet-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover:
+      "hover:border-violet-700/70 hover:from-violet-950/70 hover:shadow-violet-900/20",
+    accent: "text-violet-400/90",
+    label: "Product",
+  },
+  strategy: {
+    badge: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    card: "border-amber-900/40 bg-gradient-to-br from-amber-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover:
+      "hover:border-amber-700/70 hover:from-amber-950/70 hover:shadow-amber-900/20",
+    accent: "text-amber-400/90",
+    label: "Strategy",
+  },
+  ops: {
+    badge: "bg-teal-500/15 text-teal-300 border-teal-500/30",
+    card: "border-teal-900/40 bg-gradient-to-br from-teal-950/40 via-zinc-900/80 to-zinc-900/80",
+    hover: "hover:border-teal-700/70 hover:from-teal-950/70 hover:shadow-teal-900/20",
+    accent: "text-teal-400/90",
+    label: "Ops",
+  },
+};
+
+/** Four shimmer bubbles while the first batch streams in. */
+function SuggestionSkeletons() {
+  const heights = ["h-[84px]", "h-[96px]", "h-[72px]", "h-[92px]"];
+  return (
+    <>
+      {heights.map((h, i) => (
+        <div
+          key={i}
+          aria-hidden
+          className={cn(
+            "mb-2.5 block w-full break-inside-avoid rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2.5",
+            h,
+          )}
+        >
+          <div className="h-3 w-12 rounded-full bg-zinc-800/80" />
+          <div className="mt-2 h-3 w-4/5 animate-pulse rounded bg-zinc-800/70" />
+          <div className="mt-1.5 h-2.5 w-3/5 animate-pulse rounded bg-zinc-800/60" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Rendered at the end of the masonry while more questions are still streaming. */
+function SuggestionPulseCard() {
+  return (
+    <div
+      aria-hidden
+      className="mb-2.5 block w-full [column-span:all] break-inside-avoid rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2.5"
+    >
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500/70" />
+        Generating more
+      </div>
+      <div className="mt-2 h-3 w-3/4 animate-pulse rounded bg-zinc-800/60" />
+      <div className="mt-1.5 h-2.5 w-1/2 animate-pulse rounded bg-zinc-800/50" />
+    </div>
+  );
+}
+
 export function AiAssistantPanel({
   onClose,
   entityTag,
@@ -139,10 +399,21 @@ export function AiAssistantPanel({
   const [streaming, setStreaming] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Smooths the character-level reveal so the answer doesn't flicker on
+  // every chunk from the server. See `useSmoothText` for details.
+  const smoothedStreaming = useSmoothText(streaming, loading);
   const [fontStep, setFontStep] = useState(DEFAULT_FONT_STEP);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  const [suggestionItems, setSuggestionItems] = useState<Suggestion[]>([]);
+  const [suggestionsInitialLoading, setSuggestionsInitialLoading] =
+    useState(false);
+  const [suggestionsMoreLoading, setSuggestionsMoreLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [suggestionsDone, setSuggestionsDone] = useState(false);
 
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
@@ -302,7 +573,171 @@ export function AiAssistantPanel({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [turns, streaming, pendingQuestion, loading]);
+    // Use the smoothed string so the scroll tracks the visible text growth
+    // rather than jumping ahead on every raw server chunk.
+  }, [turns, smoothedStreaming, pendingQuestion, loading]);
+
+  // First batch: 4 from API, or restore full list (including prior “more” batches)
+  // from localStorage when revision + entity still match.
+  useEffect(() => {
+    if (!turnsHydrated) return;
+    if (turns.length > 0) return;
+    if (entitiesLoading) return;
+
+    const entityKey = entityKeyFromTag(entityTag);
+    const revision = entityBundle?.revision;
+
+    if (typeof revision === "number" && entityBundle !== null) {
+      const cached = readCachedSuggestionList(entityKey, revision);
+      if (cached !== null && cached.length > 0) {
+        setSuggestionItems(cached);
+        setSuggestionsError(null);
+        setSuggestionsDone(true);
+        setSuggestionsInitialLoading(false);
+        return;
+      }
+    }
+
+    const ac = new AbortController();
+    let cancelled = false;
+    setSuggestionItems([]);
+    setSuggestionsError(null);
+    setSuggestionsDone(false);
+    setSuggestionsInitialLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/assistant/suggestions", {
+          method: "POST",
+          signal: ac.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            entityTag
+              ? {
+                  entityContext: {
+                    type: entityTag.type,
+                    id: entityTag.id,
+                    label: entityTag.label,
+                  },
+                }
+              : {},
+          ),
+        });
+        if (cancelled) return;
+        if (!res.ok || !res.body) {
+          throw new Error(`Request failed (${res.status})`);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (cancelled) return;
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parsed = parseStreamedSuggestions(buf).slice(0, 4);
+          setSuggestionItems(parsed);
+        }
+        setSuggestionItems((prev) => {
+          const final = parseStreamedSuggestions(buf).slice(0, 4);
+          return final.length > 0 ? final : prev;
+        });
+        setSuggestionsDone(true);
+      } catch (e) {
+        if (cancelled || isAbortError(e)) return;
+        setSuggestionsError(
+          e instanceof Error ? e.message : "Could not load suggestions",
+        );
+      } finally {
+        if (!cancelled) setSuggestionsInitialLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [
+    turnsHydrated,
+    turns.length,
+    entityTag,
+    entitiesLoading,
+    entityBundle?.revision,
+    entityBundle,
+  ]);
+
+  useEffect(() => {
+    if (!turnsHydrated || turns.length > 0) return;
+    const rev = entityBundle?.revision;
+    if (typeof rev !== "number") return;
+    if (suggestionItems.length === 0) return;
+    writeCachedSuggestionList(
+      entityKeyFromTag(entityTag),
+      rev,
+      suggestionItems,
+    );
+  }, [
+    entityTag,
+    entityBundle?.revision,
+    suggestionItems,
+    turns.length,
+    turnsHydrated,
+  ]);
+
+  const fetchMoreSuggestions = useCallback(async () => {
+    if (loading || suggestionsInitialLoading || suggestionsMoreLoading) return;
+    if (suggestionItems.length === 0) return;
+    setSuggestionsMoreLoading(true);
+    setSuggestionsError(null);
+    try {
+      const res = await fetch("/api/assistant/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          more: true,
+          exclude: suggestionItems.map((s) => ({
+            short: s.short,
+            full: s.full,
+          })),
+          ...(entityTag
+            ? {
+                entityContext: {
+                  type: entityTag.type,
+                  id: entityTag.id,
+                  label: entityTag.label,
+                },
+              }
+            : {}),
+        }),
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`Request failed (${res.status})`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const incoming = parseStreamedSuggestions(buf);
+        setSuggestionItems((prev) => mergeSuggestions(prev, incoming, 4));
+      }
+      setSuggestionItems((prev) =>
+        mergeSuggestions(prev, parseStreamedSuggestions(buf), 4),
+      );
+    } catch (e) {
+      setSuggestionsError(
+        e instanceof Error ? e.message : "Could not load more suggestions",
+      );
+    } finally {
+      setSuggestionsMoreLoading(false);
+    }
+  }, [
+    entityTag,
+    loading,
+    suggestionItems,
+    suggestionsInitialLoading,
+    suggestionsMoreLoading,
+  ]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -351,6 +786,10 @@ export function AiAssistantPanel({
     [input, mentionStart, closeMention],
   );
 
+  const stopGeneration = useCallback(() => {
+    streamAbortRef.current?.abort();
+  }, []);
+
   const send = useCallback(async () => {
     const q = input.trim();
     if (!q || loading) return;
@@ -368,11 +807,16 @@ export function AiAssistantPanel({
     ]);
 
     let focusInputAfterAnswer = false;
+    let full = "";
+
+    const ac = new AbortController();
+    streamAbortRef.current = ac;
 
     try {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
         body: JSON.stringify({
           question: q,
           history: historyMessages,
@@ -394,7 +838,6 @@ export function AiAssistantPanel({
         } | null;
         setError(errJson?.error ?? `Request failed (${res.status})`);
         setPendingQuestion(null);
-        setLoading(false);
         return;
       }
 
@@ -402,12 +845,10 @@ export function AiAssistantPanel({
       if (!reader) {
         setError("No response body");
         setPendingQuestion(null);
-        setLoading(false);
         return;
       }
 
       const decoder = new TextDecoder();
-      let full = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -420,9 +861,19 @@ export function AiAssistantPanel({
       setPendingQuestion(null);
       focusInputAfterAnswer = true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
-      setPendingQuestion(null);
+      if (isAbortError(e)) {
+        if (full.length > 0) {
+          setTurns((prev) => [...prev, { question: q, answer: full }]);
+        }
+        setStreaming("");
+        setPendingQuestion(null);
+        focusInputAfterAnswer = true;
+      } else {
+        setError(e instanceof Error ? e.message : "Something went wrong");
+        setPendingQuestion(null);
+      }
     } finally {
+      streamAbortRef.current = null;
       setLoading(false);
       if (focusInputAfterAnswer) {
         setTimeout(() => inputRef.current?.focus(), 0);
@@ -433,6 +884,32 @@ export function AiAssistantPanel({
   const chatFontClass = FONT_STEPS[fontStep];
   const canDecreaseFont = fontStep > 0;
   const canIncreaseFont = fontStep < FONT_STEPS.length - 1;
+
+  const showSuggestions =
+    turns.length === 0 &&
+    !pendingQuestion &&
+    (suggestionsInitialLoading ||
+      suggestionsMoreLoading ||
+      suggestionItems.length > 0 ||
+      suggestionsError !== null ||
+      (turnsHydrated && entitiesLoading));
+
+  const applySuggestion = useCallback(
+    (q: string) => {
+      if (loading) return;
+      setInput(q);
+      closeMention();
+      window.setTimeout(() => {
+        const ta = inputRef.current;
+        if (!ta) return;
+        ta.focus();
+        const end = q.length;
+        ta.setSelectionRange(end, end);
+        setInputSel(end);
+      }, 0);
+    },
+    [loading, closeMention],
+  );
 
   const resetChat = useCallback(() => {
     if (loading) return;
@@ -755,6 +1232,116 @@ export function AiAssistantPanel({
           </div>
         )}
 
+        {showSuggestions && (
+          <div>
+            {suggestionsError && suggestionItems.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                Couldn&apos;t load suggestions — ask anything below.
+              </p>
+            ) : (
+              <>
+                {(entitiesLoading || suggestionsInitialLoading) &&
+                suggestionItems.length === 0 ? (
+                  <p
+                    className="mb-3 text-center text-[13px] leading-snug text-zinc-500"
+                    aria-live="polite"
+                  >
+                    {entitiesLoading && !suggestionsInitialLoading
+                      ? "Syncing workspace…"
+                      : "Drafting a few tailored questions from your workspace—almost there."}
+                  </p>
+                ) : null}
+                <div
+                  className="columns-1 gap-2.5 sm:columns-2"
+                  aria-label="Suggested questions"
+                >
+                  {(entitiesLoading || suggestionsInitialLoading) &&
+                  suggestionItems.length === 0 ? (
+                    <SuggestionSkeletons />
+                  ) : (
+                    <>
+                      {suggestionItems.map((s, i) => {
+                        const theme = CATEGORY_THEMES[s.category];
+                        return (
+                          <button
+                            key={`${s.short}-${i}`}
+                            type="button"
+                            onClick={() => applySuggestion(s.full)}
+                            disabled={loading}
+                            title={s.full}
+                            className={cn(
+                              "mb-2.5 block w-full break-inside-avoid rounded-xl border text-left shadow-sm",
+                              "transition-all duration-150 ease-out motion-reduce:transition-none",
+                              "px-3 py-2.5",
+                              "hover:-translate-y-0.5 hover:shadow-md",
+                              "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                              "disabled:pointer-events-none disabled:opacity-60",
+                              theme.card,
+                              theme.hover,
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                theme.badge,
+                              )}
+                            >
+                              {theme.label}
+                            </span>
+                            <div className="mt-1.5 text-[13px] font-semibold leading-snug text-zinc-100">
+                              {s.short}
+                            </div>
+                            <div className="mt-1 line-clamp-3 text-[11px] leading-snug text-zinc-400">
+                              {s.full}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {((suggestionsInitialLoading &&
+                        !suggestionsDone &&
+                        suggestionItems.length > 0) ||
+                        suggestionsMoreLoading) && (
+                        <SuggestionPulseCard />
+                      )}
+                    </>
+                  )}
+                </div>
+                {suggestionItems.length > 0 && !suggestionsInitialLoading && (
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchMoreSuggestions()}
+                      disabled={loading || suggestionsMoreLoading}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-2 text-sm font-medium text-zinc-200",
+                        "transition-colors hover:border-emerald-700/60 hover:bg-emerald-950/30 hover:text-emerald-100",
+                        "focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                    >
+                      {suggestionsMoreLoading ? (
+                        <Loader2
+                          className="h-4 w-4 shrink-0 animate-spin text-emerald-400/90"
+                          aria-hidden
+                        />
+                      ) : null}
+                      More suggestions
+                    </button>
+                    {suggestionsError ? (
+                      <p
+                        className="max-w-sm text-center text-xs text-rose-400/90"
+                        role="alert"
+                      >
+                        {suggestionsError}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {turns.map((t, i) => (
           <div key={i} className="space-y-2">
             <div className="rounded-md bg-zinc-800/80 px-2 py-1.5 text-zinc-200">
@@ -780,14 +1367,23 @@ export function AiAssistantPanel({
             </div>
             <div className="rounded-md border border-zinc-700/80 bg-zinc-950/50 px-2 py-1.5 text-zinc-200">
               <div className="mb-1.5 font-medium text-emerald-500/90">Answer</div>
-              {loading && streaming === "" ? (
+              {loading && smoothedStreaming === "" ? (
                 <span className="text-zinc-500">Thinking…</span>
               ) : (
-                <AssistantMarkdown
-                  content={streaming}
-                  className="text-inherit"
-                  people={entityBundle?.people ?? []}
-                />
+                <div className="relative">
+                  <AssistantMarkdown
+                    content={smoothedStreaming}
+                    className="text-inherit"
+                    people={entityBundle?.people ?? []}
+                  />
+                  {(loading ||
+                    smoothedStreaming.length < streaming.length) && (
+                    <span
+                      aria-hidden
+                      className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[0.15em] animate-pulse bg-emerald-500/70 align-middle opacity-70"
+                    />
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -814,8 +1410,8 @@ export function AiAssistantPanel({
               applyMention(item);
             }}
           />
-          <div className="flex items-end gap-2">
-            <div className="relative min-w-0 flex-1">
+          <div className="flex min-w-0 items-stretch gap-2">
+            <div className="relative min-w-0 min-h-11 flex-1 self-stretch">
               <textarea
                 ref={inputRef}
                 value={input}
@@ -896,7 +1492,7 @@ export function AiAssistantPanel({
                 }
                 rows={2}
                 disabled={loading}
-                className="min-h-[44px] w-full resize-none rounded-md border border-zinc-600 bg-zinc-950 px-2 py-1.5 pr-10 text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                className="box-border h-full min-h-11 w-full resize-none rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 pr-10 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
               />
               <button
                 type="button"
@@ -914,14 +1510,25 @@ export function AiAssistantPanel({
                 <AtSign className="h-4 w-4 shrink-0" aria-hidden />
               </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={loading || !input.trim()}
-              className="inline-flex h-[44px] shrink-0 items-center justify-center rounded-md bg-emerald-700 px-3 font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Send
-            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={stopGeneration}
+                className="inline-flex min-h-11 min-w-[5.5rem] shrink-0 items-center justify-center gap-1.5 self-stretch rounded-md border border-rose-800/80 bg-rose-950/90 px-3 text-sm font-medium text-rose-50 hover:bg-rose-900/95 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" aria-hidden />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void send()}
+                disabled={!input.trim()}
+                className="inline-flex min-h-11 min-w-[5.25rem] shrink-0 items-center justify-center self-stretch rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Send
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -5,19 +5,18 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   Check,
-  ChevronDown,
   ChevronRight,
   Circle,
+  Flag,
   Folder,
   Loader2,
-  Quote,
   Sparkles,
   Target,
   X,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
+import type { CompanyWithGoals, Person, Priority } from "@/lib/types/tracker";
 import type { SlackScrapeSuggestion } from "@/lib/schemas/tracker";
 import {
   resolveCompanyScrapeChannels,
@@ -38,24 +37,119 @@ import type {
 } from "@/lib/slack-scrape-stream-types";
 import { SlackLogo } from "./SlackLogo";
 import { cn } from "@/lib/utils";
+import { useSmoothText } from "@/hooks/useSmoothText";
+import {
+  PRIORITY_MENU_LABEL,
+  priorityFlagIconClass,
+  prioritySelectTextClass,
+} from "@/lib/prioritySort";
+import { AssistantPersonInline } from "@/components/ai-assistant/AssistantPersonInline";
+import { SlackScrapeEvidencePreview } from "./SlackScrapeEvidencePreview";
+import {
+  CATEGORY_META,
+  inferIdeaCategoryFromText,
+} from "@/lib/ideaCategory";
+
+/** Upper bound for typical scans (5–10 goals); bar fills toward this as suggestions stream in. */
+const SLACK_SCAN_EXPECTED_SUGGESTIONS = 10;
+/** Model streaming starts here and grows toward `SLACK_SCAN_MODEL_PROGRESS_MAX`. */
+const SLACK_SCAN_MODEL_PROGRESS_BASE = 0.3;
+const SLACK_SCAN_MODEL_PROGRESS_MAX = 0.99;
+/** Effective stream length at which length-based fill saturates (tuned with `STREAMING_FILL_SPEED`). */
+const SLACK_SCAN_MODEL_CHARS_ROUGH_MAX = 12_000;
+/** Treat streaming as finishing in half the raw output — bar reaches the same target twice as fast. */
+const STREAMING_FILL_SPEED = 2;
+
+// Both suggestion kinds appear once per object in the streamed JSON array.
+function countSlackSuggestionKindsInPartialJson(text: string): number {
+  const n1 = (text.match(/"kind"\s*:\s*"newGoalWithProjects"/g) ?? [])
+    .length;
+  const n2 = (text.match(/"kind"\s*:\s*"newProjectOnExistingGoal"/g) ?? [])
+    .length;
+  return n1 + n2;
+}
+
+/** How far through the model phase we are: length-weighted so progress keeps pace with streaming. */
+function slackScanModelPhaseFill(suggestionCount: number, streamCharLength: number): number {
+  const fromKinds = Math.min(
+    suggestionCount / SLACK_SCAN_EXPECTED_SUGGESTIONS,
+    1
+  );
+  const fromLength = Math.min(
+    streamCharLength / SLACK_SCAN_MODEL_CHARS_ROUGH_MAX,
+    1
+  );
+  const blended = 0.38 * fromKinds + 0.62 * fromLength;
+  return Math.min(1, STREAMING_FILL_SPEED * blended);
+}
 
 function PriorityPill({ priority }: { priority: string }) {
-  const color =
-    priority === "P0"
-      ? "border-red-900/60 bg-red-950/50 text-red-200"
-      : priority === "P1"
-        ? "border-amber-900/60 bg-amber-950/40 text-amber-200"
-        : priority === "P2"
-          ? "border-sky-900/60 bg-sky-950/40 text-sky-200"
-          : "border-zinc-700 bg-zinc-900 text-zinc-300";
+  const p = priority as Priority;
+  const label = PRIORITY_MENU_LABEL[p] ?? priority;
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold tracking-wide",
-        color
+        "inline-flex h-5 items-center gap-1 rounded border border-zinc-800 bg-zinc-900/60 px-1.5 text-[10px] font-semibold"
       )}
+      title={`Priority · ${label}`}
     >
-      {priority}
+      <Flag
+        className={cn("h-3 w-3 shrink-0", priorityFlagIconClass(p))}
+        strokeWidth={2}
+        aria-hidden
+      />
+      <span className={cn("tracking-wide", prioritySelectTextClass(p))}>
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function CategoryTag({
+  text,
+}: {
+  /** Free-text signals fed to the client-side category heuristic. */
+  text: string;
+}) {
+  const category = inferIdeaCategoryFromText(text);
+  const meta = CATEGORY_META[category];
+  const Icon = meta.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+        meta.pill
+      )}
+      title={`Category · ${meta.label}`}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      {meta.label}
+    </span>
+  );
+}
+
+function PersonLine({
+  label,
+  personId,
+  people,
+}: {
+  label: string;
+  personId: string;
+  people: Person[];
+}) {
+  const person = people.find((p) => p.id === personId);
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+      <span>{label}</span>
+      {person ? (
+        <AssistantPersonInline
+          name={person.name}
+          profilePicturePath={person.profilePicturePath || null}
+          className="text-[11px]"
+        />
+      ) : (
+        <span className="text-zinc-400">{personId}</span>
+      )}
     </span>
   );
 }
@@ -125,7 +219,17 @@ export function CompanyScrapeDialog({
   const [scanPhaseMessage, setScanPhaseMessage] = useState("");
   const [scanBarFraction, setScanBarFraction] = useState(0);
   const [scanModelText, setScanModelText] = useState("");
+  const isScanStreaming = scanBarFraction > 0 && scanBarFraction < 1;
+  // Typewriter-smooths the model reasoning stream so the log doesn't
+  // flicker on every server chunk. Slightly slower cps + larger flush
+  // matches the deliberate feel of a "thinking" log.
+  const smoothedScanModelText = useSmoothText(scanModelText, isScanStreaming, {
+    charsPerSecond: 70,
+    flushMs: 400,
+  });
   const scanAbortRef = useRef<AbortController | null>(null);
+  /** Target fraction (0.3–0.99) during model streaming; display value lerps here every tick. */
+  const scanModelBarTargetRef = useRef(0);
   const modelStreamRef = useRef<HTMLDivElement | null>(null);
   const [suggestions, setSuggestions] = useState<SlackScrapeSuggestion[]>([]);
   const [rejectedCount, setRejectedCount] = useState(0);
@@ -139,14 +243,6 @@ export function CompanyScrapeDialog({
     () => new Set()
   );
   const [importing, setImporting] = useState(false);
-
-  const personNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of people) {
-      m.set(p.id, p.name);
-    }
-    return m;
-  }, [people]);
 
   const newGoalSuggestions = useMemo(
     () =>
@@ -178,7 +274,25 @@ export function CompanyScrapeDialog({
     const el = modelStreamRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [scanModelText]);
+    // Track the smoothed text so the log auto-scrolls at the reveal
+    // cadence rather than jumping on every raw server chunk.
+  }, [smoothedScanModelText]);
+
+  /** Smooth the scan bar in small steps toward `scanModelBarTargetRef` between slow network chunks. */
+  useEffect(() => {
+    if (!scanLoading) return;
+    const id = window.setInterval(() => {
+      setScanBarFraction((prev) => {
+        const t = scanModelBarTargetRef.current;
+        if (t <= 0) return prev;
+        if (prev >= t - 0.0005) return prev;
+        const gap = t - prev;
+        const step = Math.max(0.0012, Math.min(0.03, gap * 0.5));
+        return Math.min(prev + step, t);
+      });
+    }, 45);
+    return () => clearInterval(id);
+  }, [scanLoading]);
 
   useEffect(() => {
     if (!open) return;
@@ -208,6 +322,7 @@ export function CompanyScrapeDialog({
     setScanPhaseMessage("");
     setScanBarFraction(0);
     setScanModelText("");
+    scanModelBarTargetRef.current = 0;
     scanAbortRef.current = null;
     setSuggestions([]);
     setRejectedCount(0);
@@ -293,6 +408,7 @@ export function CompanyScrapeDialog({
     setScanProgressEntries([]);
     setScanPhaseMessage("Starting…");
     setScanBarFraction(0.02);
+    scanModelBarTargetRef.current = 0;
     setScanModelText("");
 
     try {
@@ -329,8 +445,9 @@ export function CompanyScrapeDialog({
           if (p.type === "progress" && p.phase === "history") {
             setScanProgressEntries(p.entries);
             if (p.total > 0) {
+              // First segment: loading channel history (caps at 30% when done).
               setScanBarFraction(
-                Math.min(0.88, 0.05 + (p.completed / p.total) * 0.83)
+                Math.min(0.3, 0.05 + (p.completed / p.total) * 0.25)
               );
             }
             setScanPhaseMessage(
@@ -340,10 +457,28 @@ export function CompanyScrapeDialog({
             );
           } else if (p.type === "progress" && p.phase === "model") {
             if ("chunk" in p) {
-              setScanBarFraction((prev) => Math.min(0.98, Math.max(prev, 0.94)));
-              setScanModelText((prev) => prev + p.chunk);
+              setScanModelText((prev) => {
+                const next = prev + p.chunk;
+                const n = countSlackSuggestionKindsInPartialJson(next);
+                const fill = slackScanModelPhaseFill(n, next.length);
+                const target = Math.min(
+                  SLACK_SCAN_MODEL_PROGRESS_MAX,
+                  SLACK_SCAN_MODEL_PROGRESS_BASE +
+                    fill *
+                      (SLACK_SCAN_MODEL_PROGRESS_MAX -
+                        SLACK_SCAN_MODEL_PROGRESS_BASE)
+                );
+                scanModelBarTargetRef.current = Math.max(
+                  scanModelBarTargetRef.current,
+                  target
+                );
+                return next;
+              });
             } else {
-              setScanBarFraction(0.92);
+              scanModelBarTargetRef.current = Math.max(
+                scanModelBarTargetRef.current,
+                SLACK_SCAN_MODEL_PROGRESS_BASE
+              );
               setScanPhaseMessage(p.message);
             }
           } else if (p.type === "done") {
@@ -374,7 +509,9 @@ export function CompanyScrapeDialog({
             setGoalChecked(ng.map(() => true));
             setProjectChecked(ng.map((g) => g.projects.map(() => true)));
             setExistingProjChecked(ex.map(() => true));
-            setExpandedGoalIdx(new Set(ng.map((_, i) => i)));
+            // Start goals collapsed so the user can triage them one by one
+            // instead of scrolling through every expanded project list.
+            setExpandedGoalIdx(new Set());
             setScanBarFraction(1);
             setStage("review");
           } else if (p.type === "error") {
@@ -402,6 +539,7 @@ export function CompanyScrapeDialog({
     } finally {
       setScanLoading(false);
       scanAbortRef.current = null;
+      scanModelBarTargetRef.current = 0;
       setScanPhaseMessage("");
       setScanBarFraction(0);
       setScanProgressEntries([]);
@@ -415,19 +553,23 @@ export function CompanyScrapeDialog({
       next[idx] = checked;
       return next;
     });
-    if (checked) {
-      setProjectChecked((prev) => {
-        const row = newGoalSuggestions[idx];
-        if (!row) return prev;
-        const next = [...prev];
-        next[idx] = row.projects.map(() => true);
-        return next;
-      });
-    }
+    setProjectChecked((prev) => {
+      const row = newGoalSuggestions[idx];
+      if (!row) return prev;
+      const next = [...prev];
+      // Mirror the goal state: checking re-selects every project,
+      // unchecking clears them so we don't ship orphan projects on import.
+      next[idx] = row.projects.map(() => checked);
+      return next;
+    });
   }, [newGoalSuggestions]);
 
   const setProjectCheckAt = useCallback(
     (goalIdx: number, projIdx: number, checked: boolean) => {
+      // Guard: can't turn a project on when its parent goal is off — the
+      // UI also disables the checkbox, this is defense-in-depth in case
+      // a keyboard event sneaks through.
+      if (checked && !goalChecked[goalIdx]) return;
       setProjectChecked((prev) => {
         const next = prev.map((row) => [...row]);
         if (!next[goalIdx]) return prev;
@@ -435,7 +577,7 @@ export function CompanyScrapeDialog({
         return next;
       });
     },
-    []
+    [goalChecked]
   );
 
   const toggleGoalExpand = useCallback((idx: number) => {
@@ -456,9 +598,9 @@ export function CompanyScrapeDialog({
     for (let i = 0; i < newGoalSuggestions.length; i++) {
       const s = newGoalSuggestions[i];
       const gOn = goalChecked[i] ?? false;
+      if (!gOn) continue;
       const pRow = projectChecked[i] ?? [];
       const wantProjects = s.projects.filter((_, j) => pRow[j]);
-      if (!gOn && wantProjects.length === 0) continue;
       bundles.push({
         goal: s.goal,
         projects: wantProjects,
@@ -551,9 +693,14 @@ export function CompanyScrapeDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`Slack scan for ${company.name}`}
-        className="relative z-10 flex max-h-[min(92dvh,960px)] min-h-0 w-[min(900px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+        className={cn(
+          "relative z-10 flex min-h-0 w-[min(900px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl",
+          scanLoading && stage === "config"
+            ? "h-[min(92dvh,960px)]"
+            : "max-h-[min(92dvh,960px)]"
+        )}
       >
-        <div className="flex items-start justify-between gap-6 border-b border-zinc-700/80 px-6 py-5">
+        <div className="flex shrink-0 items-start justify-between gap-6 border-b border-zinc-700/80 px-6 py-5">
           <div className="min-w-0 flex-1 space-y-2">
             <h2 className="inline-flex items-center gap-3 text-lg font-semibold tracking-tight text-zinc-100">
               <SlackLogo alt="" className="h-6 w-6 opacity-90" />
@@ -700,7 +847,7 @@ export function CompanyScrapeDialog({
                 </>
               ) : null}
               {scanLoading ? (
-                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
                   <div className="shrink-0 space-y-2 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex min-w-0 items-center gap-2 text-sm text-zinc-200">
@@ -715,7 +862,7 @@ export function CompanyScrapeDialog({
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                        className="h-full rounded-full bg-gradient-to-r from-sky-500 to-blue-600 transition-[width] duration-100 ease-out motion-reduce:transition-none"
                         style={{
                           width: `${Math.max(2, Math.round(scanBarFraction * 100))}%`,
                         }}
@@ -723,7 +870,14 @@ export function CompanyScrapeDialog({
                     </div>
                   </div>
 
-                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-5">
+                  <div
+                    className={cn(
+                      "grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden md:grid-cols-5 md:grid-rows-1",
+                      scanProgressEntries.length > 0
+                        ? "max-md:grid-rows-[minmax(0,42vh)_minmax(0,1fr)]"
+                        : "grid-rows-[minmax(0,1fr)]"
+                    )}
+                  >
                     {scanProgressEntries.length > 0 ? (
                       <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/40 md:col-span-2">
                         <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -738,7 +892,7 @@ export function CompanyScrapeDialog({
                           </span>
                         </div>
                         <ul
-                          className="min-h-0 flex-1 overflow-y-auto py-1 text-xs"
+                          className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1 text-xs"
                           aria-live="polite"
                         >
                           {scanProgressEntries.map((e) => (
@@ -786,17 +940,19 @@ export function CompanyScrapeDialog({
                       </div>
                       <div
                         ref={modelStreamRef}
-                        className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400"
+                        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400"
                       >
-                        {scanModelText ? (
+                        {smoothedScanModelText ? (
                           <>
                             <span className="whitespace-pre-wrap break-words">
-                              {scanModelText}
+                              {smoothedScanModelText}
                             </span>
-                            <span
-                              className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-sky-400 align-[-1px]"
-                              aria-hidden
-                            />
+                            {isScanStreaming && (
+                              <span
+                                className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-sky-400 align-[-1px]"
+                                aria-hidden
+                              />
+                            )}
                           </>
                         ) : (
                           <div className="space-y-1.5">
@@ -815,7 +971,7 @@ export function CompanyScrapeDialog({
                 <p className="shrink-0 text-sm text-red-400">{scanError}</p>
               ) : null}
             </div>
-            <div className="flex justify-end gap-3 border-t border-zinc-800 px-6 py-4">
+            <div className="flex shrink-0 justify-end gap-3 border-t border-zinc-800 px-6 py-4">
               {scanLoading ? (
                 <button
                   type="button"
@@ -908,6 +1064,17 @@ export function CompanyScrapeDialog({
                       const projectRow = projectChecked[i] ?? [];
                       const projectsPicked = projectRow.filter(Boolean).length;
                       const isExpanded = expandedGoalIdx.has(i);
+                      const projectCount = s.projects.length;
+                      const categorySignal = [
+                        s.goal.description,
+                        s.goal.measurableTarget,
+                        s.goal.whyItMatters,
+                        ...s.projects.map((p) =>
+                          [p.name, p.description].filter(Boolean).join(" ")
+                        ),
+                      ]
+                        .filter(Boolean)
+                        .join(" \n ");
                       return (
                         <li
                           key={`ng-${i}`}
@@ -923,17 +1090,53 @@ export function CompanyScrapeDialog({
                               type="checkbox"
                               className="mt-1 h-4 w-4 shrink-0 rounded border-zinc-600"
                               checked={isSelected}
+                              onClick={(e) => e.stopPropagation()}
                               onChange={(e) =>
                                 setGoalCheckAt(i, e.target.checked)
                               }
                             />
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex flex-wrap items-start gap-2">
-                                <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-zinc-100">
-                                  {s.goal.description}
-                                </p>
+                            <div
+                              className={cn(
+                                "min-w-0 flex-1 space-y-2 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50",
+                                projectCount > 0 &&
+                                  "cursor-pointer p-1 -m-1 hover:bg-zinc-900/35"
+                              )}
+                              title={
+                                projectCount > 0
+                                  ? `${isExpanded ? "Collapse" : "Expand"} projects`
+                                  : undefined
+                              }
+                              role={projectCount > 0 ? "button" : undefined}
+                              tabIndex={projectCount > 0 ? 0 : undefined}
+                              aria-expanded={
+                                projectCount > 0 ? isExpanded : undefined
+                              }
+                              onClick={
+                                projectCount > 0
+                                  ? () => toggleGoalExpand(i)
+                                  : undefined
+                              }
+                              onKeyDown={
+                                projectCount > 0
+                                  ? (e) => {
+                                      if (
+                                        e.key === "Enter" ||
+                                        e.key === " "
+                                      ) {
+                                        e.preventDefault();
+                                        toggleGoalExpand(i);
+                                      }
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <div className="flex flex-wrap items-center gap-2">
+                                <CategoryTag text={categorySignal} />
                                 <PriorityPill priority={s.goal.priority} />
                               </div>
+                              <p className="min-w-0 text-sm font-semibold leading-snug text-zinc-100">
+                                {s.goal.description}
+                              </p>
                               {s.goal.measurableTarget ? (
                                 <p className="text-xs text-zinc-400">
                                   <span className="text-zinc-500">
@@ -948,108 +1151,140 @@ export function CompanyScrapeDialog({
                                 </p>
                               ) : null}
                               {s.goal.slackChannel || s.goal.ownerPersonId ? (
-                                <p className="text-[11px] text-zinc-500">
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500">
                                   {s.goal.slackChannel ? (
                                     <span className="text-zinc-400">
                                       #{s.goal.slackChannel}
                                     </span>
                                   ) : null}
                                   {s.goal.slackChannel && s.goal.ownerPersonId ? (
-                                    <span className="text-zinc-600"> · </span>
+                                    <span className="text-zinc-600">·</span>
                                   ) : null}
                                   {s.goal.ownerPersonId ? (
-                                    <span>
-                                      Owner{" "}
-                                      <span className="text-zinc-300">
-                                        {personNameById.get(s.goal.ownerPersonId) ??
-                                          s.goal.ownerPersonId}
-                                      </span>
-                                    </span>
+                                    <PersonLine
+                                      label="Owner"
+                                      personId={s.goal.ownerPersonId}
+                                      people={people}
+                                    />
                                   ) : null}
-                                </p>
-                              ) : null}
-                              {s.evidence[0] ? (
-                                <div className="flex items-start gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/40 px-3 py-2">
-                                  <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-xs italic leading-snug text-zinc-300">
-                                      “{s.evidence[0].quote.slice(0, 180)}
-                                      {s.evidence[0].quote.length > 180
-                                        ? "…"
-                                        : ""}
-                                      ”
-                                    </p>
-                                    <p className="mt-1 text-[11px] text-zinc-500">
-                                      #
-                                      {s.goal.slackChannel ||
-                                        s.evidence[0].channel}
-                                    </p>
-                                  </div>
                                 </div>
                               ) : null}
-                              {s.projects.length > 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleGoalExpand(i)}
-                                  className="inline-flex items-center gap-1 text-xs font-medium text-sky-400 hover:text-sky-300"
-                                >
-                                  {isExpanded ? (
-                                    <ChevronDown className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ChevronRight className="h-3.5 w-3.5" />
-                                  )}
-                                  {projectsPicked} of {s.projects.length}{" "}
-                                  project
-                                  {s.projects.length === 1 ? "" : "s"} selected
-                                </button>
+                              {s.evidence[0] ? (
+                                <SlackScrapeEvidencePreview
+                                  evidence={s.evidence[0]}
+                                  people={people}
+                                  channelLabel={
+                                    s.goal.slackChannel || s.evidence[0].channel
+                                  }
+                                />
                               ) : null}
+                              <div
+                                className={cn(
+                                  "inline-flex items-center gap-1 text-xs font-medium",
+                                  projectCount === 0
+                                    ? "cursor-default text-zinc-500"
+                                    : "text-sky-400"
+                                )}
+                                aria-hidden
+                              >
+                                {projectCount === 0 ? (
+                                  <>
+                                    <Folder className="h-3.5 w-3.5" />
+                                    No projects
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronRight
+                                      className={cn(
+                                        "h-3.5 w-3.5 shrink-0 transition-transform duration-300 ease-out motion-reduce:transition-none",
+                                        isExpanded && "rotate-90"
+                                      )}
+                                      aria-hidden
+                                    />
+                                    {isExpanded
+                                      ? `${projectsPicked} of ${projectCount} project${projectCount === 1 ? "" : "s"} selected`
+                                      : `${projectCount} project${projectCount === 1 ? "" : "s"} · ${projectsPicked} selected`}
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
-                          {isExpanded && s.projects.length > 0 ? (
-                            <ul className="space-y-1.5 border-t border-zinc-800/80 bg-zinc-950/40 px-4 py-3 pl-11">
-                              {s.projects.map((p, j) => (
-                                <li
-                                  key={`${i}-p-${j}`}
-                                  className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-zinc-900/60"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600"
-                                    checked={projectChecked[i]?.[j] ?? false}
-                                    onChange={(e) =>
-                                      setProjectCheckAt(
-                                        i,
-                                        j,
-                                        e.target.checked
-                                      )
-                                    }
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                      <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                                      <span className="truncate text-sm text-zinc-200">
-                                        {p.name}
-                                      </span>
-                                      <PriorityPill priority={p.priority} />
-                                    </div>
-                                    {p.description ? (
-                                      <p className="mt-0.5 pl-[22px] text-xs text-zinc-500">
-                                        {p.description}
-                                      </p>
-                                    ) : null}
-                                    {p.assigneePersonId ? (
-                                      <p className="mt-0.5 pl-[22px] text-[11px] text-zinc-500">
-                                        Assignee{" "}
-                                        <span className="text-zinc-400">
-                                          {personNameById.get(p.assigneePersonId) ??
-                                            p.assigneePersonId}
-                                        </span>
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
+                          {projectCount > 0 ? (
+                            <div
+                              className={cn(
+                                "grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none",
+                                isExpanded
+                                  ? "grid-rows-[1fr]"
+                                  : "grid-rows-[0fr]"
+                              )}
+                            >
+                              <div className="min-h-0 overflow-hidden border-t border-zinc-800/80 bg-zinc-950/40">
+                                <ul className="space-y-1.5 px-4 py-3 pl-11">
+                                  {s.projects.map((p, j) => {
+                                    const projectDisabled = !isSelected;
+                                    return (
+                                      <li
+                                        key={`${i}-p-${j}`}
+                                        className={cn(
+                                          "flex items-start gap-2 rounded-md px-2 py-1.5",
+                                          projectDisabled
+                                            ? "opacity-55"
+                                            : "hover:bg-zinc-900/60"
+                                        )}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-600 disabled:cursor-not-allowed"
+                                          checked={
+                                            projectChecked[i]?.[j] ?? false
+                                          }
+                                          disabled={projectDisabled}
+                                          onChange={(e) =>
+                                            setProjectCheckAt(
+                                              i,
+                                              j,
+                                              e.target.checked
+                                            )
+                                          }
+                                          title={
+                                            projectDisabled
+                                              ? "Select the goal to include its projects"
+                                              : undefined
+                                          }
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <Folder className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                                            <span className="truncate text-sm text-zinc-200">
+                                              {p.name}
+                                            </span>
+                                            <PriorityPill
+                                              priority={p.priority}
+                                            />
+                                          </div>
+                                          {p.description ? (
+                                            <p className="mt-0.5 pl-[22px] text-xs text-zinc-500">
+                                              {p.description}
+                                            </p>
+                                          ) : null}
+                                          {p.assigneePersonId ? (
+                                            <p className="mt-0.5 pl-[22px]">
+                                              <PersonLine
+                                                label="Assignee"
+                                                personId={
+                                                  p.assigneePersonId
+                                                }
+                                                people={people}
+                                              />
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </div>
+                            </div>
                           ) : null}
                         </li>
                       );
@@ -1070,6 +1305,13 @@ export function CompanyScrapeDialog({
                         company.goals.find((g) => g.id === s.existingGoalId)
                           ?.description ?? s.existingGoalId;
                       const isSelected = existingProjChecked[k] ?? false;
+                      const catText = [
+                        s.project.name,
+                        s.project.description,
+                        goalLabel,
+                      ]
+                        .filter(Boolean)
+                        .join(" \n ");
                       return (
                         <li
                           key={`ex-${k}`}
@@ -1094,29 +1336,37 @@ export function CompanyScrapeDialog({
                             }}
                           />
                           <div className="min-w-0 flex-1 space-y-1.5">
-                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                              <Target className="h-3 w-3" />
-                              <span className="truncate">{goalLabel}</span>
-                            </div>
-                            <div className="flex flex-wrap items-start gap-2">
-                              <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-zinc-100">
-                                {s.project.name}
-                              </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <CategoryTag text={catText} />
                               <PriorityPill priority={s.project.priority} />
                             </div>
+                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                              <Target className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{goalLabel}</span>
+                            </div>
+                            <p className="min-w-0 text-sm font-semibold leading-snug text-zinc-100">
+                              {s.project.name}
+                            </p>
                             {s.project.description ? (
                               <p className="text-xs text-zinc-500">
                                 {s.project.description}
                               </p>
                             ) : null}
                             {s.project.assigneePersonId ? (
-                              <p className="text-[11px] text-zinc-500">
-                                Assignee{" "}
-                                <span className="text-zinc-400">
-                                  {personNameById.get(s.project.assigneePersonId) ??
-                                    s.project.assigneePersonId}
-                                </span>
+                              <p className="text-[11px]">
+                                <PersonLine
+                                  label="Assignee"
+                                  personId={s.project.assigneePersonId}
+                                  people={people}
+                                />
                               </p>
+                            ) : null}
+                            {s.evidence[0] ? (
+                              <SlackScrapeEvidencePreview
+                                evidence={s.evidence[0]}
+                                people={people}
+                                channelLabel={s.evidence[0].channel}
+                              />
                             ) : null}
                           </div>
                         </li>

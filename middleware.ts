@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health"];
+// Cron routes authenticate with CRON_SECRET in the route handler, not the session cookie.
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/health", "/api/cron"];
 
 function getSecret() {
   const secret = process.env.SESSION_SECRET;

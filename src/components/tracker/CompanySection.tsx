@@ -61,7 +61,15 @@ export function CompanySection({
   mirrorPickerHierarchy,
   showCompletedProjects = true,
 }: CompanySectionProps) {
-  const [expanded, setExpanded] = useState(true);
+  const { bulkTick, expandPreset } = useTrackerExpandBulk();
+  /*
+    Derive the first-mount `expanded` from the restored expand preset (and
+    active filters) so the company section doesn't flash open-then-closed on
+    load (e.g. "All collapsed" restoring from localStorage).
+  */
+  const [expanded, setExpanded] = useState(
+    () => expandForSearch || expandPreset !== "collapse"
+  );
   /** Per-goal expanded state so we can default new goals when siblings are all collapsed. */
   const [goalExpandedById, setGoalExpandedById] = useState<
     Record<string, boolean>
@@ -120,7 +128,6 @@ export function CompanySection({
     });
     handleNewGoalRegistered(goal.id);
   }, [company.id, handleNewGoalRegistered]);
-  const { bulkTick, expandPreset } = useTrackerExpandBulk();
   const { stickyTopPx } = useRoadmapView();
   const toolbarPx =
     stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
@@ -229,10 +236,18 @@ export function CompanySection({
 
   return (
     <CompanySectionOverlayProvider>
-    <div className="group/company mb-6 min-w-0 max-w-full">
+    <div className="group/company mb-8 pb-6 min-w-0 max-w-full border-b border-zinc-800/35 last:border-b-0 last:pb-0">
       <div
         ref={companyHeaderRef}
-        className="sticky z-[29] bg-zinc-950/95 pt-3 backdrop-blur-sm"
+        className={cn(
+          "sticky z-[29] pt-3",
+          /*
+            Solid fill so content scrolls cleanly under the company header
+            (no backdrop-blur smear). Matches the toolbar/gap strip exactly
+            so the top-of-viewport sticky stack reads as one band.
+          */
+          "bg-[var(--surface-toolbar)]"
+        )}
         style={{ top: stickyStackBasePx }}
       >
         <div className="group/companyHeader flex min-w-0 items-stretch">

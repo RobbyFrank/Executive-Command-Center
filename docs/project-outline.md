@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A strategic command center for Robby and Nadav to maintain a top-down view of all goals, projects, and progress across the MLabs portfolio of companies. This is NOT a daily task manager or Slack replacement. It's an alignment and prioritization layer that ensures all work maps to goals, surfaces high-leverage opportunities, and catches drift or busy work early.
+Portfolio OS — a strategic portfolio operating system for Robby and Nadav to maintain a top-down view of all goals, projects, and progress across the MLabs portfolio of companies. This is NOT a daily task manager or Slack replacement. It's an alignment and prioritization layer that ensures all work maps to goals, surfaces high-leverage opportunities, and catches drift or busy work early.
 
 ## Core Problem
 

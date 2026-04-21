@@ -53,3 +53,20 @@ export {
   type SlackMentionPreviewDisplay,
 } from "./mention-preview";
 export { resolveSlackChannelLabelFromId } from "./channel-label";
+export {
+  postGoalChannelMessage,
+  draftGoalChannelMessage,
+  reviseGoalChannelMessage,
+  type PostGoalChannelMessageResult,
+  type DraftGoalChannelMessageResult,
+  type ReviseGoalChannelMessageResult,
+} from "./goal-channel-post";
+export {
+  generateGoalChannelPingMessage,
+  generateGoalChannelNudgeMessage,
+  reviseGoalChannelAiMessage,
+  type GenerateGoalChannelMessageResult,
+  type GoalChannelAiContext,
+  type GoalChannelAiRollup,
+  type GoalChannelAiProjectSignal,
+} from "./goal-channel-ai";

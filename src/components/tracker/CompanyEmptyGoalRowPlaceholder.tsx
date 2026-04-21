@@ -6,6 +6,8 @@ import {
   ROADMAP_DATA_COL_CLASS,
   ROADMAP_DELAY_COMPLEXITY_COL_CLASS,
   ROADMAP_GOAL_GRID_PADDING_CLASS,
+  ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS,
+  ROADMAP_GOAL_HEADER_SURFACE_CLASS,
   ROADMAP_GOAL_TITLE_COL_CLASS,
   ROADMAP_GRID_GAP_CLASS,
   ROADMAP_NEXT_MILESTONE_COL_CLASS,
@@ -14,7 +16,7 @@ import {
 } from "@/lib/tracker-roadmap-columns";
 import { AddEntityMenuButton } from "./AddEntityMenuButton";
 
-const PH = "text-xs tabular-nums text-zinc-600/90";
+const PH = "text-xs tabular-nums text-zinc-500";
 
 interface CompanyEmptyGoalRowPlaceholderProps {
   roadmapGoalRowStickyTopPx: number;
@@ -39,16 +41,17 @@ export function CompanyEmptyGoalRowPlaceholder({
   return (
     <div
       className={cn(
-        "max-w-full min-w-0 transition-colors duration-150",
-        "mb-2 rounded-md",
+        "max-w-full min-w-0 mb-2 rounded-md",
       )}
     >
       <div
         style={{ top: goalStickyTopPx }}
         className={cn(
-          "sticky z-[27] w-full min-w-0 max-w-full backdrop-blur-sm transition-colors duration-150 motion-reduce:transition-none",
-          "rounded-t-md border-b border-zinc-800/60 shadow-[0_1px_0_rgba(0,0,0,0.2)]",
-          "bg-zinc-950/95 hover:bg-zinc-900/85",
+          "sticky z-[27] w-full min-w-0 max-w-full transition-colors duration-150 motion-reduce:transition-none",
+          /* Same solid surface as a neutral goal header — avoids “ghost” transparency on empty companies */
+          ROADMAP_GOAL_HEADER_SURFACE_CLASS,
+          ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS,
+          "rounded-md border border-zinc-800/65 shadow-[0_1px_0_rgba(0,0,0,0.2)]",
         )}
       >
         <div
@@ -70,6 +73,7 @@ export function CompanyEmptyGoalRowPlaceholder({
                 buttonTitle="Add a new goal for this company"
                 onManualAdd={onManualAdd}
                 onAiCreated={onGoalCreated}
+                className="text-zinc-400 hover:text-zinc-200"
               />
             </div>
           </div>

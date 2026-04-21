@@ -605,7 +605,7 @@ export function SlackPingDialog({
           ) : null}
         </div>
 
-        <div className="sticky bottom-0 z-[1] flex justify-end gap-3 border-t border-zinc-800/90 bg-zinc-900/98 px-5 py-4 backdrop-blur-sm sm:px-6">
+        <div className="sticky bottom-0 z-[1] flex items-center justify-between gap-3 border-t border-zinc-800/90 bg-zinc-900/98 px-5 py-4 backdrop-blur-sm sm:px-6">
           <button
             type="button"
             className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800"

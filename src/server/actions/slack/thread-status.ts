@@ -62,9 +62,9 @@ export async function fetchSlackThreadStatus(
   const rosterById = rosterMapFromHints(rosterHints);
 
   const forLabels = sorted.slice(-12);
-  const lastThree = sorted.slice(-3);
+  const lastPreviewMessages = sorted.slice(-5);
   const mentionIds = new Set<string>();
-  for (const m of lastThree) {
+  for (const m of lastPreviewMessages) {
     for (const id of collectSlackUserIdsFromMessageText(m.text ?? "")) {
       mentionIds.add(id);
     }
@@ -85,7 +85,7 @@ export async function fetchSlackThreadStatus(
     rosterById
   );
 
-  const recentMessages = lastThree.map((m) => {
+  const recentMessages = lastPreviewMessages.map((m) => {
     const uid = m.user?.trim().toUpperCase();
     const label =
       uid != null

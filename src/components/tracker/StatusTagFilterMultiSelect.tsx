@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useId, useMemo, useState } from "react";
-import type { CompanyWithGoals } from "@/lib/types/tracker";
+import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import {
   countProjectsByStatusTagBucket,
   type TrackerStatusTagId,
@@ -13,6 +13,7 @@ import {
   Hourglass,
   Sparkles,
   Tags,
+  UserPlus,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -66,17 +67,30 @@ const OPTIONS: {
     group: "auto",
     Icon: Hourglass,
   },
+  {
+    id: "new_hire_pilot",
+    label: "New hire pilot",
+    hint: "Project is a new hire's pilot assignment (first 90 days)",
+    group: "auto",
+    Icon: UserPlus,
+  },
 ];
 
 interface StatusTagFilterMultiSelectProps {
   /** Hierarchy after other filters but before the Signals filter (for faceted counts). */
   hierarchy: CompanyWithGoals[];
+  /** For `new_hire_pilot` signal counts and filtering. */
+  people?: Person[];
+  /** Local calendar date `YYYY-MM-DD` (same as roadmap “today”). */
+  todayYmd?: string;
   selectedIds: TrackerStatusTagId[];
   onChange: (ids: TrackerStatusTagId[]) => void;
 }
 
 export function StatusTagFilterMultiSelect({
   hierarchy,
+  people,
+  todayYmd,
   selectedIds,
   onChange,
 }: StatusTagFilterMultiSelectProps) {
@@ -85,8 +99,8 @@ export function StatusTagFilterMultiSelect({
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const counts = useMemo(
-    () => countProjectsByStatusTagBucket(hierarchy),
-    [hierarchy]
+    () => countProjectsByStatusTagBucket(hierarchy, people, todayYmd),
+    [hierarchy, people, todayYmd]
   );
 
   const toggle = useCallback(
@@ -134,7 +148,7 @@ export function StatusTagFilterMultiSelect({
     <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         Filter goals and projects by signals: flagged at risk, spotlighted,
-        unassigned, stuck in progress, needs kickoff
+        unassigned, stuck in progress, needs kickoff, new hire pilot
       </span>
       <button
         type="button"

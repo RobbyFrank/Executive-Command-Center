@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
@@ -11,7 +12,6 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -44,12 +44,15 @@ export function Sidebar({
   displayName,
   profilePicturePath,
   initialCollapsed = false,
+  unattendedNewHireCount = 0,
 }: {
   displayName: string;
   /** Same source as Team roster (`/uploads/…` or remote blob URL). */
   profilePicturePath?: string;
   /** From HTTP cookie so the first paint matches the user's last choice (see `sidebar-prefs`). */
   initialCollapsed?: boolean;
+  /** New hires (≤30 days) with no pilot project — Team page onboarding. */
+  unattendedNewHireCount?: number;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -112,14 +115,16 @@ export function Sidebar({
     <aside
       className={cn(
         "relative flex min-h-0 shrink-0 flex-col overflow-x-hidden border-r border-zinc-800/90 bg-zinc-950 transition-[width] duration-200 ease-out motion-reduce:transition-none",
-        "before:pointer-events-none before:absolute before:inset-y-8 before:right-0 before:w-px before:bg-gradient-to-b before:from-transparent before:via-emerald-500/25 before:to-transparent before:opacity-70",
+        /* Very gentle top-left sheen — barely lifts flat zinc-950 */
+        "after:pointer-events-none after:absolute after:inset-0 after:z-0 after:content-[''] after:bg-[linear-gradient(135deg,rgba(255,255,255,0.028)_0%,rgba(255,255,255,0.006)_38%,transparent_62%)]",
+        "before:pointer-events-none before:absolute before:inset-y-8 before:right-0 before:z-[1] before:w-px before:bg-gradient-to-b before:from-transparent before:via-emerald-500/25 before:to-transparent before:opacity-70",
         collapsed ? "w-16" : "w-56"
       )}
     >
       {/* Keep vertical padding + border in sync with {@link RoadmapStickyToolbar} so the rule lines up with the main sticky header */}
       <div
         className={cn(
-          "shrink-0 border-b border-zinc-800/70 bg-zinc-950/95 px-2 pt-6 pb-3 backdrop-blur-md",
+          "relative z-10 shrink-0 border-b border-zinc-800/70 bg-zinc-950/95 px-2 pt-6 pb-3 backdrop-blur-md",
           collapsed
             ? "relative flex min-h-0 flex-col items-center"
             : "flex min-h-0 items-center justify-between gap-2"
@@ -134,10 +139,17 @@ export function Sidebar({
           )}
         >
           <div
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/85 to-emerald-700 shadow-[0_0_0_1px_rgba(16,185,129,0.25)_inset,0_6px_16px_-8px_rgba(16,185,129,0.45)]"
+            className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg"
             aria-hidden
           >
-            <Sparkles className="h-4 w-4 text-white" strokeWidth={2.25} />
+            <Image
+              src="/icons/icon.png"
+              alt=""
+              width={32}
+              height={32}
+              className="h-full w-full object-contain"
+              priority
+            />
           </div>
           {!collapsed && (
             <div className="min-w-0 flex-1 leading-none">
@@ -145,7 +157,7 @@ export function Sidebar({
                 MLabs
               </p>
               <p className="mt-0.5 truncate text-xs font-medium leading-tight text-zinc-300">
-                Command Center
+                Portfolio OS
               </p>
             </div>
           )}
@@ -170,7 +182,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <nav className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
+      <nav className="relative z-10 flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
         {NAV_GROUPS.map((group, groupIndex) => (
           <div
             key={group.title}
@@ -201,7 +213,7 @@ export function Sidebar({
                     aria-label={collapsed ? collapsedHint : undefined}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
+                      "relative flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
                       collapsed
                         ? "justify-center px-2 py-2"
                         : "gap-3 px-3 py-2",
@@ -212,8 +224,34 @@ export function Sidebar({
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
                     {!collapsed && (
-                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                      <>
+                        <span className="min-w-0 flex-1 truncate">
+                          {item.label}
+                        </span>
+                        {item.href === "/team" && unattendedNewHireCount > 0 ? (
+                          <span
+                            className="shrink-0 tabular-nums rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/35"
+                            title={`${unattendedNewHireCount} new hire${
+                              unattendedNewHireCount === 1 ? "" : "s"
+                            } without a pilot project`}
+                          >
+                            {unattendedNewHireCount > 9
+                              ? "9+"
+                              : unattendedNewHireCount}
+                          </span>
+                        ) : null}
+                      </>
                     )}
+                    {collapsed &&
+                    item.href === "/team" &&
+                    unattendedNewHireCount > 0 ? (
+                      <span
+                        className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-amber-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                        title={`${unattendedNewHireCount} new hire${
+                          unattendedNewHireCount === 1 ? "" : "s"
+                        } without a pilot project`}
+                      />
+                    ) : null}
                   </Link>
                 );
               })}
@@ -224,7 +262,7 @@ export function Sidebar({
 
       <div
         className={cn(
-          "border-t border-zinc-800",
+          "relative z-10 border-t border-zinc-800",
           collapsed ? "p-2" : "p-3"
         )}
       >

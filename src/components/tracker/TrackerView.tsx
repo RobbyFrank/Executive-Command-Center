@@ -21,7 +21,8 @@ import {
 } from "./tracker-expand-context";
 import { RoadmapViewProvider } from "./roadmap-view-context";
 import { RoadmapStickyBelowToolbarGap } from "./RoadmapStickyBelowToolbarGap";
-import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
+import { PageToolbar } from "./PageToolbar";
+import { EmptyState } from "./EmptyState";
 import { RoadmapExpandModeSelect } from "./RoadmapExpandModeSelect";
 import {
   Crosshair,
@@ -61,6 +62,7 @@ import {
   emptyRoadmapFilters,
   type RoadmapInitialFilters,
 } from "@/lib/roadmap-query";
+import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 
 const ROADMAP_FOCUS_MODE_STORAGE_KEY = "ecc-roadmap-focus-mode";
 const ROADMAP_EXPAND_PRESET_STORAGE_KEY = "ecc-roadmap-expand-preset";
@@ -147,6 +149,12 @@ export function TrackerView({
   const allCompanies = useMemo(
     (): Company[] => hierarchy.map(({ goals: _goals, ...co }) => co),
     [hierarchy]
+  );
+
+  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
+  const pilotFilterContext = useMemo(
+    () => ({ people, todayYmd }),
+    [people, todayYmd]
   );
 
   const searchActive = normalizeTrackerSearchQuery(searchQuery).length > 0;
@@ -239,11 +247,12 @@ export function TrackerView({
 
   useEffect(() => {
     let expandPresetFromStorage = false;
+    let focusModeFromStorage = false;
     try {
       const raw = localStorage.getItem(ROADMAP_FOCUS_MODE_STORAGE_KEY);
       if (raw === "1" || raw === "true") {
         setFocusMode(true);
-        setFocusEnforceTick((x) => x + 1);
+        focusModeFromStorage = true;
       }
 
       const rawExpand = localStorage.getItem(ROADMAP_EXPAND_PRESET_STORAGE_KEY);
@@ -258,10 +267,28 @@ export function TrackerView({
     } catch {
       /* ignore quota / private mode */
     }
-    if (expandPresetFromStorage) {
+    /*
+      Fold bulkTick/focusEnforceTick bumps from restored prefs AND initialFocus
+      into a single state-update batch alongside roadmapToolbarPrefsHydrated so
+      children mount exactly once with the correct preset/focus state. Prevents
+      the "everything expands, then collapses a frame later" flash on load.
+    */
+    const hasInitialFocus = Boolean(
+      initialFocus?.goalId && initialFocus?.projectId
+    );
+    if (hasInitialFocus) {
+      setFocusMode(true);
+      setFocusedGoalId(initialFocus!.goalId);
+      setFocusedProjectId(initialFocus!.projectId);
+    }
+    if (expandPresetFromStorage || hasInitialFocus) {
       setBulkTick((t) => t + 1);
     }
+    if (focusModeFromStorage || hasInitialFocus) {
+      setFocusEnforceTick((x) => x + 1);
+    }
     setRoadmapToolbarPrefsHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -314,15 +341,6 @@ export function TrackerView({
     setFocusedProjectId(null);
     setFocusMode(false);
   }, [filterActive]);
-
-  useEffect(() => {
-    if (!initialFocus?.goalId || !initialFocus?.projectId) return;
-    setFocusMode(true);
-    setFocusedGoalId(initialFocus.goalId);
-    setFocusedProjectId(initialFocus.projectId);
-    setBulkTick((t) => t + 1);
-    setFocusEnforceTick((x) => x + 1);
-  }, [initialFocus?.goalId, initialFocus?.projectId]);
 
   /** Focus mode is single-branch drill-in; bulk presets that expand the whole tree fight that — force Goals only while Focus is on. */
   const effectiveExpandPreset = useMemo<TrackerExpandPreset>(
@@ -487,9 +505,10 @@ export function TrackerView({
     () =>
       filterTrackerHierarchyByStatusTags(
         hierarchyAfterStatusEnum,
-        statusTagFilterIds.length > 0 ? statusTagFilterIds : null
+        statusTagFilterIds.length > 0 ? statusTagFilterIds : null,
+        pilotFilterContext
       ),
-    [hierarchyAfterStatusEnum, statusTagFilterIds]
+    [hierarchyAfterStatusEnum, statusTagFilterIds, pilotFilterContext]
   );
 
   const hierarchyAfterHideDone = useMemo(
@@ -552,6 +571,7 @@ export function TrackerView({
       unassigned: "Unassigned",
       zombie: "Stuck in progress",
       stalled: "Needs kickoff",
+      new_hire_pilot: "New hire pilot",
     };
     return statusTagFilterIds.map((id) => labels[id]).join(", ");
   }, [statusTagFilterIds]);
@@ -650,11 +670,7 @@ export function TrackerView({
   return (
     <TrackerExpandProvider value={bulkValue}>
       <RoadmapViewProvider>
-      <RoadmapStickyToolbar>
-        <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-        <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
-          Roadmap
-        </h1>
+      <PageToolbar title="Roadmap">
         <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
@@ -709,6 +725,8 @@ export function TrackerView({
         <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12.5rem]">
           <StatusTagFilterMultiSelect
             hierarchy={hierarchyForStatusTagCounts}
+            people={people}
+            todayYmd={todayYmd}
             selectedIds={statusTagFilterIds}
             onChange={setStatusTagFilterIds}
           />
@@ -861,25 +879,29 @@ export function TrackerView({
             viewLocked={focusMode}
           />
         </div>
-        </div>
-      </RoadmapStickyToolbar>
+      </PageToolbar>
 
       <div className="min-w-0 max-w-full px-6 pb-6">
         <RoadmapStickyBelowToolbarGap />
         {hierarchy.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
-            <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
-              <MapIcon className="h-7 w-7 text-zinc-500" />
-            </div>
-            <h2 className="text-base font-semibold text-zinc-200 mb-1.5">Your roadmap is empty</h2>
-            <p className="text-sm text-zinc-500 text-center max-w-md">
-              Goals, projects, and milestones will appear here once you add companies on the{" "}
-              <a href="/companies" className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors">
-                Companies
-              </a>{" "}
-              page. Each company becomes a section on the roadmap with its own goals and projects.
-            </p>
-          </div>
+          <EmptyState
+            icon={MapIcon}
+            title="Your roadmap is empty"
+            description={
+              <>
+                Goals, projects, and milestones will appear here once you add companies on the{" "}
+                <a
+                  href="/companies"
+                  className="text-zinc-400 underline underline-offset-2 hover:text-zinc-200 transition-colors"
+                >
+                  Companies
+                </a>{" "}
+                page. Each company becomes a section on the roadmap with its own goals and
+                projects.
+              </>
+            }
+            descriptionClassName="max-w-md"
+          />
         ) : filterActive && filteredHierarchy.length === 0 ? (
           <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-zinc-800 py-8 px-4 text-center">
             <p className="text-sm text-zinc-500 max-w-lg">
@@ -904,6 +926,13 @@ export function TrackerView({
               Reset filters
             </button>
           </div>
+        ) : !roadmapToolbarPrefsHydrated ? (
+          /*
+            Hold the hierarchy until restored Roadmap toolbar prefs
+            (Goals only / Focus mode / initialFocus) are applied, so goals and
+            projects don't briefly render expanded and then collapse.
+          */
+          <RoadmapHierarchySkeleton count={Math.min(hierarchy.length, 3)} />
         ) : (
           filteredHierarchy.map((company) => (
             <CompanySection
@@ -922,5 +951,36 @@ export function TrackerView({
       </div>
       </RoadmapViewProvider>
     </TrackerExpandProvider>
+  );
+}
+
+/**
+ * Placeholder blocks shown while the Roadmap toolbar prefs (expand preset, focus mode)
+ * hydrate from localStorage. Keeps the page visually stable instead of flashing a fully
+ * expanded tree that immediately collapses once `Goals only` or similar is applied.
+ */
+function RoadmapHierarchySkeleton({ count }: { count: number }) {
+  const safeCount = Math.max(1, count || 1);
+  return (
+    <div aria-busy="true" aria-label="Loading roadmap" className="animate-pulse">
+      {Array.from({ length: safeCount }).map((_, i) => (
+        <div
+          key={i}
+          className="mb-8 pb-6 border-b border-zinc-800/35 last:border-b-0 last:pb-0"
+        >
+          <div className="pt-3 pb-2 flex items-center gap-3">
+            <div className="h-4 w-4 rounded-sm bg-zinc-800/80" />
+            <div className="h-7 w-7 rounded-md bg-zinc-800/90" />
+            <div className="h-5 w-56 max-w-[40%] rounded bg-zinc-800/80" />
+            <div className="h-3 w-16 rounded bg-zinc-800/60" />
+          </div>
+          <div className="mt-2 space-y-2">
+            <div className="h-9 rounded-md border border-zinc-800/70 bg-zinc-900/55" />
+            <div className="h-9 rounded-md border border-zinc-800/70 bg-zinc-900/45" />
+            <div className="h-9 rounded-md border border-zinc-800/70 bg-zinc-900/45" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

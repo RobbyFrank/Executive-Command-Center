@@ -1,3 +1,5 @@
+import { emojify } from "node-emoji";
+
 /** Normalize a Slack channel name for display (leading #, trimmed). */
 export function formatSlackChannelHash(raw: string): string {
   const t = raw.trim();
@@ -37,6 +39,24 @@ export function collectSlackUserIdsFromMessageText(raw: string): string[] {
 }
 
 /**
+ * Truncate for UI preview without cutting a `<@U…>` mention mid-token (which would
+ * break inline mention rendering).
+ */
+export function truncateSlackTextAvoidSplitMentions(
+  raw: string,
+  maxLen: number
+): string {
+  const t = raw.trim();
+  if (t.length <= maxLen) return t;
+  let cut = t.slice(0, maxLen);
+  const partial = /<@[^>]*$/i.exec(cut);
+  if (partial && partial.index !== undefined) {
+    cut = cut.slice(0, partial.index).trimEnd();
+  }
+  return `${cut}…`;
+}
+
+/**
  * Replace `<@USERID|Name>` / `<@USERID>` using embedded labels and/or a resolved id→name map.
  * Optionally replaces bare `U…` Slack IDs when they appear as standalone tokens (export quirks).
  */
@@ -66,7 +86,7 @@ export function expandSlackUserMentionsForDisplay(
   return s;
 }
 
-/** Common Slack `:shortcode:` → Unicode for readable previews (subset). */
+/** Common Slack `:shortcode:` → Unicode for readable previews (subset + Slack-only names). */
 const SLACK_EMOJI_SHORTCODE: Record<string, string> = {
   white_check_mark: "✅",
   heavy_check_mark: "✔️",
@@ -163,14 +183,17 @@ const SLACK_EMOJI_SHORTCODE: Record<string, string> = {
   face_with_monocle: "🧐",
   nerd_face: "🤓",
   sunglasses: "😎",
+  /** Slack name; not always present in generic emoji shortcode packs. */
+  film_frames: "🎞️",
 };
 
 export function expandSlackEmojiShortcodes(s: string): string {
-  return s.replace(/:([a-z0-9_+-]+):/gi, (full, code: string) => {
+  const afterSlackSubset = s.replace(/:([a-z0-9_+-]+):/gi, (full, code: string) => {
     const key = code.toLowerCase();
     const u = SLACK_EMOJI_SHORTCODE[key];
     return u ?? full;
   });
+  return emojify(afterSlackSubset);
 }
 
 /**

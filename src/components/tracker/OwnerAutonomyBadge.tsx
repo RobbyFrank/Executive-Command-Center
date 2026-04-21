@@ -8,14 +8,21 @@ import { cn } from "@/lib/utils";
 
 interface OwnerAutonomyBadgeProps {
   person: Person;
-  /** Pixel-tier preset; `sm` is sized for the 24px avatar in the Roadmap owner column. */
-  size?: "sm" | "md";
+  /**
+   * `sm` — 24px Roadmap owner avatar. `md` — slightly larger. `roster` — 48px Team profile photo.
+   */
+  size?: "sm" | "md" | "roster";
   /**
    * Border colour fed by the parent surface (matches the row chrome) so the badge
    * cleanly separates from the avatar even on busy backgrounds.
    */
   ringClassName?: string;
   className?: string;
+  /**
+   * When true (default), pin to the bottom-right of a `relative` parent. When false, flow inline
+   * (e.g. inside an overlay trigger).
+   */
+  anchored?: boolean;
 }
 
 /**
@@ -34,14 +41,23 @@ export function OwnerAutonomyBadge({
   size = "sm",
   ringClassName = "ring-zinc-900",
   className,
+  anchored = true,
 }: OwnerAutonomyBadgeProps) {
   const founder = isFounderPerson(person);
   const level = clampAutonomy(person.autonomyScore);
 
+  const positionClass = anchored
+    ? size === "roster"
+      ? "absolute bottom-0 right-0 z-[5] translate-x-[1.5em] translate-y-px"
+      : "absolute -bottom-[3px] -right-[12px] z-[5]"
+    : "relative";
+
   const dims =
-    size === "sm"
-      ? "h-4 w-4 min-h-4 min-w-4 text-[10px]"
-      : "h-[18px] w-[18px] min-h-[18px] min-w-[18px] text-[11px]";
+    size === "roster"
+      ? "h-5 w-5 min-h-5 min-w-5 text-[10px]"
+      : size === "sm"
+        ? "h-4 w-4 min-h-4 min-w-4 text-[10px]"
+        : "h-[18px] w-[18px] min-h-[18px] min-w-[18px] text-[11px]";
 
   let palette: string;
   let glyph: string;
@@ -72,7 +88,8 @@ export function OwnerAutonomyBadge({
   return (
     <span
       className={cn(
-        "pointer-events-none absolute -bottom-[3px] -right-[12px] inline-flex items-center justify-center rounded-full font-bold tabular-nums leading-none shadow-sm ring-2",
+        "pointer-events-none inline-flex items-center justify-center rounded-full font-bold tabular-nums leading-none shadow-sm ring-2",
+        positionClass,
         dims,
         palette,
         ringClassName,

@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -9,7 +10,14 @@ import {
 } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import type { Company, EmploymentKind, Person, PersonWorkload } from "@/lib/types/tracker";
+import type {
+  Company,
+  CompanyWithGoals,
+  EmploymentKind,
+  Person,
+  PersonWorkload,
+  Project,
+} from "@/lib/types/tracker";
 import {
   buildTeamRosterGroups,
   AUTONOMY_GROUP_LABEL,
@@ -18,6 +26,7 @@ import {
   FOUNDER_GROUP_VISUAL,
   FOUNDERS_DEPARTMENT,
   isFounderPerson,
+  AUTONOMY_LEVEL_SELECT_LABEL,
   AUTONOMY_LEVEL_SELECT_OPTIONS,
   clampAutonomy,
   TEAM_ROSTER_WORKLOAD_HEADER,
@@ -27,6 +36,7 @@ import { DepartmentOptionIcon } from "@/lib/departmentIcons";
 import { WorkloadTierHeaderIcon } from "./WorkloadTierHeaderIcon";
 import { cn } from "@/lib/utils";
 import { InlineEditCell } from "./InlineEditCell";
+import { OwnerAutonomyBadge } from "./OwnerAutonomyBadge";
 import { TeamRosterRowMenu } from "./TeamRosterRowMenu";
 import { LocalImageField } from "./LocalImageField";
 import { CompanyAffiliationLogos } from "./CompanyAffiliationLogos";
@@ -38,15 +48,16 @@ import {
   Plus,
   FilterX,
   Search,
+  X,
   Building2,
   Briefcase,
   Clock,
   Crown,
+  Cake,
   Layers,
   UserX,
   Activity,
   Users,
-  RefreshCw,
   Lock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -84,12 +95,65 @@ import {
   type TeamRosterFilterState,
 } from "@/lib/team-roster-filter";
 import { normalizeTrackerSearchQuery as normalizeSearch } from "@/lib/tracker-search-filter";
-import { formatUsdWhole } from "@/lib/formatUsd";
+import { formatUsdCompactK, formatUsdWhole } from "@/lib/formatUsd";
 import { SlackImportDialog } from "./SlackImportDialog";
+import type { RefreshPersonResult } from "@/server/actions/slack";
 import { refreshPersonFromSlack } from "@/server/actions/slack";
 import { SLACK_REFRESH_NO_NEW_DATA_MESSAGE } from "@/lib/slack-refresh-messages";
-import { SetPersonPasswordDialog } from "./SetPersonPasswordDialog";
-import { setPersonPassword } from "@/server/actions/auth-admin";
+import { SendLoginSlackDialog } from "./SendLoginSlackDialog";
+import { LoginRowMenu } from "./LoginRowMenu";
+import {
+  calendarDateTodayLocal,
+  formatCalendarDateHint,
+  formatTeamTenureFromJoinYmd,
+  getUpcomingJoinAnniversaryWithin,
+} from "@/lib/relativeCalendarDate";
+import {
+  daysSinceJoined,
+  findPilotProjectsFor,
+  isNewHire,
+} from "@/lib/onboarding";
+import { NewHireRow } from "@/components/team/NewHireRow";
+import {
+  RecommendPilotDialog,
+  type SelectedBuddy,
+} from "@/components/team/RecommendPilotDialog";
+import { AssignmentMessageDialog } from "@/components/team/AssignmentMessageDialog";
+import {
+  RoadmapViewProvider,
+  useRoadmapView,
+} from "./roadmap-view-context";
+import { PageToolbar } from "./PageToolbar";
+import { EmptyState } from "./EmptyState";
+import { RoadmapStickyBelowToolbarGap } from "./RoadmapStickyBelowToolbarGap";
+import {
+  TeamRosterActionsMenu,
+  type SlackRefreshScope,
+} from "./TeamRosterActionsMenu";
+import { TeamRosterGroupingSelect } from "./TeamRosterGroupingSelect";
+import {
+  ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX,
+  ROADMAP_TOOLBAR_STICKY_FALLBACK_PX,
+} from "@/lib/tracker-sticky-layout";
+import { ROADMAP_ENTITY_TITLE_DISPLAY_CLASS } from "@/lib/tracker-roadmap-columns";
+
+/** Autonomy overlay menu row: level disc + full label. */
+function teamRosterAutonomyMenuOption(value: string) {
+  const level = clampAutonomy(parseInt(value, 10));
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      <span
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 ring-1 ring-zinc-700 text-[11px] font-semibold tabular-nums text-zinc-300"
+        aria-hidden
+      >
+        {level}
+      </span>
+      <span className="min-w-0 text-left text-sm text-zinc-200">
+        {AUTONOMY_LEVEL_SELECT_LABEL[level]}
+      </span>
+    </span>
+  );
+}
 
 function EmploymentMiniIcon({ label }: { label: string }) {
   if (label === "Outsourced") {
@@ -111,6 +175,25 @@ function RosterGroupMemberCount({ count }: { count: number }) {
 
 function sumEstimatedMonthlySalary(people: Person[]): number {
   return people.reduce((s, p) => s + (p.estimatedMonthlySalary ?? 0), 0);
+}
+
+/**
+ * True when at least one of the fields that a Slack refresh can populate is still empty.
+ * Founders don't have a `role`/`department`/`joinDate` we'd fill from Slack, so only
+ * their photo is considered here — everything else is "always complete" for founders.
+ * Mirrors the fields updated in `refreshPersonFromSlack` on the server.
+ */
+function personHasIncompleteSlackProfile(p: Person): boolean {
+  const photoEmpty = !p.profilePicturePath?.trim();
+  if (isFounderPerson(p)) return photoEmpty;
+  return (
+    photoEmpty ||
+    !p.name?.trim() ||
+    !p.email?.trim() ||
+    !p.joinDate?.trim() ||
+    !p.role?.trim() ||
+    !p.department?.trim()
+  );
 }
 
 /** Matches Team column: $0 / unset is treated as no salary entered. */
@@ -140,44 +223,42 @@ type PersonWithLoginFlag = Person & { loginPasswordSet?: boolean };
 
 interface TeamRosterManagerProps {
   initialPeople: Person[];
+  initialProjects: Project[];
+  hierarchy: CompanyWithGoals[];
   companies: Company[];
   workloads: PersonWorkload[];
   /** Founders can set/clear app login passwords for roster members (email + bcrypt hash in tracker JSON). */
   canManageLoginPasswords: boolean;
 }
 
-/** Same shell as {@link RoadmapStickyToolbar} (border, blur, shadow, padding). */
-const TEAM_PAGE_STICKY_TOOLBAR_CLASS =
-  "sticky top-0 z-30 min-w-0 max-w-full border-b border-zinc-800/70 " +
-  "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-3 " +
-  "shadow-[0_10px_28px_-10px_rgba(0,0,0,0.5)] motion-reduce:shadow-none";
-
-/** Shared chrome for **Import from Slack** and **Refresh all from Slack** (toolbar). */
+/** Shared chrome for **Import from Slack** and **Refresh all from Slack** — matches Roadmap secondary actions. */
 const TEAM_SLACK_ACTION_BUTTON_CLASS =
-  "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-zinc-600 bg-zinc-900/85 px-3 py-1.5 text-xs font-medium text-zinc-200 shadow-sm " +
-  "transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-100 " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 " +
+  "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-sm font-medium text-zinc-200 shadow-sm " +
+  "transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 " +
   "disabled:cursor-not-allowed disabled:opacity-40";
 
 const TEAM_SLACK_ACTION_ICON_CLASS = "h-4 w-4 shrink-0 opacity-90";
 
 /**
- * Sticky header row applied on `<tr>` so `<th>` cells stay in the column grid.
- * `top` is set dynamically via the `--team-roster-sticky-top` CSS variable on the scroll wrapper.
+ * Sticky header row applied on `<tr>` — solid chrome matching {@link GoalsColumnHeaders}
+ * (no backdrop-blur smear). `top` via `--team-roster-sticky-top` on the scroll wrapper.
  */
 const TEAM_ROSTER_HEADER_ROW_STICKY =
-  "sticky z-20 top-[var(--team-roster-sticky-top,0px)] border-b border-zinc-800 bg-zinc-950/95 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.45)] backdrop-blur-md supports-[backdrop-filter]:bg-zinc-950/80 [&_th]:bg-zinc-950/95";
+  "sticky z-20 top-[var(--team-roster-sticky-top,0px)] border-b border-zinc-700/70 bg-[var(--surface-toolbar)] shadow-[0_1px_0_rgba(0,0,0,0.2)] [&_th]:bg-[var(--surface-toolbar)]";
 
-export function TeamRosterManager({
+function TeamRosterManagerInner({
   initialPeople,
+  initialProjects,
+  hierarchy,
   companies,
   workloads,
   canManageLoginPasswords,
 }: TeamRosterManagerProps) {
   const router = useRouter();
-  const [passwordDialog, setPasswordDialog] = useState<{
+  const [loginDialog, setLoginDialog] = useState<{
     person: PersonWithLoginFlag;
-    mode: "set" | "change";
+    mode: "create" | "resend";
   } | null>(null);
   /** After adding a person, name cell opens in edit mode so the user can type immediately. */
   const [newPersonNameFocusId, setNewPersonNameFocusId] = useState<
@@ -192,21 +273,34 @@ export function TeamRosterManager({
   const [hideFounders, setHideFounders] = useState(true);
   const [slackImportOpen, setSlackImportOpen] = useState(false);
   const [slackBulkRefreshRunning, setSlackBulkRefreshRunning] = useState(false);
+  /** Local merges from Slack refresh so the table updates before `router.refresh()` completes. */
+  const [peopleOverrides, setPeopleOverrides] = useState<Map<string, Person>>(
+    () => new Map()
+  );
+  /** Row being synced from Slack (bulk or row menu). */
+  const [slackSyncingPersonId, setSlackSyncingPersonId] = useState<string | null>(
+    null
+  );
+  /** Brief highlight after a successful Slack-driven update. */
+  const [slackFlashById, setSlackFlashById] = useState<Record<string, boolean>>(
+    {}
+  );
+  const slackRosterRowRefMap = useRef(new Map<string, HTMLTableRowElement>());
+  const [recommendPerson, setRecommendPerson] = useState<Person | null>(null);
+  const [assignmentFlow, setAssignmentFlow] = useState<{
+    newHire: Person;
+    projectId: string;
+    assignmentKind: "owner" | "assignee" | "new_project";
+    dmContextSummary: string;
+    buddies: SelectedBuddy[];
+  } | null>(null);
 
-  const teamStickyToolbarRef = useRef<HTMLDivElement>(null);
-  const [teamStickyToolbarPx, setTeamStickyToolbarPx] = useState(0);
+  const { stickyTopPx } = useRoadmapView();
+  /** Same rule as {@link RoadmapStickyBelowToolbarGap} — avoids wrong offsets before toolbar measures. */
+  const toolbarOffsetPx =
+    stickyTopPx > 0 ? stickyTopPx : ROADMAP_TOOLBAR_STICKY_FALLBACK_PX;
   const teamColumnHeaderRef = useRef<HTMLTableRowElement>(null);
   const [teamColumnHeaderPx, setTeamColumnHeaderPx] = useState(40);
-
-  useLayoutEffect(() => {
-    const el = teamStickyToolbarRef.current;
-    if (!el) return;
-    const sync = () => setTeamStickyToolbarPx(el.getBoundingClientRect().height);
-    sync();
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useLayoutEffect(() => {
     const el = teamColumnHeaderRef.current;
@@ -218,24 +312,79 @@ export function TeamRosterManager({
     return () => ro.disconnect();
   }, []);
 
+  const mergedPeople = useMemo(() => {
+    return initialPeople.map((p) => peopleOverrides.get(p.id) ?? p);
+  }, [initialPeople, peopleOverrides]);
+
+  /** Clears local Slack merges when `initialPeople` updates (e.g. after `router.refresh()`). */
+  useEffect(() => {
+    setPeopleOverrides(new Map());
+  }, [initialPeople]);
+
+  useLayoutEffect(() => {
+    if (!slackSyncingPersonId) return;
+    const el = slackRosterRowRefMap.current.get(slackSyncingPersonId);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [slackSyncingPersonId]);
+
+  const applySlackRefreshToLocalRoster = useCallback(
+    (personId: string, r: RefreshPersonResult) => {
+      if (!r.ok) return;
+      setPeopleOverrides((prev) => new Map(prev).set(personId, r.person));
+      setSlackFlashById((s) => ({ ...s, [personId]: true }));
+      window.setTimeout(() => {
+        setSlackFlashById((s) => {
+          const next = { ...s };
+          delete next[personId];
+          return next;
+        });
+      }, 2200);
+    },
+    []
+  );
+
+  const onSkipNewHire = useCallback(async (person: Person) => {
+    const updated = await updatePerson(person.id, { skippedFromNewHires: true });
+    setPeopleOverrides((prev) => new Map(prev).set(person.id, updated));
+    toast.success(`Skipped ${person.name}.`);
+  }, []);
+
+  const onSlackMenuRefreshStart = useCallback((personId: string) => {
+    setSlackSyncingPersonId(personId);
+  }, []);
+
+  const onSlackMenuRefreshResult = useCallback(
+    (personId: string, r: RefreshPersonResult) => {
+      setSlackSyncingPersonId(null);
+      applySlackRefreshToLocalRoster(personId, r);
+    },
+    [applySlackRefreshToLocalRoster]
+  );
+
   const existingSlackIds = useMemo(() => {
     const s = new Set<string>();
-    for (const p of initialPeople) {
+    for (const p of mergedPeople) {
       const h = p.slackHandle?.trim().toUpperCase();
       if (h) s.add(h);
     }
     return s;
-  }, [initialPeople]);
+  }, [mergedPeople]);
 
   const peopleWithSlackHandle = useMemo(
-    () => initialPeople.filter((p) => (p.slackHandle ?? "").trim() !== ""),
-    [initialPeople]
+    () => mergedPeople.filter((p) => (p.slackHandle ?? "").trim() !== ""),
+    [mergedPeople]
+  );
+
+  /** Subset of Slack-linked roster rows still missing at least one Slack-sourced field. */
+  const peopleWithIncompleteSlackProfile = useMemo(
+    () => peopleWithSlackHandle.filter(personHasIncompleteSlackProfile),
+    [peopleWithSlackHandle]
   );
 
   const peopleForRosterView = useMemo(() => {
-    if (!hideFounders) return initialPeople;
-    return initialPeople.filter((p) => !isFounderPerson(p));
-  }, [initialPeople, hideFounders]);
+    if (!hideFounders) return mergedPeople;
+    return mergedPeople.filter((p) => !isFounderPerson(p));
+  }, [mergedPeople, hideFounders]);
 
   const workloadByPersonId = useMemo(() => {
     const m = new Map<string, PersonWorkload>();
@@ -304,6 +453,27 @@ export function TeamRosterManager({
     [peopleForRosterView, workloadByPersonId, filterState]
   );
 
+  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
+
+  const newHiresSorted = useMemo(() => {
+    const list = peopleForRosterView.filter(
+      (p) => isNewHire(p, todayYmd) && !p.skippedFromNewHires
+    );
+    return [...list].sort((a, b) => {
+      const aPilots = findPilotProjectsFor(a, initialProjects).length;
+      const bPilots = findPilotProjectsFor(b, initialProjects).length;
+      const aNo = aPilots === 0 ? 0 : 1;
+      const bNo = bPilots === 0 ? 0 : 1;
+      if (aNo !== bNo) return aNo - bNo;
+      const da = daysSinceJoined(a, todayYmd);
+      const db = daysSinceJoined(b, todayYmd);
+      if (da === null && db === null) return 0;
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return db - da;
+    });
+  }, [peopleForRosterView, initialProjects, todayYmd]);
+
   const filterActive = useMemo(
     () => isTeamRosterFilterActive(filterState),
     [filterState]
@@ -312,8 +482,19 @@ export function TeamRosterManager({
   const searchActive =
     normalizeSearch(filterState.searchQuery).length > 0;
 
+  const teamActiveFilterDimensionCount = useMemo(() => {
+    let n = 0;
+    if (searchActive) n++;
+    if (filterState.departmentValues.length > 0) n++;
+    if (filterState.employmentKinds.length > 0) n++;
+    if (filterState.workloadIds.length > 0) n++;
+    if (filterState.companyIds.length > 0) n++;
+    if (filterState.missingDetailIds.length > 0) n++;
+    return n;
+  }, [searchActive, filterState]);
+
   const departmentFacetOptions = useMemo(() => {
-    const keys = teamRosterDepartmentFilterOptions(initialPeople);
+    const keys = teamRosterDepartmentFilterOptions(mergedPeople);
     return keys.map((id) => ({
       id,
       label: teamDepartmentFilterLabel(id),
@@ -332,7 +513,7 @@ export function TeamRosterManager({
             ? "text-zinc-100"
             : undefined,
     }));
-  }, [initialPeople, peopleForDeptFacet]);
+  }, [mergedPeople, peopleForDeptFacet]);
 
   const employmentFacetOptions = useMemo(
     () =>
@@ -401,15 +582,15 @@ export function TeamRosterManager({
 
   const departmentOptionsByPersonId = useMemo(() => {
     const m = new Map<string, { value: string; label: string }[]>();
-    for (const p of initialPeople) {
+    for (const p of mergedPeople) {
       if (isFounderPerson(p)) continue;
       m.set(
         p.id,
-        departmentSelectOptions(initialPeople, p.department ?? "", p.id)
+        departmentSelectOptions(mergedPeople, p.department ?? "", p.id)
       );
     }
     return m;
-  }, [initialPeople]);
+  }, [mergedPeople]);
 
   const maxWorkloadAcrossTeam = useMemo(
     () =>
@@ -421,71 +602,94 @@ export function TeamRosterManager({
     setFilterState(emptyTeamRosterFilterState());
   }, []);
 
-  const onRefreshAllFromSlack = useCallback(async () => {
-    if (peopleWithSlackHandle.length === 0 || slackBulkRefreshRunning) return;
-    setSlackBulkRefreshRunning(true);
-    const total = peopleWithSlackHandle.length;
-    const loadId = toast.loading(`Syncing from Slack (0 / ${total})`, {
-      description: "Starting…",
-    });
-    let updated = 0;
-    let unchanged = 0;
-    let failed = 0;
-    const failures: { name: string; error: string }[] = [];
-    const avatarWarnings: string[] = [];
+  const onRefreshFromSlack = useCallback(
+    async (scope: SlackRefreshScope) => {
+      if (slackBulkRefreshRunning) return;
+      const targets =
+        scope === "incomplete"
+          ? peopleWithIncompleteSlackProfile
+          : peopleWithSlackHandle;
+      if (targets.length === 0) return;
 
-    try {
-      for (let i = 0; i < peopleWithSlackHandle.length; i++) {
-        const p = peopleWithSlackHandle[i];
-        toast.loading(`Syncing from Slack (${i + 1} / ${total})`, {
-          id: loadId,
-          description: p.name,
-        });
-        const r = await refreshPersonFromSlack(p.id, p.slackHandle ?? "");
-        if (r.ok) {
-          updated += 1;
-          if (r.avatarWarning) {
-            avatarWarnings.push(`${p.name}: ${r.avatarWarning}`);
+      setSlackBulkRefreshRunning(true);
+      const total = targets.length;
+      const scopeLabel =
+        scope === "incomplete" ? "incomplete profiles" : "everyone";
+      const loadId = toast.loading(
+        `Syncing from Slack (0 / ${total}) — ${scopeLabel}`,
+        { description: "Starting…" }
+      );
+      let updated = 0;
+      let unchanged = 0;
+      let failed = 0;
+      const failures: { name: string; error: string }[] = [];
+      const avatarWarnings: string[] = [];
+
+      try {
+        for (let i = 0; i < targets.length; i++) {
+          const p = targets[i];
+          setSlackSyncingPersonId(p.id);
+          toast.loading(
+            `Syncing from Slack (${i + 1} / ${total}) — ${scopeLabel}`,
+            { id: loadId, description: p.name }
+          );
+          const r = await refreshPersonFromSlack(p.id, p.slackHandle ?? "");
+          setSlackSyncingPersonId(null);
+          if (r.ok) {
+            updated += 1;
+            applySlackRefreshToLocalRoster(p.id, r);
+            if (r.avatarWarning) {
+              avatarWarnings.push(`${p.name}: ${r.avatarWarning}`);
+            }
+          } else if (r.error === SLACK_REFRESH_NO_NEW_DATA_MESSAGE) {
+            unchanged += 1;
+          } else {
+            failed += 1;
+            failures.push({ name: p.name, error: r.error });
           }
-        } else if (r.error === SLACK_REFRESH_NO_NEW_DATA_MESSAGE) {
-          unchanged += 1;
-        } else {
-          failed += 1;
-          failures.push({ name: p.name, error: r.error });
         }
-      }
 
-      toast.dismiss(loadId);
-      router.refresh();
+        toast.dismiss(loadId);
+        await router.refresh();
+        setPeopleOverrides(new Map());
 
-      const summaryParts = [
-        updated > 0 ? `${updated} updated` : null,
-        unchanged > 0 ? `${unchanged} already up to date` : null,
-        failed > 0 ? `${failed} failed` : null,
-      ].filter(Boolean);
+        const summaryParts = [
+          updated > 0 ? `${updated} updated` : null,
+          unchanged > 0 ? `${unchanged} already up to date` : null,
+          failed > 0 ? `${failed} failed` : null,
+        ].filter(Boolean);
 
-      if (failed > 0) {
-        toast.warning(summaryParts.join(" · ") || "Some refreshes failed", {
-          description: failures
-            .slice(0, 8)
-            .map((f) => `${f.name}: ${f.error}`)
-            .join(" · "),
-        });
-      } else if (summaryParts.length > 0) {
-        toast.success(summaryParts.join(" · "));
+        if (failed > 0) {
+          toast.warning(summaryParts.join(" · ") || "Some refreshes failed", {
+            description: failures
+              .slice(0, 8)
+              .map((f) => `${f.name}: ${f.error}`)
+              .join(" · "),
+          });
+        } else if (summaryParts.length > 0) {
+          toast.success(summaryParts.join(" · "));
+        }
+        if (avatarWarnings.length > 0) {
+          toast.warning("Some profile photos could not be saved", {
+            description: avatarWarnings.slice(0, 4).join(" · "),
+          });
+        }
+      } catch (e) {
+        toast.dismiss(loadId);
+        toast.error(e instanceof Error ? e.message : "Refresh failed");
+      } finally {
+        setSlackSyncingPersonId(null);
+        setSlackBulkRefreshRunning(false);
       }
-      if (avatarWarnings.length > 0) {
-        toast.warning("Some profile photos could not be saved", {
-          description: avatarWarnings.slice(0, 4).join(" · "),
-        });
-      }
-    } catch (e) {
-      toast.dismiss(loadId);
-      toast.error(e instanceof Error ? e.message : "Refresh failed");
-    } finally {
-      setSlackBulkRefreshRunning(false);
-    }
-  }, [peopleWithSlackHandle, slackBulkRefreshRunning, router]);
+    },
+    [
+      peopleWithSlackHandle,
+      peopleWithIncompleteSlackProfile,
+      slackBulkRefreshRunning,
+      router,
+      applySlackRefreshToLocalRoster,
+    ]
+  );
 
   if (initialPeople.length === 0) {
     return (
@@ -495,58 +699,51 @@ export function TeamRosterManager({
           onClose={() => setSlackImportOpen(false)}
           existingSlackIds={existingSlackIds}
         />
-        <div className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
-          <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-            <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
-              Team
-            </h1>
-          </div>
-        </div>
+        <PageToolbar title="Team" />
         <div className="min-w-0 max-w-full px-6 pb-6">
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
-          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
-            <Users className="h-7 w-7 text-zinc-500" />
-          </div>
-          <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No team members yet</h2>
-          <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
-            Your team roster is empty. Add your first team member to start tracking roles, departments, autonomy levels, and workloads.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                createPerson({
-                  name: "New team member",
-                  role: "",
-                  department: "",
-                  autonomyScore: 0,
-                  slackHandle: "",
-                  profilePicturePath: "",
-                  joinDate: "",
-                  email: "",
-                  phone: "",
-                  estimatedMonthlySalary: 0,
-                  employment: "inhouse_salaried",
-                })
-              }
-              className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
-            >
-              <Plus className="h-4 w-4" />
-              Add your first team member
-            </button>
-            <button
-              type="button"
-              onClick={() => setSlackImportOpen(true)}
-              className={cn(
-                TEAM_SLACK_ACTION_BUTTON_CLASS,
-                "min-h-10 px-4 py-2 text-sm cursor-pointer"
-              )}
-            >
-              <SlackLogo alt="" className={TEAM_SLACK_ACTION_ICON_CLASS} />
-              Import from Slack
-            </button>
-          </div>
-        </div>
+          <RoadmapStickyBelowToolbarGap />
+          <EmptyState
+            icon={Users}
+            title="No team members yet"
+            description="Your team roster is empty. Add your first team member to start tracking roles, departments, autonomy levels, and workloads."
+            descriptionClassName="max-w-sm"
+            actions={
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    createPerson({
+                      name: "New team member",
+                      role: "",
+                      department: "",
+                      autonomyScore: 0,
+                      slackHandle: "",
+                      profilePicturePath: "",
+                      joinDate: "",
+                      welcomeSlackUrl: "",
+                      welcomeSlackChannelId: "",
+                      email: "",
+                      phone: "",
+                      estimatedMonthlySalary: 0,
+                      employment: "inhouse_salaried",
+                    })
+                  }
+                  className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add your first team member
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSlackImportOpen(true)}
+                  className={cn(TEAM_SLACK_ACTION_BUTTON_CLASS, "cursor-pointer")}
+                >
+                  <SlackLogo alt="" className={TEAM_SLACK_ACTION_ICON_CLASS} />
+                  Import from Slack
+                </button>
+              </>
+            }
+          />
         </div>
       </div>
     );
@@ -554,33 +751,67 @@ export function TeamRosterManager({
 
   return (
     <>
+      {recommendPerson ? (
+        <RecommendPilotDialog
+          open
+          onClose={() => setRecommendPerson(null)}
+          newHire={recommendPerson}
+          people={mergedPeople}
+          projects={initialProjects}
+          hierarchy={hierarchy}
+          onAssignedExisting={(ctx) => {
+            setAssignmentFlow({
+              newHire: ctx.newHire,
+              projectId: ctx.projectId,
+              assignmentKind: ctx.assignmentKind,
+              dmContextSummary: ctx.recommendation.dmContextSummary,
+              buddies: ctx.buddies,
+            });
+            setRecommendPerson(null);
+          }}
+          onNewProjectCreated={(ctx) => {
+            setAssignmentFlow({
+              newHire: ctx.newHire,
+              projectId: ctx.projectId,
+              assignmentKind: "new_project",
+              dmContextSummary: ctx.recommendation.dmContextSummary,
+              buddies: ctx.buddies,
+            });
+            setRecommendPerson(null);
+          }}
+        />
+      ) : null}
+      {assignmentFlow ? (
+        <AssignmentMessageDialog
+          open
+          onClose={() => setAssignmentFlow(null)}
+          newHire={assignmentFlow.newHire}
+          projectId={assignmentFlow.projectId}
+          assignmentKind={assignmentFlow.assignmentKind}
+          dmContextSummary={assignmentFlow.dmContextSummary}
+          people={mergedPeople}
+          projects={initialProjects}
+          hierarchy={hierarchy}
+          buddies={assignmentFlow.buddies}
+        />
+      ) : null}
       <SlackImportDialog
         open={slackImportOpen}
         onClose={() => setSlackImportOpen(false)}
         existingSlackIds={existingSlackIds}
       />
-      {passwordDialog ? (
-        <SetPersonPasswordDialog
+      {loginDialog ? (
+        <SendLoginSlackDialog
           open
-          person={passwordDialog.person}
-          mode={passwordDialog.mode}
-          onClose={() => setPasswordDialog(null)}
+          person={loginDialog.person}
+          people={mergedPeople}
+          mode={loginDialog.mode}
+          onClose={() => setLoginDialog(null)}
         />
       ) : null}
       <div className="min-w-0 min-h-0 max-w-full">
-      <div ref={teamStickyToolbarRef} className={TEAM_PAGE_STICKY_TOOLBAR_CLASS}>
-      <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-        <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
-          Team
-        </h1>
-        <div
-          className={cn(
-            "relative flex-1 min-w-0 transition-[max-width] duration-200 ease-out",
-            filterState.searchQuery.trim() !== ""
-              ? "max-w-[19.2rem]"
-              : "max-w-[10rem] focus-within:max-w-[19.2rem]"
-          )}
-        >
+      <PageToolbar title="Team">
+        <div className="relative flex-1 min-w-0 max-w-[10rem] transition-[max-width] duration-200 ease-out motion-reduce:transition-none focus-within:max-w-[19.2rem]">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none"
             aria-hidden
@@ -592,54 +823,76 @@ export function TeamRosterManager({
               setFilterState((s) => ({ ...s, searchQuery: e.target.value }))
             }
             placeholder="Search name, role, department, email, phone…"
-            className="w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 pr-3 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            className={cn(
+              "w-full min-w-0 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+              "[&::-webkit-search-cancel-button]:appearance-none",
+              searchActive ? "pr-8" : "pr-3"
+            )}
             aria-label="Search team"
             autoComplete="off"
           />
+          {searchActive ? (
+            <button
+              type="button"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+              aria-label="Clear search"
+              onClick={() =>
+                setFilterState((s) => ({ ...s, searchQuery: "" }))
+              }
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          ) : null}
         </div>
 
-        <TeamFacetMultiSelect
-          ariaLabel="Filter by department"
-          emptySummary="All departments"
-          summaryIcon={<Layers className="h-3.5 w-3.5" aria-hidden />}
-          options={departmentFacetOptions}
-          selectedIds={filterState.departmentValues}
-          onChange={(departmentValues) =>
-            setFilterState((s) => ({ ...s, departmentValues }))
-          }
-          enableSearch
-          searchPlaceholder="Search departments…"
-        />
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[15rem]">
+          <TeamFacetMultiSelect
+            ariaLabel="Filter by department"
+            emptySummary="All departments"
+            summaryIcon={<Layers className="h-3.5 w-3.5" aria-hidden />}
+            options={departmentFacetOptions}
+            selectedIds={filterState.departmentValues}
+            onChange={(departmentValues) =>
+              setFilterState((s) => ({ ...s, departmentValues }))
+            }
+            enableSearch
+            searchPlaceholder="Search departments…"
+          />
+        </div>
 
-        <TeamFacetMultiSelect
-          ariaLabel="Filter by employment type"
-          emptySummary="All types"
-          summaryIcon={<Building2 className="h-3.5 w-3.5" aria-hidden />}
-          options={employmentFacetOptions}
-          selectedIds={filterState.employmentKinds}
-          onChange={(ids) =>
-            setFilterState((s) => ({
-              ...s,
-              employmentKinds: ids as EmploymentKind[],
-            }))
-          }
-        />
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[11rem]">
+          <TeamFacetMultiSelect
+            ariaLabel="Filter by employment type"
+            emptySummary="All types"
+            summaryIcon={<Building2 className="h-3.5 w-3.5" aria-hidden />}
+            options={employmentFacetOptions}
+            selectedIds={filterState.employmentKinds}
+            onChange={(ids) =>
+              setFilterState((s) => ({
+                ...s,
+                employmentKinds: ids as EmploymentKind[],
+              }))
+            }
+          />
+        </div>
 
-        <TeamFacetMultiSelect
-          ariaLabel="Filter by workload"
-          emptySummary="All workloads"
-          summaryIcon={<Activity className="h-3.5 w-3.5" aria-hidden />}
-          options={workloadFacetOptions}
-          selectedIds={filterState.workloadIds}
-          onChange={(workloadIds) =>
-            setFilterState((s) => ({
-              ...s,
-              workloadIds: workloadIds as TeamRosterFilterState["workloadIds"],
-            }))
-          }
-        />
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[12rem]">
+          <TeamFacetMultiSelect
+            ariaLabel="Filter by workload"
+            emptySummary="All workloads"
+            summaryIcon={<Activity className="h-3.5 w-3.5" aria-hidden />}
+            options={workloadFacetOptions}
+            selectedIds={filterState.workloadIds}
+            onChange={(workloadIds) =>
+              setFilterState((s) => ({
+                ...s,
+                workloadIds: workloadIds as TeamRosterFilterState["workloadIds"],
+              }))
+            }
+          />
+        </div>
 
-        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[18rem]">
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[15rem]">
           <CompanyFilterMultiSelect
             companies={companiesForFilter}
             selectedIds={filterState.companyIds}
@@ -650,105 +903,99 @@ export function TeamRosterManager({
           />
         </div>
 
-        <TeamFacetMultiSelect
-          ariaLabel="Filter by missing profile fields"
-          emptySummary="All profiles"
-          summaryIcon={<UserX className="h-3.5 w-3.5" aria-hidden />}
-          options={missingFacetOptions}
-          selectedIds={filterState.missingDetailIds}
-          onChange={(missingDetailIds) =>
-            setFilterState((s) => ({
-              ...s,
-              missingDetailIds:
-                missingDetailIds as TeamRosterFilterState["missingDetailIds"],
-            }))
-          }
-          enableSearch
-          searchPlaceholder="Search missing fields…"
-        />
+        <div className="min-w-0 flex-1 sm:flex-none sm:max-w-[14rem]">
+          <TeamFacetMultiSelect
+            ariaLabel="Filter by missing profile fields"
+            emptySummary="All profiles"
+            summaryIcon={<UserX className="h-3.5 w-3.5" aria-hidden />}
+            options={missingFacetOptions}
+            selectedIds={filterState.missingDetailIds}
+            onChange={(missingDetailIds) =>
+              setFilterState((s) => ({
+                ...s,
+                missingDetailIds:
+                  missingDetailIds as TeamRosterFilterState["missingDetailIds"],
+              }))
+            }
+            enableSearch
+            searchPlaceholder="Search missing fields…"
+          />
+        </div>
+
+        {filterActive ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <span
+              className="rounded-md border border-zinc-700/90 bg-zinc-900/70 px-2 py-1 text-[11px] font-medium tabular-nums text-zinc-400"
+              aria-live="polite"
+            >
+              {teamActiveFilterDimensionCount} filter
+              {teamActiveFilterDimensionCount !== 1 ? "s" : ""} active
+            </span>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              title="Clear search and all team filters"
+            >
+              <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Reset filters
+            </button>
+          </div>
+        ) : null}
 
         <label
           htmlFor="team-roster-hide-founders"
-          className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 text-xs text-zinc-400 hover:text-zinc-300"
+          className="inline-flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-within:ring-2 focus-within:ring-emerald-500/35 focus-within:ring-offset-2 focus-within:ring-offset-zinc-950"
         >
           <input
             id="team-roster-hide-founders"
             type="checkbox"
             checked={hideFounders}
             onChange={(e) => setHideFounders(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 text-amber-500 focus:ring-2 focus:ring-zinc-500/50 focus:ring-offset-0"
+            className="h-3.5 w-3.5 shrink-0 rounded border-zinc-600 bg-zinc-900 text-amber-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:ring-offset-0"
           />
           <span>Hide founders</span>
         </label>
 
-        {filterActive ? (
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900/80 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors shrink-0"
-            title="Clear search and all team filters"
-          >
-            <FilterX className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            Reset filters
-          </button>
-        ) : null}
-
-        <div className="inline-flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setSlackImportOpen(true)}
-            className={TEAM_SLACK_ACTION_BUTTON_CLASS}
-          >
-            <SlackLogo alt="" className={TEAM_SLACK_ACTION_ICON_CLASS} />
-            Import from Slack
-          </button>
-          <button
-            type="button"
-            onClick={() => void onRefreshAllFromSlack()}
-            disabled={
-              slackBulkRefreshRunning || peopleWithSlackHandle.length === 0
-            }
-            title={
-              peopleWithSlackHandle.length === 0
-                ? "Add Slack user IDs to team members first"
-                : "Update name, email, join date, and photos from Slack for everyone with a Slack ID"
-            }
-            className={TEAM_SLACK_ACTION_BUTTON_CLASS}
-          >
-            <RefreshCw
-              className={cn(
-                TEAM_SLACK_ACTION_ICON_CLASS,
-                slackBulkRefreshRunning && "animate-spin"
-              )}
-              aria-hidden
-            />
-            Refresh all from Slack
-          </button>
-        </div>
-
-        <div className="ml-auto shrink-0">
-          <select
-            id="team-roster-sort-mode"
+        <div className="ml-auto flex min-w-0 shrink-0 items-center justify-end gap-2">
+          <TeamRosterActionsMenu
+            onImportFromSlack={() => setSlackImportOpen(true)}
+            onRefreshFromSlack={(scope) => void onRefreshFromSlack(scope)}
+            slackTargetCount={peopleWithSlackHandle.length}
+            incompleteTargetCount={peopleWithIncompleteSlackProfile.length}
+            slackBulkRefreshRunning={slackBulkRefreshRunning}
+          />
+          <TeamRosterGroupingSelect
             value={rosterSortMode}
-            onChange={(e) =>
-              setRosterSortMode(e.target.value as TeamRosterSortMode)
-            }
-            aria-label="Group team by autonomy, department, or workload"
-            className={cn(
-              "cursor-pointer rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-1.5 text-xs font-medium text-zinc-200",
-              "transition-colors hover:border-zinc-600 hover:text-zinc-100",
-              "focus:outline-none focus:ring-2 focus:ring-zinc-500/50"
-            )}
-          >
-            <option value="autonomy">By Autonomy</option>
-            <option value="department">By Department</option>
-            <option value="workload">By workload</option>
-          </select>
+            onChange={setRosterSortMode}
+            disabled={slackBulkRefreshRunning}
+          />
         </div>
-      </div>
-      </div>
+      </PageToolbar>
 
       <div className="min-w-0 max-w-full space-y-4 px-6 pb-6">
+      <RoadmapStickyBelowToolbarGap />
+      {newHiresSorted.length > 0 ? (
+        <section className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-4 space-y-3">
+          <h2 className="text-base font-semibold text-zinc-200">New hires</h2>
+          <p className="text-xs text-zinc-500">
+            First 30 days on the team. Sorted with no pilot project first, then
+            by days since join date.
+          </p>
+          <div className="space-y-2">
+            {newHiresSorted.map((p) => (
+              <NewHireRow
+                key={p.id}
+                person={p}
+                projects={initialProjects}
+                todayYmd={todayYmd}
+                onRecommendPilot={() => setRecommendPerson(p)}
+                onSkip={() => onSkipNewHire(p)}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
       {filterActive ? (
         <p className="text-xs text-zinc-500">
           Showing{" "}
@@ -768,11 +1015,11 @@ export function TeamRosterManager({
       ) : null}
 
       <div
-        className="bg-zinc-900/40 rounded-lg border border-zinc-800 w-max min-w-full"
+        className="w-max min-w-full rounded-lg border border-zinc-800/55 bg-zinc-900/45 shadow-sm ring-1 ring-black/25"
         style={
           {
-            "--team-roster-sticky-top": `${teamStickyToolbarPx}px`,
-            "--team-roster-group-top": `${teamStickyToolbarPx + teamColumnHeaderPx}px`,
+            "--team-roster-sticky-top": `${toolbarOffsetPx + ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX}px`,
+            "--team-roster-group-top": `${toolbarOffsetPx + ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX + teamColumnHeaderPx}px`,
           } as CSSProperties
         }
       >
@@ -791,36 +1038,39 @@ export function TeamRosterManager({
           </p>
         ) : null}
         {!(filterActive && filteredPeople.length === 0) ? (
-        <table className="w-full text-sm min-w-[1500px]">
+        <table className="w-full text-sm min-w-[1210px]">
           <thead>
             <tr
               ref={teamColumnHeaderRef}
-              className={cn("text-xs text-zinc-500", TEAM_ROSTER_HEADER_ROW_STICKY)}
+              className={cn(
+                "text-[11px] font-medium uppercase tracking-wider text-zinc-400",
+                TEAM_ROSTER_HEADER_ROW_STICKY
+              )}
             >
               <th
-                className="text-left px-3 py-3 font-medium min-w-[220px]"
+                className="text-left px-3 py-3 font-medium min-w-[240px]"
                 scope="col"
               >
                 Member
               </th>
-              <th className="text-left px-3 py-3 font-medium">Role</th>
               <th className="text-left px-3 py-3 font-medium min-w-[120px]">
                 Department
               </th>
               <th className="text-left px-3 py-3 font-medium whitespace-nowrap">
                 Team
               </th>
-              <th className="text-left px-3 py-3 font-medium whitespace-nowrap">
-                Join date
+              <th
+                className="text-left px-3 py-3 font-medium whitespace-nowrap"
+                scope="col"
+                title="Join date as compact tenure; cake badge when a work anniversary (1y, 2y, …) is within 30 days"
+              >
+                Tenure
               </th>
               <th
-                className="text-right px-3 py-3 font-medium whitespace-nowrap min-w-[7.5rem]"
+                className="text-left px-3 py-3 font-medium whitespace-nowrap min-w-[7.5rem]"
                 scope="col"
               >
                 Est. monthly ($)
-              </th>
-              <th className="text-left px-3 py-3 font-medium min-w-[13rem]">
-                Autonomy
               </th>
               <th className="text-left px-3 py-3 font-medium min-w-[220px]">
                 Workload
@@ -889,10 +1139,10 @@ export function TeamRosterManager({
                 <tr
                   className={cn(
                     visual.header,
-                    "sticky z-10 top-[var(--team-roster-group-top,0px)] bg-zinc-900 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.35)]"
+                    "sticky z-10 top-[var(--team-roster-group-top,0px)] bg-[var(--surface-group-header)] shadow-[0_2px_4px_-2px_rgba(0,0,0,0.35)]"
                   )}
                 >
-                  <td colSpan={14} className="px-3 py-2.5">
+                  <td colSpan={12} className="px-3 py-2.5">
                     <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {group.kind === "department" ? (
@@ -958,38 +1208,106 @@ export function TeamRosterManager({
                   return (
                   <tr
                     key={person.id}
+                    ref={(el) => {
+                      if (el) {
+                        slackRosterRowRefMap.current.set(person.id, el);
+                      } else {
+                        slackRosterRowRefMap.current.delete(person.id);
+                      }
+                    }}
                     className={cn(
                       visual.dataRow,
-                      "border-b border-zinc-800/60 group align-middle"
+                      "border-b border-zinc-800/60 group align-middle",
+                      slackSyncingPersonId === person.id &&
+                        "bg-amber-500/[0.09] shadow-[inset_0_0_0_1px_rgba(245,158,11,0.4)]",
+                      slackFlashById[person.id] &&
+                        "bg-emerald-500/[0.12] transition-colors duration-500"
                     )}
                   >
                     <td className="px-3 py-2 align-middle">
-                      <div className="flex items-center gap-3 min-w-0 max-w-[280px]">
-                        <div className="shrink-0">
+                      <div className="flex items-center gap-3 min-w-0 max-w-[320px]">
+                        <div className="relative shrink-0">
                           <LocalImageField
                             variant="person"
                             entityId={person.id}
                             path={person.profilePicturePath ?? ""}
                           />
+                          {isFounderPerson(person) ? (
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[5] flex justify-end items-end pb-0.5">
+                              <div className="translate-x-[1.5em]">
+                                <OwnerAutonomyBadge
+                                  person={person}
+                                  size="roster"
+                                  anchored={false}
+                                  ringClassName="ring-zinc-950"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[6] flex justify-end items-end pb-0.5">
+                              <div
+                                className={cn(
+                                  "pointer-events-auto w-max translate-x-[1.5em]",
+                                  "[&_button]:justify-end [&_button]:pl-0.5 [&_button]:pr-5",
+                                  "[&_button]:cursor-pointer [&_button]:rounded-full [&_button]:transition-[box-shadow,filter,transform]",
+                                  "[&_button:hover]:shadow-[0_0_0_2px_rgba(52,211,153,0.45)]",
+                                  "[&_button:hover]:brightness-110",
+                                  "[&_button:focus-visible]:shadow-[0_0_0_2px_rgba(52,211,153,0.55)]",
+                                  "[&_button:focus-visible]:outline-none",
+                                )}
+                              >
+                                <InlineEditCell
+                                  type="select"
+                                  selectPresentation="always"
+                                  options={AUTONOMY_LEVEL_SELECT_OPTIONS}
+                                  value={String(
+                                    clampAutonomy(person.autonomyScore)
+                                  )}
+                                  onSave={(v) =>
+                                    updatePerson(person.id, {
+                                      autonomyScore: clampAutonomy(
+                                        parseInt(v, 10)
+                                      ),
+                                    })
+                                  }
+                                  formatDisplay={(val, ctx) =>
+                                    ctx?.role === "option"
+                                      ? teamRosterAutonomyMenuOption(val)
+                                      : (
+                                          <OwnerAutonomyBadge
+                                            person={person}
+                                            size="roster"
+                                            anchored={false}
+                                            ringClassName="ring-zinc-950"
+                                          />
+                                        )
+                                  }
+                                  displayTitle="Autonomy level (0–5) — click to change"
+                                  overlaySelectQuiet
+                                  className="group/status w-max min-w-0"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-1 flex-col gap-px">
                           <InlineEditCell
                             value={person.name}
                             onSave={(name) => updatePerson(person.id, { name })}
-                            displayClassName="text-zinc-200"
+                            displayClassName={ROADMAP_ENTITY_TITLE_DISPLAY_CLASS}
+                            collapsedButtonClassName="!min-h-0 !py-0 leading-snug"
                             startInEditMode={
                               person.id === newPersonNameFocusId
                             }
                           />
+                          <InlineEditCell
+                            value={person.role}
+                            onSave={(role) => updatePerson(person.id, { role })}
+                            displayClassName="text-zinc-400"
+                            collapsedButtonClassName="!min-h-0 !py-0 leading-snug"
+                          />
                         </div>
                       </div>
-                    </td>
-                    <td className="px-3 py-2 align-middle max-w-[140px]">
-                      <InlineEditCell
-                        value={person.role}
-                        onSave={(role) => updatePerson(person.id, { role })}
-                        displayClassName="text-zinc-400"
-                      />
                     </td>
                     <td className="px-3 py-2 align-middle max-w-[160px]">
                       {isFounderPerson(person) ? (
@@ -1027,7 +1345,7 @@ export function TeamRosterManager({
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 align-middle max-w-[120px] whitespace-nowrap">
+                    <td className="px-3 py-2 align-middle max-w-[11.5rem] min-w-0 whitespace-nowrap">
                       {isFounderPerson(person) ? (
                         <span
                           className="text-sm text-zinc-400 font-medium"
@@ -1042,11 +1360,53 @@ export function TeamRosterManager({
                           onSave={(joinDate) =>
                             updatePerson(person.id, { joinDate })
                           }
-                          displayClassName="text-zinc-400"
+                          formatDisplay={(v) => {
+                            const upcoming =
+                              v.trim() === ""
+                                ? null
+                                : getUpcomingJoinAnniversaryWithin(
+                                    v.trim(),
+                                    30
+                                  );
+                            return (
+                              <span className="inline-flex min-w-0 items-center gap-1.5">
+                                <span className="shrink-0 tabular-nums">
+                                  {formatTeamTenureFromJoinYmd(v)}
+                                </span>
+                                {upcoming ? (
+                                  <span
+                                    className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold tabular-nums text-amber-200/95 bg-amber-500/15 ring-1 ring-amber-400/35"
+                                    title={
+                                      upcoming.daysUntil === 0
+                                        ? `${upcoming.yearOrdinal}-year work anniversary today — ${formatCalendarDateHint(upcoming.anniversaryYmd)}`
+                                        : `${upcoming.yearOrdinal}-year work anniversary in ${upcoming.daysUntil}d — ${formatCalendarDateHint(upcoming.anniversaryYmd)}`
+                                    }
+                                    aria-label={
+                                      upcoming.daysUntil === 0
+                                        ? `${upcoming.yearOrdinal}-year work anniversary today`
+                                        : `${upcoming.yearOrdinal}-year work anniversary in ${upcoming.daysUntil} days`
+                                    }
+                                  >
+                                    <Cake
+                                      className="h-3 w-3 text-amber-300/90"
+                                      aria-hidden
+                                    />
+                                    <span>{upcoming.yearOrdinal}y</span>
+                                  </span>
+                                ) : null}
+                              </span>
+                            );
+                          }}
+                          displayTitle={
+                            person.joinDate.trim()
+                              ? `${formatCalendarDateHint(person.joinDate)} — click to change join date`
+                              : "Join date — click to set"
+                          }
+                          displayClassName="text-zinc-400 tabular-nums"
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2 align-middle text-right max-w-[9rem]">
+                    <td className="px-3 py-2 align-middle text-left max-w-[9rem]">
                       {isFounderPerson(person) ? null : (
                         <InlineEditCell
                           type="number"
@@ -1068,35 +1428,12 @@ export function TeamRosterManager({
                             if (!Number.isFinite(n) || n <= 0) {
                               return "—";
                             }
-                            return formatUsdWhole(n);
+                            return formatUsdCompactK(n);
                           }}
                           placeholder="—"
                           displayTitle="Estimated monthly salary (USD)"
                           displayClassName="text-zinc-300 tabular-nums"
-                          collapsedButtonClassName="!text-right"
-                          className="text-right"
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 align-middle min-w-[13rem]">
-                      {isFounderPerson(person) ? null : (
-                        <InlineEditCell
-                          type="select"
-                          selectPresentation="always"
-                          options={AUTONOMY_LEVEL_SELECT_OPTIONS}
-                          value={String(
-                            clampAutonomy(person.autonomyScore)
-                          )}
-                          onSave={(v) =>
-                            updatePerson(person.id, {
-                              autonomyScore: clampAutonomy(
-                                parseInt(v, 10)
-                              ),
-                            })
-                          }
-                          displayClassName="text-zinc-300"
-                          displayTitle="Autonomy level"
-                          className="max-w-[min(20rem,100%)]"
+                          className="text-left"
                         />
                       )}
                     </td>
@@ -1154,7 +1491,13 @@ export function TeamRosterManager({
                               scheduleSlackProfileRefresh(
                                 person.id,
                                 parsed,
-                                () => router.refresh()
+                                () => router.refresh(),
+                                {
+                                  onStart: () =>
+                                    onSlackMenuRefreshStart(person.id),
+                                  onResult: (r) =>
+                                    onSlackMenuRefreshResult(person.id, r),
+                                }
                               );
                             }
                           })();
@@ -1175,6 +1518,7 @@ export function TeamRosterManager({
                       {(() => {
                         const p = person as PersonWithLoginFlag;
                         const hasEmail = (p.email ?? "").trim() !== "";
+                        const hasSlackId = (p.slackHandle ?? "").trim() !== "";
                         if (!canManageLoginPasswords) {
                           return (
                             <span className="text-zinc-600" aria-hidden>
@@ -1193,63 +1537,70 @@ export function TeamRosterManager({
                           );
                         }
                         if (p.loginPasswordSet) {
+                          /** Founders: login actions live in the row **…** menu so we don’t stack two menus. */
+                          const showLoginMenuInLoginColumn =
+                            !isFounderPerson(p);
                           return (
-                            <div className="flex flex-wrap items-center gap-1.5">
+                            <div className="flex items-center gap-1.5">
                               <Lock
                                 className="h-3.5 w-3.5 shrink-0 text-emerald-500/90"
                                 aria-hidden
                               />
-                              <button
-                                type="button"
-                                className="text-xs font-medium text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
-                                onClick={() =>
-                                  setPasswordDialog({ person: p, mode: "change" })
-                                }
-                              >
-                                Change
-                              </button>
-                              <button
-                                type="button"
-                                className="text-xs font-medium text-zinc-500 hover:text-red-400"
-                                onClick={() => {
-                                  if (
-                                    !confirm(
-                                      "Remove login access for this person? They can be given a new password later."
-                                    )
-                                  ) {
-                                    return;
+                              <span className="text-xs font-medium text-zinc-400">
+                                Active
+                              </span>
+                              {showLoginMenuInLoginColumn ? (
+                                <LoginRowMenu
+                                  person={p}
+                                  onSendNewPassword={() =>
+                                    setLoginDialog({
+                                      person: p,
+                                      mode: "resend",
+                                    })
                                   }
-                                  void (async () => {
-                                    const r = await setPersonPassword(p.id, null);
-                                    if (!r.ok) {
-                                      toast.error(r.error);
-                                      return;
-                                    }
-                                    toast.success("Login access removed.");
-                                    router.refresh();
-                                  })();
-                                }}
-                              >
-                                Remove
-                              </button>
+                                />
+                              ) : null}
                             </div>
                           );
                         }
                         return (
                           <button
                             type="button"
-                            className="rounded border border-zinc-600 bg-zinc-900/80 px-2 py-1 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                            className="rounded border border-zinc-600 bg-zinc-900/80 px-2 py-1 text-xs font-medium text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={!hasSlackId}
+                            title={
+                              hasSlackId
+                                ? "Create a login and send the password on Slack"
+                                : "Add this person's Slack user ID first — the password is delivered by Slack group DM"
+                            }
                             onClick={() =>
-                              setPasswordDialog({ person: p, mode: "set" })
+                              setLoginDialog({ person: p, mode: "create" })
                             }
                           >
-                            Set password
+                            Create Login
                           </button>
                         );
                       })()}
                     </td>
                     <td className="py-2 pl-2 pr-4 align-middle">
-                      <TeamRosterRowMenu person={person} />
+                      <TeamRosterRowMenu
+                        person={person}
+                        onSlackRefreshStart={onSlackMenuRefreshStart}
+                        onSlackRefreshResult={onSlackMenuRefreshResult}
+                        {...(canManageLoginPasswords &&
+                        isFounderPerson(person) &&
+                        (person as PersonWithLoginFlag).loginPasswordSet
+                          ? {
+                              canManageLoginPasswords: true,
+                              loginPasswordSet: true,
+                              onSendNewPassword: () =>
+                                setLoginDialog({
+                                  person: person as PersonWithLoginFlag,
+                                  mode: "resend",
+                                }),
+                            }
+                          : {})}
+                      />
                     </td>
                   </tr>
                   );
@@ -1261,7 +1612,7 @@ export function TeamRosterManager({
         ) : null}
       </div>
 
-      <div className="pt-1">
+      <div className="pt-3">
         <button
           type="button"
           onClick={async () => {
@@ -1273,6 +1624,8 @@ export function TeamRosterManager({
               slackHandle: "",
               profilePicturePath: "",
               joinDate: "",
+              welcomeSlackUrl: "",
+              welcomeSlackChannelId: "",
               email: "",
               phone: "",
               estimatedMonthlySalary: 0,
@@ -1289,5 +1642,13 @@ export function TeamRosterManager({
       </div>
       </div>
     </>
+  );
+}
+
+export function TeamRosterManager(props: TeamRosterManagerProps) {
+  return (
+    <RoadmapViewProvider>
+      <TeamRosterManagerInner {...props} />
+    </RoadmapViewProvider>
   );
 }

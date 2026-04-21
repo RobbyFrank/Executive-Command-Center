@@ -15,22 +15,27 @@
   --destructive: #ef4444;
   --success: #22c55e;
   --warning: #f59e0b;
+  /*
+    Legacy fallbacks — roadmap sticky surfaces use Tailwind + shared classes in
+    tracker-roadmap-columns.ts (zinc-950/55 to match project rows).
+  */
+  --surface-1: rgba(9, 9, 11, 0.55);
+  --surface-1-solid: rgba(9, 9, 11, 0.92);
+  --surface-1-hover: rgba(24, 24, 27, 0.6);
   /* Scrollbars — zinc base, violet hover (aligned with tracker / focus rings) */
   --scrollbar-size: 8px;
   --scrollbar-thumb: color-mix(in srgb, var(--muted-foreground) 32%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, #a78bfa 42%, var(--background));
+  /* Shared tracker surfaces — sticky toolbar, column headers, group rows */
+  --surface-toolbar: #0b0b10;
+  --surface-group-header: #141418;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
   /* Avoid horizontal bleed from vw-sized descendants (sidebar layout ≠ 100vw). */
   overflow-x: hidden;
-}
-
-* {
-  border-color: var(--border);
 }
 
 /* Custom scrollbars (Firefox + WebKit) — thin track, pill thumb, brand hover */
@@ -64,6 +69,12 @@ body {
 }
 
 @layer base {
+  /* Default border color for elements that set a border width without a color.
+     Must live in this layer so @layer utilities (e.g. border-transparent) can override. */
+  * {
+    border-color: var(--border);
+  }
+
   /* Native buttons default to the arrow cursor in many browsers; use pointer for click affordance. */
   button:not(:disabled) {
     cursor: pointer;

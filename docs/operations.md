@@ -24,6 +24,12 @@ Roadmap (`/`), Companies (`/companies`), and Team (`/team`) load tracker data vi
 
 Anthropic-backed routes use `@upstash/ratelimit` with the same Redis client as the tracker (see `src/lib/ai-rate-limit.ts`): **60 requests per minute per signed-in user** (sliding window). Excess requests return **429** with `Retry-After`.
 
+## Draft goal/project AI — ideas shortlist cache
+
+The **initial** auto-request for **Draft a new goal/project with AI** (ideas mode, empty chat history) hits `POST /api/ai-create` and is stored with Next.js `unstable_cache` for **10 minutes** (`src/lib/ai-create-ideas-cache.ts`, tag `ecc-ai-create-ideas`). The cache key is the draft **type** plus **company id** (goal flow) or **goal id** (project flow).
+
+**Invalidation:** `src/server/actions/tracker.ts` calls `revalidateTag("ecc-ai-create-ideas", { expire: 0 })` when goals or projects change in ways that affect AI context: **create / delete** goal or project, **batch scrape import**, or **patch** updates that touch substantive fields (goal: description, measurable target, why it matters, current value, priority, status; project: name, description, definition of done, priority, status, primary `goalId`). Promoting a project to **In Progress** from a milestone Slack URL also invalidates. **Not** invalidated for minor edits (e.g. owner, Slack fields, at-risk/spotlight, mirrors). **Follow-on** API calls (pick an idea, expand, revise, conversational mode, or “new directions” with a non-empty history) are never read from this cache.
+
 ## PII in LLM prompts
 
 `src/lib/tracker-redact.ts` removes **email**, **phone**, and **estimated monthly salary** from the tracker JSON embedded in assistant / AI create / AI update prompts. Slack thread drafting still receives full in-memory data in `buildMilestoneThreadContextBlock` (it does not echo salary into the prompt text).
@@ -68,3 +74,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 - `stage: "slack_post"` — the same user lacks `chat:write` or was removed from the channel.
 - Set `DIGEST_POST_FAILURES=1` to have the route post a short `Daily executive digest failed: …` line into the channel on errors (off by default to avoid noisy failures).
 - To reset dedupe (force the next run to behave like a first run), delete the Redis key `ecc:digest:exec:last`.
+
+## Onboarding detector (cron)
+
+`GET /api/cron/onboarding-detector` runs three times daily (`0 3,11,19 * * *` in `vercel.json`). It uses the same **`Authorization: Bearer ${CRON_SECRET}`** pattern as the executive digest. The job scans Slack for Nadav welcome messages and may append new `Person` rows plus welcome metadata. Configure Slack + Anthropic as in [environment.md](environment.md). Full runbook: [onboarding.md](onboarding.md).

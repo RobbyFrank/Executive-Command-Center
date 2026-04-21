@@ -62,7 +62,14 @@ export async function GET() {
   }));
 
   return Response.json(
-    { companies, goals, projects, milestones, people },
+    {
+      revision: data.revision,
+      companies,
+      goals,
+      projects,
+      milestones,
+      people,
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -40,7 +40,7 @@ import {
   appendGoalReviewNote,
 } from "@/server/actions/tracker";
 import {
-  CalendarPlus,
+  Calendar,
   ChevronRight,
   ChevronDown,
   Flag,
@@ -58,10 +58,28 @@ import { toast } from "sonner";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
+import type {
+  GoalChannelAiContext,
+  MilestoneLikelihoodRiskLevel,
+  SlackMemberRosterHint,
+} from "@/server/actions/slack";
 import { SlackChannelPicker } from "./SlackChannelPicker";
 import { GoalLikelihoodInline } from "./GoalLikelihoodInline";
+import type { GoalLikelihoodInlineOwner } from "./GoalLikelihoodInline";
+import {
+  GoalSlackPopover,
+  type GoalSlackPopoverProjectRow,
+  type GoalSlackPopoverUnscoredReason,
+} from "./GoalSlackPopover";
+import { SlackChannelMessageDialog } from "./SlackChannelMessageDialog";
+import {
+  requestOpenProjectSlackThread,
+  subscribeProjectSlackThreadClosed,
+} from "@/lib/openProjectSlackThread";
 import { useGoalLikelihoodRollup } from "@/hooks/useGoalLikelihoodRollup";
 import { useGoalOneLiner } from "@/hooks/useGoalOneLiner";
+import { getNextPendingMilestone } from "@/lib/next-milestone";
+import { isValidHttpUrl } from "@/lib/httpUrl";
 
 import { CollapsePanel } from "./CollapsePanel";
 import { ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX } from "@/lib/tracker-sticky-layout";
@@ -77,6 +95,9 @@ import {
   ROADMAP_PROJECT_CARD_INDENT_PX,
   ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS,
   ROADMAP_GOAL_SLACK_COL_CLASS,
+  ROADMAP_GOAL_OUTER_NEUTRAL_CLASS,
+  ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS,
+  ROADMAP_GOAL_HEADER_SURFACE_CLASS,
 } from "@/lib/tracker-roadmap-columns";
 import {
   goalLatestMilestoneDueDateYmd,
@@ -150,7 +171,6 @@ export function GoalSection({
   mirrorPickerHierarchy,
   showCompletedProjects = true,
 }: GoalSectionProps) {
-  const [expanded, setExpanded] = useState(() => initialExpanded ?? true);
   /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
   const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
   /** After adding a project, name cell opens in edit mode so the user can type immediately. */
@@ -171,6 +191,21 @@ export function GoalSection({
     setFocusedProjectId,
     focusEnforceTick,
   } = useTrackerExpandBulk();
+  /*
+    Derive the first-mount `expanded` value from the restored expand preset,
+    focus mode, and any active search/filters so the goal header doesn't flash
+    open-then-closed right after hydration (e.g. "Goals only" collapsing
+    projects on load, or a shareable URL with filters loading in collapsed).
+  */
+  const [expanded, setExpanded] = useState(() => {
+    if (initialExpanded !== undefined) return initialExpanded;
+    if (expandForSearch) return true;
+    if (focusProjectMode) return false;
+    if (expandPreset === "goals_only" || expandPreset === "collapse") {
+      return false;
+    }
+    return true;
+  });
   const goalContext = useContextMenu();
   const goalActionsRef = useRef<HTMLButtonElement>(null);
   const [goalReviewNotesNonce, setGoalReviewNotesNonce] = useState(0);
@@ -328,6 +363,24 @@ export function GoalSection({
     }
   }, [focusProjectMode, focusedGoalId, goal.id]);
 
+  /**
+   * When the user closes the in-app Slack thread popover that this goal's
+   * popover opened, re-open the Goal popover so they land back where they
+   * started. Only reacts to the specific project id we requested.
+   */
+  useEffect(() => {
+    const unsubscribe = subscribeProjectSlackThreadClosed((projectId) => {
+      if (pendingReopenForProjectIdRef.current !== projectId) return;
+      pendingReopenForProjectIdRef.current = null;
+      if (shouldCollapseOnThreadCloseRef.current) {
+        shouldCollapseOnThreadCloseRef.current = false;
+        setExpanded(false);
+      }
+      setGoalPopoverOpen(true);
+    });
+    return unsubscribe;
+  }, []);
+
   const atRiskProjectCount = useMemo(
     () => goal.projects.filter((p) => p.atRisk).length,
     [goal.projects]
@@ -351,6 +404,21 @@ export function GoalSection({
     () =>
       getGoalHeaderWarnings(goal, people, { includeProjectWarnings: false }),
     [goal, people]
+  );
+
+  /** No projects → Confidence / Due date / Progress show a subtle "—" empty-state instead of 0-valued UI. */
+  const hasNoProjects = goal.projects.length === 0;
+  /** Shared tooltip so hovering any of the three placeholders explains the same reason. */
+  const noProjectsColTitle =
+    "No projects yet — confidence, due date, and progress will appear once a project is added";
+  /** Minimal dashed glyph used across Confidence / Due date / Progress when there are no projects. */
+  const noProjectsPlaceholder = (
+    <span
+      className="inline-flex h-4 items-center text-[10px] font-medium leading-none text-zinc-600 select-none"
+      aria-hidden
+    >
+      —
+    </span>
   );
 
   useEffect(() => {
@@ -466,6 +534,264 @@ export function GoalSection({
     goalLikelihoodRollup,
     goalOneLinerEnabled
   );
+
+  /**
+   * Rows for the goal popover drill-down — **one per project**, including projects without
+   * milestones, completed projects, blocked projects, and projects whose next milestone hasn't
+   * been scheduled / linked yet. Unscored rows carry a `reasonCode` + short label so the card
+   * explains why there's no on-time estimate instead of silently rendering 0%/0%.
+   */
+  const goalPopoverProjectRows = useMemo((): GoalSlackPopoverProjectRow[] => {
+    const summariesByKey = new Map<
+      string,
+      (typeof goalLikelihoodRollup extends null ? never : NonNullable<typeof goalLikelihoodRollup>)["projectSummaries"][number]
+    >();
+    for (const s of goalLikelihoodRollup?.projectSummaries ?? []) {
+      summariesByKey.set(`${s.projectName}\u0000${s.milestoneName}`, s);
+    }
+    const rows: GoalSlackPopoverProjectRow[] = [];
+    for (const p of goal.projects) {
+      const owner = p.ownerId ? peopleById.get(p.ownerId) : undefined;
+      const ownerForRow = owner
+        ? {
+            name: owner.name,
+            profilePicturePath: owner.profilePicturePath ?? "",
+          }
+        : null;
+
+      const nextPending = getNextPendingMilestone(p.milestones);
+      const projectDone = p.status === "Done";
+      const projectBlocked = p.status === "Blocked" || p.isBlocked === true;
+
+      /** Blocked is orthogonal to assessment readiness — keep it as a note, not a reason pill. */
+      const blockerNote = projectBlocked
+        ? p.blockedByProjectName?.trim()
+          ? `Blocked by ${p.blockedByProjectName.trim()}`
+          : "Blocked"
+        : undefined;
+
+      /** Unscored explainer: what's stopping the AI from producing an estimate yet. */
+      let reasonCode: GoalSlackPopoverUnscoredReason | undefined;
+      let reasonLabel: string | undefined;
+      let milestoneName = nextPending?.name ?? "";
+
+      if (projectDone) {
+        reasonCode = "completed";
+        reasonLabel = "Completed";
+        milestoneName = "";
+      } else if (p.milestones.length === 0) {
+        reasonCode = "noMilestones";
+        reasonLabel = "No milestones";
+      } else if (!nextPending) {
+        reasonCode = "completed";
+        reasonLabel = "All milestones complete";
+        milestoneName = "";
+      } else {
+        const target = nextPending.targetDate?.trim() ?? "";
+        const hasDate = Boolean(target) && parseCalendarDateString(target) !== null;
+        const hasSlack = isValidHttpUrl((nextPending.slackUrl ?? "").trim());
+
+        if (p.status === "Idea") {
+          reasonCode = "notStarted";
+          reasonLabel = "Idea — not scheduled";
+        } else if (p.status === "Pending" && (!hasDate || !hasSlack)) {
+          reasonCode = "notStarted";
+          reasonLabel = "Not started";
+        } else if (!hasDate && !hasSlack) {
+          reasonCode = "notStarted";
+          reasonLabel = "No target date or thread";
+        } else if (!hasDate) {
+          reasonCode = "noTargetDate";
+          reasonLabel = "No target date";
+        } else if (!hasSlack) {
+          reasonCode = "noSlackThread";
+          reasonLabel = "No Slack thread";
+        }
+      }
+
+      /** Look up the cached AI assessment only when the milestone is actually assessable. */
+      const key =
+        reasonCode || !nextPending ? "" : `${p.name}\u0000${nextPending.name}`;
+      const summary = key ? summariesByKey.get(key) : undefined;
+
+      if (!reasonCode && !summary) {
+        reasonCode = "assessing";
+        reasonLabel = "Assessing…";
+      }
+
+      const scored = Boolean(summary);
+      rows.push({
+        projectId: p.id,
+        projectName: p.name,
+        milestoneName,
+        summaryLine: summary?.summaryLine ?? "",
+        likelihood: summary?.likelihood ?? 0,
+        riskLevel: summary?.riskLevel ?? "medium",
+        progressEstimate: summary?.progressEstimate ?? 0,
+        slackUrl: (nextPending?.slackUrl ?? "").trim(),
+        owner: ownerForRow,
+        scored,
+        reasonCode: scored ? undefined : reasonCode,
+        reasonLabel: scored ? undefined : reasonLabel,
+        blockerNote,
+      });
+    }
+    return rows;
+  }, [goal.projects, goalLikelihoodRollup, peopleById]);
+
+  /**
+   * Distinct project owners under the goal, autonomy desc then name asc (header avatar stack).
+   * Enriched with each owner's worst project signal (risk desc, likelihood asc) for a colored ring.
+   * Worst signals are only present when `goalLikelihoodRollup.ready` — otherwise rings fall back to neutral.
+   */
+  const goalProjectOwners = useMemo((): GoalLikelihoodInlineOwner[] => {
+    const rollupReady = Boolean(goalLikelihoodRollup?.ready);
+    /** Map ownerId → per-project rows (only counts owners that own at least one project with a dated+linked next pending milestone and a cached summary). */
+    const projectsByOwnerId = new Map<
+      string,
+      Array<{ riskLevel: MilestoneLikelihoodRiskLevel; likelihood: number }>
+    >();
+    if (rollupReady) {
+      const projectById = new Map(goal.projects.map((p) => [p.id, p]));
+      for (const row of goalPopoverProjectRows) {
+        const p = projectById.get(row.projectId);
+        const ownerId = p?.ownerId?.trim();
+        if (!ownerId) continue;
+        /** Only count rows with a real cached assessment — unscored rows would misleadingly color the ring. */
+        if (!row.scored) continue;
+        const bucket = projectsByOwnerId.get(ownerId);
+        const entry = { riskLevel: row.riskLevel, likelihood: row.likelihood };
+        if (bucket) bucket.push(entry);
+        else projectsByOwnerId.set(ownerId, [entry]);
+      }
+    }
+
+    const RISK_ORDER: Record<MilestoneLikelihoodRiskLevel, number> = {
+      low: 0,
+      medium: 1,
+      high: 2,
+      critical: 3,
+    };
+
+    const seen = new Set<string>();
+    const owners: GoalLikelihoodInlineOwner[] = [];
+    for (const p of goal.projects) {
+      const id = p.ownerId?.trim();
+      if (!id || seen.has(id)) continue;
+      const person = peopleById.get(id);
+      if (!person) continue;
+      seen.add(id);
+
+      let worstRisk: MilestoneLikelihoodRiskLevel | undefined;
+      let worstLikelihood: number | undefined;
+      const entries = projectsByOwnerId.get(id);
+      if (entries && entries.length > 0) {
+        const best = entries.slice().sort((a, b) => {
+          const r = RISK_ORDER[b.riskLevel] - RISK_ORDER[a.riskLevel];
+          if (r !== 0) return r;
+          return a.likelihood - b.likelihood;
+        })[0]!;
+        worstRisk = best.riskLevel;
+        worstLikelihood = best.likelihood;
+      }
+
+      owners.push({
+        id: person.id,
+        name: person.name,
+        profilePicturePath: person.profilePicturePath ?? "",
+        autonomyScore: person.autonomyScore ?? 0,
+        riskLevel: worstRisk,
+        worstLikelihood,
+      });
+    }
+    owners.sort((a, b) => {
+      if (b.autonomyScore !== a.autonomyScore) {
+        return b.autonomyScore - a.autonomyScore;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return owners;
+  }, [goal.projects, goalLikelihoodRollup, goalPopoverProjectRows, peopleById]);
+
+  /** Goal-level AI context: rollup + per-project signals + roster for channel-message drafting. */
+  const goalChannelAiContext = useMemo((): GoalChannelAiContext => {
+    const rosterHints: SlackMemberRosterHint[] = [];
+    for (const o of goalProjectOwners) {
+      const person = peopleById.get(o.id);
+      const slackUserId = person?.slackHandle?.trim() ?? "";
+      if (!slackUserId) continue;
+      const avatar = o.profilePicturePath.trim();
+      rosterHints.push({
+        slackUserId,
+        name: o.name,
+        ...(avatar ? { profilePicturePath: avatar } : {}),
+      });
+    }
+
+    const projectIdToOwnerName = new Map<string, string>();
+    for (const p of goal.projects) {
+      if (!p.ownerId?.trim()) continue;
+      const person = peopleById.get(p.ownerId);
+      if (person) projectIdToOwnerName.set(p.id, person.name);
+    }
+
+    return {
+      goalDescription: goal.description,
+      oneLinerSummary: goalOneLinerSummary ?? "",
+      rollup: {
+        ready: Boolean(goalLikelihoodRollup?.ready),
+        onTimeLikelihood: goalLikelihoodRollup?.onTimeLikelihood ?? 0,
+        riskLevel: goalLikelihoodRollup?.riskLevel ?? "medium",
+        aiConfidence: goalLikelihoodRollup?.aiConfidence ?? 0,
+        coverageCached: goalLikelihoodRollup?.coverage.cached ?? 0,
+        coverageTotal: goalLikelihoodRollup?.coverage.total ?? 0,
+      },
+      projects: goalPopoverProjectRows.map((r) => ({
+        projectName: r.projectName,
+        milestoneName: r.milestoneName,
+        scored: r.scored,
+        likelihood: r.likelihood,
+        riskLevel: r.riskLevel,
+        progressEstimate: r.progressEstimate,
+        summaryLine: r.summaryLine,
+        blockerNote: r.blockerNote ?? "",
+        reasonLabel: r.reasonLabel ?? "",
+        ownerName: projectIdToOwnerName.get(r.projectId) ?? "",
+      })),
+      rosterHints,
+    };
+  }, [
+    goal.description,
+    goal.projects,
+    goalLikelihoodRollup,
+    goalOneLinerSummary,
+    goalPopoverProjectRows,
+    goalProjectOwners,
+    peopleById,
+  ]);
+
+  const goalInlineRef = useRef<HTMLButtonElement>(null);
+  const goalInlineSpotlightRef = useRef<HTMLDivElement>(null);
+  const [goalPopoverOpen, setGoalPopoverOpen] = useState(false);
+  const [goalChannelMessageOpen, setGoalChannelMessageOpen] = useState(false);
+  const [goalChannelMessageMode, setGoalChannelMessageMode] = useState<
+    "ping" | "nudge" | "reply"
+  >("reply");
+  /**
+   * Set to the projectId whose in-app Slack thread window we just opened from
+   * the Goal popover. When `ProjectRow` notifies that the thread window was
+   * closed, we re-open this goal's popover so the user lands back where they
+   * started. Null means no pending return trip.
+   */
+  const pendingReopenForProjectIdRef = useRef<string | null>(null);
+  /**
+   * Remembers whether we auto-expanded this goal *just* to mount the target
+   * `ProjectRow` so the thread popover could render. Because the popover only
+   * mounts inside an expanded goal, we flip `expanded` to true, then flip it
+   * back when the thread closes so the user lands back on the inline summary
+   * (exactly where they were when they opened the Goal popover).
+   */
+  const shouldCollapseOnThreadCloseRef = useRef(false);
 
   const onNewProjectCreated = useCallback((id: string) => {
     setExpanded(true);
@@ -659,7 +985,8 @@ export function GoalSection({
           "border-l-2 border-amber-400 bg-amber-950/45",
         !goal.atRisk &&
           goal.spotlight &&
-          "border-l-2 border-emerald-400/85 bg-emerald-950/40"
+          "border-l-2 border-emerald-400/85 bg-emerald-950/40",
+        !goal.atRisk && !goal.spotlight && ROADMAP_GOAL_OUTER_NEUTRAL_CLASS
       )}
     >
       {/* Goal header — click row (not inline controls) to expand/collapse; AI context via info icon */}
@@ -669,7 +996,7 @@ export function GoalSection({
         className={cn(
           // Hover lives on this sticky bar (visible when collapsed); outer wrapper hover was covered
           // by opaque bg and also fired over the whole project list when expanded.
-          "sticky z-[27] w-full min-w-0 max-w-full backdrop-blur-sm transition-colors duration-150 motion-reduce:transition-none",
+          "sticky z-[27] w-full min-w-0 max-w-full transition-colors duration-150 motion-reduce:transition-none",
           expanded
             ? "border-b-0 shadow-none"
             : "border-b border-zinc-800/60 shadow-[0_1px_0_rgba(0,0,0,0.2)]",
@@ -678,10 +1005,14 @@ export function GoalSection({
             ? "bg-amber-950/85 hover:bg-amber-900/78"
             : goal.spotlight
               ? "bg-emerald-950/80 hover:bg-emerald-900/72"
-              : "bg-zinc-950/95 hover:bg-zinc-900/85"
+              : cn(
+                  ROADMAP_GOAL_HEADER_SURFACE_CLASS,
+                  ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS
+                )
         )}
       >
         <div
+          ref={goalInlineSpotlightRef}
           onClick={onGoalHeaderClick}
           className={cn(
             "group/goal flex min-h-[28px] w-full min-w-max max-w-full cursor-pointer items-center py-1 transition-colors",
@@ -828,22 +1159,29 @@ export function GoalSection({
             ROADMAP_DATA_COL_CLASS,
             "flex items-center justify-start pl-0.5",
           )}
+          title={hasNoProjects ? noProjectsColTitle : undefined}
         >
-          <AutoConfidencePercent
-            score={goalConfidenceAuto}
-            explanation={goalConfidenceExplain}
-          />
+          {hasNoProjects ? (
+            noProjectsPlaceholder
+          ) : (
+            <AutoConfidencePercent
+              score={goalConfidenceAuto}
+              explanation={goalConfidenceExplain}
+            />
+          )}
         </div>
 
         {/* Due date — latest milestone target date across all projects in this goal */}
         <div
           className={cn(
             ROADMAP_DATA_COL_CLASS,
-            !goalLatestDueYmd.trim() &&
+            (hasNoProjects || !goalLatestDueYmd.trim()) &&
               "flex items-center justify-start pl-2"
           )}
           title={
-            goalLatestDueYmd.trim()
+            hasNoProjects
+              ? noProjectsColTitle
+              : goalLatestDueYmd.trim()
               ? [
                   formatCalendarDateHint(goalLatestDueYmd),
                   " — latest milestone due date in this goal",
@@ -858,7 +1196,9 @@ export function GoalSection({
               : "Set a target date on at least one milestone under this goal’s projects"
           }
         >
-          {goalLatestDueYmd.trim() ? (
+          {hasNoProjects ? (
+            noProjectsPlaceholder
+          ) : goalLatestDueYmd.trim() ? (
             <span
               className={cn(
                 "block truncate px-1 py-0.5 text-xs font-medium leading-tight",
@@ -887,18 +1227,6 @@ export function GoalSection({
                 })
               }
               displayTitle="Set milestone due date (goal column shows the latest date in this goal)"
-              emptyLabel={
-                <span
-                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 not-italic transition-colors hover:bg-zinc-800/55 hover:text-zinc-300"
-                  aria-hidden
-                >
-                  <CalendarPlus
-                    className="h-3.5 w-3.5 shrink-0"
-                    strokeWidth={1.75}
-                    aria-hidden
-                  />
-                </span>
-              }
             />
           ) : (
             <button
@@ -916,18 +1244,32 @@ export function GoalSection({
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800/55 hover:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/45"
               aria-label="No milestone due date yet — add projects and milestones with target dates; latest shows here automatically"
             >
-              <CalendarPlus className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+              <Calendar
+                className="h-3.5 w-3.5 shrink-0 text-zinc-500/75"
+                strokeWidth={1.5}
+                aria-hidden
+              />
             </button>
           )}
         </div>
 
         {/* Progress — all milestones in this goal */}
-        <div className={ROADMAP_DATA_COL_CLASS}>
-          <ProgressBar
-            percent={goalMilestoneProgressPercent}
-            label={`${goalMilestonesDoneCount}/${goalMilestonesFlat.length}`}
-            title={`${goalMilestonesDoneCount} of ${goalMilestonesFlat.length} milestones complete in this goal (${goalMilestoneProgressPercent}%)`}
-          />
+        <div
+          className={cn(
+            ROADMAP_DATA_COL_CLASS,
+            hasNoProjects && "flex items-center justify-start pl-2"
+          )}
+          title={hasNoProjects ? noProjectsColTitle : undefined}
+        >
+          {hasNoProjects ? (
+            noProjectsPlaceholder
+          ) : (
+            <ProgressBar
+              percent={goalMilestoneProgressPercent}
+              label={`${goalMilestonesDoneCount}/${goalMilestonesFlat.length}`}
+              title={`${goalMilestonesDoneCount} of ${goalMilestonesFlat.length} milestones complete in this goal (${goalMilestoneProgressPercent}%)`}
+            />
+          )}
         </div>
 
         {/* Slack channel name (always visible; column header shows Slack mark) — after Progress */}
@@ -948,7 +1290,15 @@ export function GoalSection({
         <div
           className={cn(
             ROADMAP_NEXT_MILESTONE_COL_CLASS,
-            !expanded && goalLikelihoodRollup != null && "min-w-0"
+            /*
+              Collapsed goal with a rollup: let the Next-milestone column grow into the
+              flex-1 spacer so the one-line summary has room to read well on wider viewports
+              instead of truncating inside the fixed 36rem slot. `!w-auto` + `!grow` overrides
+              `w-[36rem]` / `grow-0` from {@link ROADMAP_NEXT_MILESTONE_COL_CLASS}; `min-w-[36rem]`
+              keeps the same baseline width so narrower viewports still match the header grid.
+            */
+            !expanded && goalLikelihoodRollup != null &&
+              "!w-auto !grow min-w-[36rem]"
           )}
           aria-hidden={expanded || goalLikelihoodRollup == null}
         >
@@ -958,6 +1308,7 @@ export function GoalSection({
               className="min-w-0 max-w-full pr-1"
             >
               <GoalLikelihoodInline
+                ref={goalInlineRef}
                 metricsReady={goalLikelihoodRollup.ready}
                 onTimeLikelihood={goalLikelihoodRollup.onTimeLikelihood}
                 riskLevel={goalLikelihoodRollup.riskLevel}
@@ -966,6 +1317,15 @@ export function GoalSection({
                 summaryLine={goalOneLinerSummary}
                 summaryLoading={goalOneLinerLoading}
                 summaryError={goalOneLinerError}
+                owners={goalProjectOwners}
+                goalDescription={goal.description}
+                freshness={goalLikelihoodRollup.freshness}
+                threadCoverage={{
+                  considered:
+                    goalLikelihoodRollup.freshness?.threadsConsidered ?? 0,
+                  total: goalLikelihoodRollup.threadSlackUrls.length,
+                }}
+                onOpen={() => setGoalPopoverOpen(true)}
               />
             </div>
           ) : null}
@@ -1052,6 +1412,51 @@ export function GoalSection({
         openNonce={goalReviewNotesNonce}
         entries={goal.reviewLog}
         onAppendNote={(t) => appendGoalReviewNote(goal.id, t)}
+      />
+      <GoalSlackPopover
+        open={goalPopoverOpen}
+        onClose={() => setGoalPopoverOpen(false)}
+        anchorRef={goalInlineRef}
+        spotlightRef={goalInlineSpotlightRef}
+        goalDescription={goal.description}
+        goalSlackChannelName={goal.slackChannel ?? ""}
+        goalSlackChannelId={goal.slackChannelId ?? ""}
+        rollup={goalLikelihoodRollup}
+        rollupLoading={goalLikelihoodLoading}
+        oneLinerSummary={goalOneLinerSummary}
+        oneLinerLoading={goalOneLinerLoading}
+        oneLinerError={goalOneLinerError}
+        projectRows={goalPopoverProjectRows}
+        owners={goalProjectOwners}
+        onOpenChannelMessage={(mode) => {
+          setGoalChannelMessageMode(mode);
+          setGoalChannelMessageOpen(true);
+        }}
+        onOpenProjectSlackThread={(projectId) => {
+          if (goal.projects.some((p) => p.id === projectId)) {
+            if (!expanded) {
+              setExpanded(true);
+              shouldCollapseOnThreadCloseRef.current = true;
+            }
+            pendingReopenForProjectIdRef.current = projectId;
+          }
+          requestOpenProjectSlackThread(projectId);
+        }}
+      />
+      <SlackChannelMessageDialog
+        open={goalChannelMessageOpen}
+        onClose={(reason) => {
+          setGoalChannelMessageOpen(false);
+          if (reason === "dismiss") setGoalPopoverOpen(true);
+        }}
+        goalId={goal.id}
+        goalDescription={goal.description}
+        channelId={goal.slackChannelId ?? ""}
+        channelName={goal.slackChannel ?? ""}
+        people={people}
+        spotlightRef={goalInlineSpotlightRef}
+        mode={goalChannelMessageMode}
+        goalContext={goalChannelAiContext}
       />
 
       {/* Projects */}

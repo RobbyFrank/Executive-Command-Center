@@ -21,8 +21,13 @@ import { compareMilestonesByTargetDate } from "@/lib/milestoneSort";
 import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
 import { comparePriority } from "@/lib/prioritySort";
 import { sortProjectsBlockedUnderBlocker } from "@/lib/projectBlockedOrder";
-import { withFounderDepartmentRules } from "@/lib/autonomyRoster";
+import {
+  clampAutonomy,
+  isFounderPerson,
+  withFounderDepartmentRules,
+} from "@/lib/autonomyRoster";
 import { toPublicPerson } from "@/lib/personSecrets";
+import { normalizePersonEmail } from "@/lib/personContactValidation";
 import { computeMomentumScore, isActiveStatus } from "@/lib/companyMomentum";
 
 const MAX_COMMIT_ATTEMPTS = 12;
@@ -32,6 +37,7 @@ function emptyCompanyDirectoryStats(): CompanyDirectoryStats {
     goals: 0,
     projects: 0,
     owners: 0,
+    teamMembers: [],
     activeGoals: 0,
     activeProjects: 0,
     goalsWithSpotlight: 0,
@@ -308,6 +314,7 @@ export class TrackerRepositoryCore implements TrackerRepository {
     const withDefaults: Person = {
       ...person,
       passwordHash: person.passwordHash ?? "",
+      email: normalizePersonEmail(person.email ?? ""),
     };
     const normalized = withFounderDepartmentRules(withDefaults);
     await this.commitWithRetry((data) => {
@@ -323,6 +330,9 @@ export class TrackerRepositoryCore implements TrackerRepository {
       const idx = data.people.findIndex((p) => p.id === id);
       if (idx === -1) throw new Error(`Person ${id} not found`);
       const merged = { ...data.people[idx], ...updates, id };
+      if (updates.email !== undefined) {
+        merged.email = normalizePersonEmail(updates.email);
+      }
       data.people[idx] = withFounderDepartmentRules(merged);
       result = data.people[idx];
     });
@@ -448,12 +458,19 @@ export class TrackerRepositoryCore implements TrackerRepository {
   async getCompanyStatsByCompanyId(): Promise<
     Record<string, CompanyDirectoryStats>
   > {
-    const [companies, goals, projects, milestones] = await Promise.all([
+    const [companies, goals, projects, milestones, people] = await Promise.all([
       this.getCompanies(),
       this.getGoals(),
       this.getProjects(),
       this.getMilestones(),
+      this.getPeople(),
     ]);
+    const peopleById = new Map(
+      people.map((p) => {
+        const pub = toPublicPerson(withFounderDepartmentRules(p));
+        return [pub.id, pub] as const;
+      })
+    );
     const stats: Record<string, CompanyDirectoryStats> = {};
     for (const c of companies) {
       stats[c.id] = emptyCompanyDirectoryStats();
@@ -507,7 +524,24 @@ export class TrackerRepositoryCore implements TrackerRepository {
 
     for (const [companyId, set] of ownerIdsByCompany) {
       const row = stats[companyId];
-      if (row) row.owners = set.size;
+      if (!row) continue;
+      const teamMembers = [...set]
+        .map((id) => peopleById.get(id))
+        .filter((p): p is NonNullable<typeof p> => Boolean(p))
+        .filter((p) => !isFounderPerson(p))
+        .sort((a, b) => {
+          const da = clampAutonomy(a.autonomyScore);
+          const db = clampAutonomy(b.autonomyScore);
+          if (db !== da) return db - da;
+          return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        })
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          profilePicturePath: p.profilePicturePath ?? "",
+        }));
+      row.teamMembers = teamMembers;
+      row.owners = teamMembers.length;
     }
 
     for (const c of companies) {

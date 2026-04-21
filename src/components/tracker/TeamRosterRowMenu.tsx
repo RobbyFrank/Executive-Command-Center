@@ -10,10 +10,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import { MoreHorizontal, RefreshCw, Send, Trash2 } from "lucide-react";
 import type { Person } from "@/lib/types/tracker";
 import { isFounderPerson } from "@/lib/autonomyRoster";
-import { deletePerson, updatePerson } from "@/server/actions/tracker";
+import { deletePerson } from "@/server/actions/tracker";
+import type { RefreshPersonResult } from "@/server/actions/slack";
 import { scheduleSlackProfileRefresh } from "@/lib/slackRosterRefresh";
 import { SlackLogo } from "./SlackLogo";
 
@@ -23,9 +24,29 @@ type PanelView = "menu" | "delete";
 
 interface TeamRosterRowMenuProps {
   person: Person;
+  /** Optional: row highlight + merged roster updates for “Refresh from Slack”. */
+  onSlackRefreshStart?: (personId: string) => void;
+  onSlackRefreshResult?: (
+    personId: string,
+    result: RefreshPersonResult
+  ) => void;
+  /**
+   * When this person is a founder with app login, login actions are merged here so the
+   * Login column does not show a second “…” menu next to **Active**.
+   */
+  canManageLoginPasswords?: boolean;
+  loginPasswordSet?: boolean;
+  onSendNewPassword?: () => void;
 }
 
-export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
+export function TeamRosterRowMenu({
+  person,
+  onSlackRefreshStart,
+  onSlackRefreshResult,
+  canManageLoginPasswords,
+  loginPasswordSet,
+  onSendNewPassword,
+}: TeamRosterRowMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<PanelView>("menu");
@@ -43,6 +64,14 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
 
   const founder = isFounderPerson(person);
   const hasSlackId = Boolean(person.slackHandle?.trim());
+  const sendLoginInRowMenu =
+    Boolean(founder) &&
+    Boolean(canManageLoginPasswords) &&
+    Boolean(loginPasswordSet) &&
+    typeof onSendNewPassword === "function";
+
+  /** Founder status is set only via data / tooling, not this menu. */
+  const hasAnyRowAction = sendLoginInRowMenu || hasSlackId || !founder;
 
   useEffect(() => {
     setMounted(true);
@@ -85,38 +114,13 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
     setPanelBox(null);
   }
 
-  async function onSetFounder() {
-    setError(null);
-    setPending(true);
-    try {
-      await updatePerson(person.id, { isFounder: true });
-      close();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update.");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function onRemoveFounder() {
-    setError(null);
-    setPending(true);
-    try {
-      await updatePerson(person.id, { isFounder: false });
-      close();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update.");
-    } finally {
-      setPending(false);
-    }
-  }
-
   function onRefreshFromSlack() {
     setError(null);
     close();
-    scheduleSlackProfileRefresh(person.id, person.slackHandle, () =>
-      router.refresh()
-    );
+    scheduleSlackProfileRefresh(person.id, person.slackHandle, () => router.refresh(), {
+      onStart: () => onSlackRefreshStart?.(person.id),
+      onResult: (r) => onSlackRefreshResult?.(person.id, r),
+    });
   }
 
   async function onConfirmDelete() {
@@ -168,25 +172,20 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
                     {error}
                   </p>
                 )}
-                {founder ? (
+                {sendLoginInRowMenu ? (
                   <button
                     type="button"
                     disabled={pending}
-                    onClick={() => void onRemoveFounder()}
-                    className="flex w-full cursor-pointer items-center rounded px-2 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => {
+                      close();
+                      onSendNewPassword?.();
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Remove founder status
+                    <Send className="h-3.5 w-3.5 shrink-0 opacity-70" />
+                    <span className="flex-1">Send new password</span>
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => void onSetFounder()}
-                    className="flex w-full cursor-pointer items-center rounded px-2 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Set as Founder
-                  </button>
-                )}
+                ) : null}
                 {hasSlackId ? (
                   <button
                     type="button"
@@ -257,6 +256,10 @@ export function TeamRosterRowMenu({ person }: TeamRosterRowMenuProps) {
         ) : null}
       </>
     ) : null;
+
+  if (!hasAnyRowAction) {
+    return null;
+  }
 
   return (
     <div className="relative flex justify-end" ref={anchorRef}>

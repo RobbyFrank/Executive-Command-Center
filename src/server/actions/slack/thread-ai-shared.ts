@@ -118,6 +118,36 @@ export async function claudePlainText(
   return block.text.trim();
 }
 
+/**
+ * Streams assistant text deltas from Claude (same model as {@link claudePlainText}).
+ * Used for onboarding pilot recommendations and other long UI streams.
+ */
+export async function* claudePlainTextStream(
+  system: string,
+  user: string,
+  options?: { maxTokens?: number }
+): AsyncGenerator<string, void, undefined> {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not set.");
+  }
+  const anthropic = new Anthropic({ apiKey });
+  const stream = anthropic.messages.stream({
+    model: getAnthropicModel(),
+    max_tokens: options?.maxTokens ?? 2048,
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
 type ThreadPingTailTranscriptResult =
   | { ok: true; transcript: string }
   | { ok: false; error: string };

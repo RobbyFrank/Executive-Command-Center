@@ -14,6 +14,7 @@ import {
   compactChannelMessages,
   getPublicBaseUrl,
 } from "./prompt";
+import { buildOnboardingSignalLines } from "@/lib/onboarding";
 import {
   readExecutiveDigestState,
   writeExecutiveDigestState,
@@ -201,13 +202,14 @@ export async function buildAndSendExecutiveDigest(
   const previousState = await readExecutiveDigestState();
   const repo = getRepository();
 
-  const [history, hierarchy, people] = await Promise.all([
+  const [history, hierarchy, people, projects] = await Promise.all([
     fetchSlackChannelHistory(channelId, {
       oldestTs: windowStartTs,
       maxMessages: 500,
     }),
     repo.getHierarchy(),
     repo.getPeople(),
+    repo.getProjects(),
   ]);
 
   if (!history.ok) {
@@ -229,7 +231,11 @@ export async function buildAndSendExecutiveDigest(
 
   const labelMap = buildPersonLabelMap(people);
   const channelMessageLines = compactChannelMessages(messages, labelMap, 300);
-  const trackerSignalLines = buildTrackerSignalLines(hierarchy, 120);
+  const todayYmd = now.toISOString().slice(0, 10);
+  const trackerSignalLines = [
+    ...buildTrackerSignalLines(hierarchy, 120),
+    ...buildOnboardingSignalLines(people, projects, todayYmd),
+  ];
 
   const userPrompt = buildExecutiveDigestUserPrompt({
     channelName: "executive-priorities",

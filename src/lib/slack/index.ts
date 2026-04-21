@@ -39,3 +39,9 @@ export type {
   SlackChannelHistoryMessage,
   SlackThreadApiMessage,
 } from "./threads";
+export {
+  fetchSlackUserMessageHistory,
+  slackTsToYmdUtc,
+  type SlackUserMessageMatch,
+  type SlackUserMessageKind,
+} from "./user-messages";

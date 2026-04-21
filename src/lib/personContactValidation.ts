@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-/** After trim; empty is allowed. */
+/** Trim + lowercase for roster storage and display (emails are case-insensitive). */
+export function normalizePersonEmail(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** After trim and lowercasing; empty is allowed. */
 export function isValidPersonEmail(trimmed: string): boolean {
   return trimmed === "" || z.string().email().safeParse(trimmed).success;
 }
@@ -13,7 +18,7 @@ export function isValidPersonPhone(trimmed: string): boolean {
 }
 
 export function personEmailValidationError(draft: string): string | undefined {
-  const t = draft.trim();
+  const t = normalizePersonEmail(draft);
   if (isValidPersonEmail(t)) return undefined;
   return "Enter a valid email address.";
 }

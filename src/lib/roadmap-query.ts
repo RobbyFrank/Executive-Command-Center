@@ -15,6 +15,7 @@ const TRACKER_STATUS_TAGS: readonly TrackerStatusTagId[] = [
   "unassigned",
   "zombie",
   "stalled",
+  "new_hire_pilot",
 ] as const;
 const TAG_SET = new Set<string>(TRACKER_STATUS_TAGS);
 

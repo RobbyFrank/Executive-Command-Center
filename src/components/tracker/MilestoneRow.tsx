@@ -11,7 +11,6 @@ import type { Milestone, Person } from "@/lib/types/tracker";
 import { InlineEditCell } from "./InlineEditCell";
 import { updateMilestone, deleteMilestone } from "@/server/actions/tracker";
 import {
-  CalendarPlus,
   Check,
   Circle,
   ExternalLink,
@@ -26,6 +25,7 @@ import { useContextMenu } from "@/hooks/useContextMenu";
 import { SlackLogo } from "./SlackLogo";
 import { useSlackThreadStatus } from "@/hooks/useSlackThreadStatus";
 import { useMilestoneLikelihood } from "@/hooks/useMilestoneLikelihood";
+import { useAutoCompleteMilestoneAt100 } from "@/hooks/useAutoCompleteMilestoneAt100";
 import { MilestoneSlackThreadInline } from "./MilestoneSlackThreadInline";
 import {
   SlackMilestoneThreadPopovers,
@@ -203,6 +203,13 @@ export function MilestoneRow({
     projectComplexity,
     rosterHints: slackThread.rosterHints,
     roadmapContext,
+    threadReplyCount: hasSlackThreadUrl ? threadReplyCountForLikelihood : null,
+  });
+
+  useAutoCompleteMilestoneAt100({
+    milestoneId: milestone.id,
+    status: milestone.status,
+    progressEstimate: milestoneLikelihood.result?.progressEstimate ?? null,
     threadReplyCount: hasSlackThreadUrl ? threadReplyCountForLikelihood : null,
   });
 
@@ -417,18 +424,6 @@ export function MilestoneRow({
             updateMilestone(milestone.id, { targetDate })
           }
           type="date"
-          emptyLabel={
-            <span
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors not-italic hover:bg-zinc-800/55 hover:text-zinc-300"
-              aria-hidden
-            >
-              <CalendarPlus
-                className="h-3.5 w-3.5 shrink-0"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-            </span>
-          }
           displayClassName={
             isNextPendingMilestone && !isDone
               ? milestoneDateDisplayClass(dueHorizon)
@@ -637,7 +632,16 @@ export function MilestoneRow({
 
       {showSlackInlineBesideTitle ? (
         <div
-          className="pointer-events-none absolute top-1/2 z-10 min-w-0 w-max max-w-[min(36rem,calc(100%-max(4.5rem,3vw)))] -translate-y-1/2 overflow-hidden"
+          /*
+            Absolutely positioned Slack thread strip — starts at the goal Confidence column
+            (`TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT`). The upper bound
+            used to be `min(36rem, …)` which cropped the author + body summary on typical
+            laptop widths even though plenty of horizontal space was available. Bumping to
+            `54rem` (`864px`) lets longer one-line thread summaries show without forcing the
+            row to scroll horizontally; the `calc(100% - …)` clause still protects narrow
+            viewports from running the strip off-screen.
+          */
+          className="pointer-events-none absolute top-1/2 z-10 min-w-0 w-max max-w-[min(54rem,calc(100%-max(4.5rem,3vw)))] -translate-y-1/2 overflow-hidden"
           style={{
             left: TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT,
           }}

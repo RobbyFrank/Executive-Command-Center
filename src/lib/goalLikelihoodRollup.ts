@@ -6,6 +6,7 @@ import type {
   MilestoneLikelihoodRiskLevel,
   MilestoneLikelihoodResult,
 } from "@/server/actions/slack";
+import type { SlackThreadFreshnessSignal } from "@/lib/slackThreadFreshness";
 
 type CachedOk = Extract<MilestoneLikelihoodResult, { ok: true }>;
 
@@ -41,6 +42,18 @@ export type GoalLikelihoodRollup = {
   aiConfidence: number;
   projectSummaries: GoalLikelihoodProjectSummary[];
   coverage: { total: number; cached: number };
+  /**
+   * Slack URLs for the assessable next-pending milestones under this goal — used by the hook to
+   * read cached {@link SlackThreadStatusOk} entries and fold them into {@link freshness}. Kept
+   * on the rollup so other UI (e.g. {@link GoalSlackPopover}) can share the same source list.
+   */
+  threadSlackUrls: string[];
+  /**
+   * Most-recent "last reply" signal across the threads referenced by {@link threadSlackUrls},
+   * read from the shared thread-status cache. `null` when no child row has populated that cache
+   * yet (e.g. first paint before milestone rows hydrate). Deterministic given the cache contents.
+   */
+  freshness: SlackThreadFreshnessSignal | null;
 };
 
 export type ReadCachedMilestoneLikelihood = (args: {
@@ -94,6 +107,8 @@ export function computeGoalLikelihoodRollup(
 
   if (slots.length === 0) return null;
 
+  const threadSlackUrls = slots.map((s) => s.slackUrl);
+
   let cached = 0;
   const cachedRows: Array<{
     weight: number;
@@ -140,6 +155,8 @@ export function computeGoalLikelihoodRollup(
       aiConfidence: 0,
       projectSummaries: [],
       coverage: { total, cached },
+      threadSlackUrls,
+      freshness: null,
     };
   }
 
@@ -189,5 +206,7 @@ export function computeGoalLikelihoodRollup(
     aiConfidence,
     projectSummaries,
     coverage: { total, cached },
+    threadSlackUrls,
+    freshness: null,
   };
 }

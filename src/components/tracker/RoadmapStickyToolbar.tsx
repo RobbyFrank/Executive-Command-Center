@@ -28,8 +28,12 @@ export function RoadmapStickyToolbar({ children }: { children: ReactNode }) {
       ref={ref}
       className={cn(
         "sticky top-0 z-30 min-w-0 max-w-full border-b border-zinc-800/70",
-        "bg-zinc-950/95 backdrop-blur-md px-6 pt-6 pb-3",
-        "shadow-[0_10px_28px_-10px_rgba(0,0,0,0.5)] motion-reduce:shadow-none"
+        /*
+          Solid fill (no backdrop-blur) — content scrolls cleanly behind it instead
+          of smearing. Matches {@link RoadmapStickyBelowToolbarGap} so the seam to
+          the strip below is invisible.
+        */
+        "bg-[var(--surface-toolbar)] px-6 pt-6 pb-3"
       )}
     >
       {children}

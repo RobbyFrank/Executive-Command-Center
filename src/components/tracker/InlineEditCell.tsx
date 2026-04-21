@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Pencil } from "lucide-react";
+import { Calendar, ChevronDown, Pencil } from "lucide-react";
 import {
   formatCalendarDateHint,
   formatRelativeCalendarDate,
@@ -197,7 +197,7 @@ export function InlineEditCell({
     width: number;
     maxHeight: number;
   } | null>(null);
-  const resolvedEmptyLabel = emptyLabel ?? (type === "date" ? "Set date" : "—");
+  const resolvedEmptyLabel = emptyLabel ?? "—";
 
   const cellPadX = trackerGridAlign ? "pl-0 pr-1.5" : "px-1.5";
   const selectPadX = trackerGridAlign ? "pl-0 pr-7" : "pl-1.5 pr-7";
@@ -435,8 +435,11 @@ export function InlineEditCell({
           aria-label={listLabel}
           className={cn(
             "peer relative z-[1] flex min-h-8 w-full max-w-full cursor-pointer items-center rounded py-0.5 text-sm transition-colors",
-            centerSelectTrigger && trackerGridAlign
-              ? "justify-center px-1 text-center"
+            centerSelectTrigger
+              ? cn(
+                  "justify-center pr-6 text-center",
+                  trackerGridAlign ? "pl-0" : "pl-1.5",
+                )
               : cn("text-left", selectPadX, "pr-7"),
             !value.trim() && "text-zinc-600 italic",
             value.trim() && displayClassName,
@@ -525,7 +528,7 @@ export function InlineEditCell({
       ? `${formatCalendarDateHint(value)} — choose date`
       : dateMin
         ? `Set due date — on or after ${dateMin}`
-        : "Set date — choose date";
+        : "Choose date";
     const buttonClass =
       variant === "plain"
         ? cn(
@@ -534,7 +537,7 @@ export function InlineEditCell({
             "cursor-pointer transition-colors",
             "hover:bg-zinc-800/50 hover:px-1.5 hover:py-0.5 hover:-mx-1.5",
             "focus-visible:outline-none focus-visible:bg-zinc-800/45 focus-visible:px-1.5 focus-visible:py-0.5 focus-visible:-mx-1.5 focus-visible:ring-1 focus-visible:ring-zinc-500/35",
-            !value.trim() && "text-zinc-500 italic",
+            !value.trim() && "text-zinc-500/75",
             value.trim() && displayClassName
           )
         : cn(
@@ -542,7 +545,7 @@ export function InlineEditCell({
             cellPadX,
             "border-0 bg-transparent transition-colors cursor-pointer",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-600",
-            !value.trim() && !emptyAttention && "text-zinc-600 italic",
+            !value.trim() && !emptyAttention && "text-zinc-500/75",
             emptyAttention &&
               "rounded-md border border-amber-500/45 bg-amber-950/40 font-medium not-italic text-amber-100 shadow-sm ring-1 ring-amber-500/25 hover:bg-amber-950/55",
             emptyAttention && trackerGridAlign && "pl-1.5",
@@ -590,7 +593,16 @@ export function InlineEditCell({
             ? formatDisplay
               ? formatDisplay(value)
               : formatRelativeCalendarDate(value)
-            : resolvedEmptyLabel}
+            : emptyLabel ?? (
+                <Calendar
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0",
+                    emptyAttention ? "text-amber-200/85" : "text-zinc-500/75"
+                  )}
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+              )}
         </button>
       </div>
     );

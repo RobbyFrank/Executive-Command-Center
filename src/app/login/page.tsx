@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import Image from "next/image";
 import {
   ArrowRight,
   Eye,
@@ -9,7 +10,6 @@ import {
   Lock,
   Mail,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { loginAction, type LoginState } from "@/server/actions/auth";
 
@@ -164,22 +164,21 @@ export default function LoginPage() {
           <div className="relative rounded-[15px] bg-zinc-950/80 p-8 backdrop-blur-xl">
             {/* Brand */}
             <div className="mb-8 flex flex-col items-center text-center">
-              <div className="relative mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400/90 to-emerald-600 shadow-[0_8px_24px_-8px_rgba(16,185,129,0.8)] ring-1 ring-emerald-300/40">
-                <Sparkles
-                  className="h-5 w-5 text-white"
-                  aria-hidden
-                  strokeWidth={2.25}
-                />
-                <span
-                  aria-hidden
-                  className="absolute inset-0 rounded-xl bg-gradient-to-b from-white/25 to-transparent"
+              <div className="relative mb-4 flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl">
+                <Image
+                  src="/icons/icon.png"
+                  alt=""
+                  width={48}
+                  height={48}
+                  className="h-full w-full object-contain"
+                  priority
                 />
               </div>
               <h1 className="bg-gradient-to-b from-white to-zinc-400 bg-clip-text text-2xl font-semibold tracking-tight text-transparent">
-                Executive Command Center
+                Portfolio OS
               </h1>
               <p className="mt-1.5 text-sm text-zinc-500">
-                Sign in to access the MLabs Roadmap
+                Sign in to access the MLabs Portfolio
               </p>
             </div>
 
@@ -271,7 +270,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-600">
-          © {new Date().getFullYear()} MLabs · Executive Command Center
+          © {new Date().getFullYear()} MLabs · Portfolio OS
         </p>
       </div>
     </div>

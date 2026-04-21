@@ -199,9 +199,9 @@ const MENTION_PREVIEW_RE =
 /** Channel/hash refs like #engineering (not #5 — must start with a letter after #). */
 const CHANNEL_PREVIEW_RE = /#[A-Za-z][\w-]*/g;
 
-/** Slack dark theme: user/channel mention (approx. `.c-mrkdwn__mention`). */
+/** Slack dark theme: user/channel mention (approx. `.c-mrkdwn__mention`). Sized for thread preview body (`text-[11px]`). */
 const SLACK_MENTION_CLASS =
-  "mx-0.5 inline-block rounded-[3px] bg-[rgba(29,155,209,0.14)] px-[3px] py-px align-baseline text-[16px] font-semibold leading-[1.5] text-[#1d9bd1]";
+  "mx-0.5 inline-block rounded-[3px] bg-[rgba(29,155,209,0.14)] px-[3px] py-px align-baseline text-[11px] font-semibold leading-relaxed text-[#1d9bd1]";
 
 const URL_IN_TEXT_RE = /https?:\/\/[^\s<>`]+/g;
 
@@ -279,7 +279,7 @@ function SlackThreadMessageBody({ text }: { text: string }): ReactNode {
         p.kind === "code" ? (
           <code
             key={i}
-            className="mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[13px] leading-snug text-[#e8912d] ring-1 ring-white/10"
+            className="mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[11px] leading-snug text-[#e8912d] ring-1 ring-white/10"
           >
             {p.value}
           </code>
@@ -773,10 +773,10 @@ export function SlackThreadPopover({
 
             </aside>
 
-            {/* Right: Slack messages — layout/colors match Slack dark thread view (flat rows, no per-message cards). */}
-            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto border-t border-zinc-800/90 bg-[#1a1d21] px-3 py-3 lg:border-t-0 lg:pl-3 lg:pr-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="min-w-0 flex-1 text-[13px] font-semibold leading-snug text-[#9b9b9b]">
+            {/* Right: Slack messages — header row stays visible; list scrolls independently. */}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col border-t border-zinc-800/90 bg-[#1a1d21] lg:border-t-0">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-800/80 bg-[#1a1d21] px-3 pt-3 pb-2.5 lg:px-4">
+                <p className="min-w-0 flex-1 text-[11px] font-semibold leading-snug text-[#9b9b9b]">
                   {status && status.recentMessages.length > 0
                     ? `Last ${status.recentMessages.length} ${
                         status.recentMessages.length === 1 ? "reply" : "replies"
@@ -825,54 +825,56 @@ export function SlackThreadPopover({
                   </a>
                 </div>
               </div>
-              {status && status.recentMessages.length > 0 ? (
-                <div className="space-y-4">
-                  {status.recentMessages.map((m, i) => (
-                    <div
-                      key={`${m.slackUserId ?? m.userLabel}-${i}`}
-                      className="flex gap-2.5"
-                    >
-                      {m.avatarSrc ? (
-                        <img
-                          src={m.avatarSrc}
-                          alt=""
-                          className="mt-0.5 h-9 w-9 shrink-0 rounded-[3px] object-cover"
-                        />
-                      ) : (
-                        <div
-                          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] bg-[#363636] text-[11px] font-bold text-[#e0e0e0]"
-                          aria-hidden
-                        >
-                          {displayInitials(m.userLabel)}
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1 pt-px">
-                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                          <span className="text-[16px] font-bold leading-tight text-[#f8f8f8]">
-                            {m.userLabel}
-                          </span>
-                          {m.postedRelative ? (
-                            <span className="text-[12px] font-normal text-[#ababab]">
-                              {m.postedRelative}
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 lg:px-4">
+                {status && status.recentMessages.length > 0 ? (
+                  <div className="space-y-3.5">
+                    {status.recentMessages.map((m, i) => (
+                      <div
+                        key={`${m.slackUserId ?? m.userLabel}-${i}`}
+                        className="flex gap-2"
+                      >
+                        {m.avatarSrc ? (
+                          <img
+                            src={m.avatarSrc}
+                            alt=""
+                            className="mt-0.5 h-7 w-7 shrink-0 rounded-[3px] object-cover"
+                          />
+                        ) : (
+                          <div
+                            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[3px] bg-[#363636] text-[10px] font-bold text-[#e0e0e0]"
+                            aria-hidden
+                          >
+                            {displayInitials(m.userLabel)}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1 pt-px">
+                          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="text-[11px] font-bold leading-tight text-[#f8f8f8]">
+                              {m.userLabel}
                             </span>
+                            {m.postedRelative ? (
+                              <span className="text-[11px] font-normal text-[#ababab]">
+                                {m.postedRelative}
+                              </span>
+                            ) : null}
+                          </div>
+                          {m.text?.trim() ? (
+                            <div className="mt-0.5 text-[11px] leading-relaxed text-[#e8e8e8]">
+                              <div className="whitespace-pre-wrap break-words [word-break:break-word]">
+                                <SlackThreadMessageBody text={m.text} />
+                              </div>
+                            </div>
                           ) : null}
                         </div>
-                        {m.text?.trim() ? (
-                          <div className="mt-0.5 text-[16px] leading-[1.5] text-[#f8f8f8]">
-                            <div className="whitespace-pre-wrap break-words [word-break:break-word]">
-                              <SlackThreadMessageBody text={m.text} />
-                            </div>
-                          </div>
-                        ) : null}
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[13px] text-[#9b9b9b]">
-                  No recent messages loaded yet.
-                </p>
-              )}
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#9b9b9b]">
+                    No recent messages loaded yet.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>

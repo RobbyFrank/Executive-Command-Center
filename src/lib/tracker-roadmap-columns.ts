@@ -128,3 +128,25 @@ export const ROADMAP_NEXT_MILESTONE_COL_CLASS =
 export const ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS =
   "max-w-full min-w-0 overflow-hidden rounded-md border border-zinc-800/55 bg-zinc-900/45 shadow-sm ring-1 ring-black/25 border-l-[3px] border-l-zinc-600/60 transition-colors duration-150 motion-reduce:transition-none hover:bg-zinc-900/60 hover:border-zinc-700/65";
 
+/** Inner row fill on neutral project rows — keep in sync with {@link ProjectRow}. */
+export const ROADMAP_PROJECT_INNER_ROW_NEUTRAL_CLASS = "bg-zinc-950/55";
+
+/**
+ * Goal header sticky fill — a hair lighter than the project inner row
+ * ({@link ROADMAP_PROJECT_INNER_ROW_NEUTRAL_CLASS}) so hierarchy still reads, but kept
+ * close to zinc-950 so the strip does not read as a bright band. Solid (no backdrop-blur).
+ */
+export const ROADMAP_GOAL_HEADER_SURFACE_CLASS =
+  "bg-[var(--surface-group-header)]";
+
+/** Goal header hover — subtle lift without returning to the old bright gray. */
+export const ROADMAP_GOAL_HEADER_NEUTRAL_HOVER_CLASS = "hover:bg-[#1a1a20]";
+
+/**
+ * Neutral goal block outer (no at-risk / spotlight) — shell fill aligned with
+ * {@link ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS}; omits full perimeter border so stacked
+ * goals keep a single divider between blocks.
+ */
+export const ROADMAP_GOAL_OUTER_NEUTRAL_CLASS =
+  "bg-zinc-900/45 ring-1 ring-black/25 border-l-[3px] border-l-zinc-600/60";
+

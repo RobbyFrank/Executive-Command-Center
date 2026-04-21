@@ -11,16 +11,7 @@ import {
   writeSlackThreadStatusCache,
   type SlackThreadStatusOk,
 } from "@/lib/slackThreadStatusCache";
-
-function rosterHintsFromPeople(people: Person[]): SlackMemberRosterHint[] {
-  return people
-    .filter((p) => p.slackHandle.trim() !== "")
-    .map((p) => ({
-      slackUserId: p.slackHandle,
-      name: p.name,
-      profilePicturePath: p.profilePicturePath.trim() || undefined,
-    }));
-}
+import { slackRosterHintsFromPeople } from "@/lib/slack-roster-hints";
 
 export type UseSlackThreadStatusResult = {
   status: SlackThreadStatusOk | null;
@@ -40,7 +31,7 @@ export function useSlackThreadStatus(
   people: Person[]
 ): UseSlackThreadStatusResult {
   const rosterHints = useMemo(
-    () => rosterHintsFromPeople(people),
+    () => slackRosterHintsFromPeople(people),
     [people]
   );
 

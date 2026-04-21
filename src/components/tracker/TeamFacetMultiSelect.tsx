@@ -10,6 +10,10 @@ import {
 } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  FilterSelectSelectionBadge,
+  filterSelectTriggerButtonClass,
+} from "./filter-select-trigger";
 
 export interface TeamFacetOption {
   id: string;
@@ -106,7 +110,7 @@ export function TeamFacetMultiSelect({
     );
 
   return (
-    <div className="relative min-w-[9rem] w-full max-w-[16rem] overflow-visible">
+    <div className="relative min-w-[7rem] w-full max-w-full overflow-visible">
       <span id={`${listId}-label`} className="sr-only">
         {ariaLabel}
       </span>
@@ -117,9 +121,12 @@ export function TeamFacetMultiSelect({
         aria-labelledby={`${listId}-label`}
         aria-controls={`${listId}-panel`}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900/80 py-1.5 pl-2 pr-2 text-left text-sm text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+        className={filterSelectTriggerButtonClass(open, selectedIds.length > 0)}
       >
-        <span className="flex min-w-0 flex-1 items-center gap-2">{buttonSummary}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          {buttonSummary}
+          <FilterSelectSelectionBadge count={selectedIds.length} />
+        </span>
         <ChevronDown
           className={cn(
             "h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform motion-reduce:transition-none",
@@ -131,12 +138,12 @@ export function TeamFacetMultiSelect({
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[120]" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
             id={`${listId}-panel`}
             role="group"
             aria-label={ariaLabel}
-            className="absolute right-0 top-full z-[130] mt-1 min-w-full w-max max-w-[min(100vw-2rem,22rem)] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
+            className="absolute right-0 top-full z-50 mt-1 min-w-full w-max max-w-[min(100vw-2rem,22rem)] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-lg"
           >
             {enableSearch ? (
               <div className="border-b border-zinc-800 px-2 pb-2 pt-1.5">
@@ -156,7 +163,7 @@ export function TeamFacetMultiSelect({
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={searchPlaceholder}
                     autoComplete="off"
-                    className="w-full rounded-md border border-zinc-700 bg-zinc-950/80 py-1.5 pl-8 pr-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                    className="w-full rounded-md border border-zinc-700 bg-zinc-950/80 py-1.5 pl-8 pr-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
                   />
                 </div>
               </div>

@@ -30,7 +30,7 @@ On **Companies**, rows are **grouped by MRR tier**: Idea ($0), Startup ($1–$1K
 - **Team** employment — **In-house**, **In-house (hourly)**, or **Outsourced**.
 - **App login** — optional **`passwordHash`** (bcrypt). Sign-in uses the person’s **email** plus password; the hash is never sent to the client (only a `loginPasswordSet` flag on reads). Founders set passwords on **Team → Login**; see [strategic-tracker-ai-auth.md](strategic-tracker-ai-auth.md).
 
-The **Team** page lists **founders** (fixed person records) first, then groups remaining rows by **autonomy score** (1–5), with section headers per autonomy level (the score uses neutral blocks in the Autonomy column). Each row shows **workload**: total owned projects, P0/P1 counts, and **companies** where they own projects (logos from the Companies page when set; otherwise short names).
+The **Team** page lists **founders** (fixed person records) first, then groups remaining rows by **autonomy score** (1–5), with section headers per autonomy level (the score uses neutral blocks in the Autonomy column). Each row shows **workload**: total owned projects, P0/P1 counts, and **companies** where they own projects (logos from the Companies page when set; otherwise short names). Optional **`skippedFromNewHires`** hides a person from the **New hires** strip on Team; it resets when their **join date** changes to a new non-empty value.
 
 **Goals** can store an optional **Slack channel** name and **URL**; **projects** can store **Slack channel**, **thread** (label/title), and **URL** (inline when each goal/project row is expanded). Slack *integration* behavior is documented in [strategic-tracker-slack.md](strategic-tracker-slack.md).
 

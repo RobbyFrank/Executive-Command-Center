@@ -51,12 +51,21 @@ export interface CompanyWithGoals extends Company {
   goals: GoalWithProjects[];
 }
 
+/** One roster member shown in the Companies directory Team column (goal/project owners). */
+export interface CompanyDirectoryTeamMember {
+  id: string;
+  name: string;
+  profilePicturePath: string;
+}
+
 /** Aggregates for the Companies directory (goals / projects / distinct owners + momentum). */
 export interface CompanyDirectoryStats {
   goals: number;
   projects: number;
-  /** Distinct people who own at least one goal or project under this company. */
+  /** Non-founder team avatars only: count matches `teamMembers.length`. */
   owners: number;
+  /** Goal/project owners for this company, excluding founders; autonomy 5→0 then name. */
+  teamMembers: CompanyDirectoryTeamMember[];
   /** Goals with status In Progress. */
   activeGoals: number;
   /** Projects with status In Progress. */

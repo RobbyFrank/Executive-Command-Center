@@ -3,6 +3,7 @@ import { SLACK_USER_ID_RE } from "@/lib/slackUserId";
 import {
   isValidPersonEmail,
   isValidPersonPhone,
+  normalizePersonEmail,
 } from "@/lib/personContactValidation";
 
 // --- Enums ---
@@ -229,11 +230,15 @@ const PersonInputSchema = z.object({
   profilePicturePath: z.string().default(""),
   /** Calendar date (YYYY-MM-DD) when the person joined */
   joinDate: z.string().default(""),
+  /** Permalink to Nadav's welcome message in the onboarding group DM (optional). */
+  welcomeSlackUrl: z.string().default(""),
+  /** Slack channel ID of the onboarding MPIM (optional). */
+  welcomeSlackChannelId: z.string().default(""),
   /** Work email (optional). Invalid stored values are cleared on load (legacy / bad data). */
   email: z
     .string()
     .default("")
-    .transform((s) => s.trim())
+    .transform((s) => normalizePersonEmail(s))
     .transform((s) => (isValidPersonEmail(s) ? s : "")),
   /** Phone (optional). Invalid stored values are cleared on load (legacy / bad data). */
   phone: z
@@ -251,6 +256,11 @@ const PersonInputSchema = z.object({
    * count as founders; explicit `false` opts out.
    */
   isFounder: z.boolean().optional(),
+  /**
+   * When true, hide this person from the Team page "New hires" strip until their
+   * join date changes (cleared automatically in `updatePerson`).
+   */
+  skippedFromNewHires: z.boolean().optional(),
   /** bcrypt hash for app login; empty means no login. Never expose to the client. */
   passwordHash: z
     .string()
@@ -271,6 +281,8 @@ export const PersonSchema = PersonInputSchema.transform((p) => {
     slackHandle: p.slackHandle,
     profilePicturePath: p.profilePicturePath,
     joinDate: p.joinDate,
+    welcomeSlackUrl: p.welcomeSlackUrl,
+    welcomeSlackChannelId: p.welcomeSlackChannelId,
     email: p.email,
     phone: p.phone,
     estimatedMonthlySalary: Math.max(
@@ -280,6 +292,9 @@ export const PersonSchema = PersonInputSchema.transform((p) => {
     employment,
     passwordHash: p.passwordHash,
     ...(p.isFounder !== undefined ? { isFounder: p.isFounder } : {}),
+    ...(p.skippedFromNewHires !== undefined
+      ? { skippedFromNewHires: p.skippedFromNewHires }
+      : {}),
   };
 });
 
@@ -289,6 +304,10 @@ export const SlackScrapeEvidenceSchema = z.object({
   channel: z.string().min(1),
   ts: z.string().min(1),
   quote: z.string().min(1),
+  /** Slack user id of the message author (filled server-side from transcript). */
+  authorSlackUserId: z.string().optional(),
+  /** Tracker person id when the author maps to the roster (filled server-side). */
+  authorPersonId: z.string().optional(),
 });
 
 /** Goal fields proposed for a new goal (ids set server-side). */

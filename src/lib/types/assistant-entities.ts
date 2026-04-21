@@ -13,6 +13,8 @@ export type AssistantPersonRef = {
 };
 
 export type AssistantEntitiesBundle = {
+  /** Tracker document revision — bumps on any roadmap mutation; used for client caches. */
+  revision: number;
   companies: AssistantEntityOption[];
   goals: AssistantEntityOption[];
   projects: AssistantEntityOption[];

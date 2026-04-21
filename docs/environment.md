@@ -17,6 +17,8 @@ Copy `.env.example` to `.env.local` and set values below. The app does not commi
 | -------- | ------- |
 | `ANTHROPIC_API_KEY` | Enables the **Assistant** (floating button), **Update with AI…**, **AI create**, company **Generate from website…**, Slack thread drafting/summaries, and milestone likelihood. Without it, those features return a configuration error. |
 | `ANTHROPIC_MODEL` | Optional override for the default Claude model (e.g. `claude-sonnet-4-6`). |
+| `ROBBY_CALENDLY_URL` | Optional; included in **new hire pilot** assignment Slack drafts when set (Team onboarding). |
+| `NADAV_SLACK_USER_ID` | Optional fallback Slack user id for **Nadav** (used by the new hire **buddy group DM** when no roster `Person.id === "nadav"` with `slackHandle` exists). Format: `U01234ABCDE`. |
 
 ## Images (optional)
 
@@ -56,6 +58,14 @@ Roadmap UI includes a **status dot** (green = activity within 24h, amber = quiet
 
 Profile photos from Slack import use **Vercel Blob** when `BLOB_READ_WRITE_TOKEN` is set. Roster duplicates are skipped by Slack user ID.
 
+### Team roster message-based enrichment (Role / Department / Join Date fallback)
+
+**Import from Slack** and **Refresh all from Slack** on the Team page use Slack `search.messages` (`query=from:<@USERID>`) to backfill empty **Role**, empty **Department**, and empty **Join Date** fields from a person’s last ~50 messages (AI-inferred role/dept via Claude; oldest-message `ts` for the join-date fallback). Existing non-empty values are never overwritten.
+
+Add **User Token Scope `search:read`** to the same `xoxp-` token used for `SLACK_BILLING_USER_TOKEN` (or `SLACK_CHANNEL_LIST_USER_TOKEN` if you prefer that one), reinstall the app, and re-run user OAuth. Without the scope the roster import/refresh still runs—the enrichment is silently skipped.
+
+Requires `ANTHROPIC_API_KEY` for the role/department inference; the join-date fallback is pure Slack data and works without it. See [strategic-tracker-slack.md](strategic-tracker-slack.md#message-based-enrichment-role--department--join-date-fallback) for the algorithm.
+
 ## Daily executive digest (optional)
 
 A Vercel Cron job can post an AI-generated digest to `#executive-priorities` every morning. It reads the last 7 days of channel messages, joins them with the current tracker (at-risk / spotlight / P0–P1 / upcoming milestones), and surfaces only **new, interesting, or problematic** items since yesterday's digest. See [operations.md](operations.md#daily-executive-digest) for the full runbook.
@@ -69,9 +79,16 @@ A Vercel Cron job can post an AI-generated digest to `#executive-priorities` eve
 
 Slack user-token scopes reused from the milestone-thread flow cover the digest as-is: `channels:history`, `groups:history`, and `chat:write`.
 
+## New hire onboarding (optional)
+
+See [onboarding.md](onboarding.md) for the pilot recommender, cron detector, and Team flows. Reuses the same Slack user token and `ANTHROPIC_API_KEY` as other AI features.
+
+The **buddy group DM** action (Team → Assign onboarding project → assignment dialog → "Open new group DM with buddies + Nadav") opens a multi-person DM via `conversations.open` and posts as the OAuth user. Requires the user token to also have **`mpim:write`** (and ideally **`im:write`** for 1:1 fallback). Resolves Nadav from `Person.id === "nadav"`, then any founder named "Nadav", then `NADAV_SLACK_USER_ID` env override.
+
 ## See also
 
 - [data-storage.md](data-storage.md) — Redis key, seeding, backups
 - [strategic-tracker.md](strategic-tracker.md) — Roadmap documentation index
+- [onboarding.md](onboarding.md) — New hire pilot projects and Slack onboarding
 - [strategic-tracker-data-model.md](strategic-tracker-data-model.md) — Data model; [strategic-tracker-roadmap-ui.md](strategic-tracker-roadmap-ui.md) — Roadmap UI
 - [operations.md](operations.md) — CI, health, caching, AI rate limits, PII in prompts

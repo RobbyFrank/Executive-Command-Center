@@ -33,6 +33,13 @@ export const getCachedPersonWorkloads = unstable_cache(
   trackerTag
 );
 
+/** Flat project list (new-hire pilot detection, Team onboarding). */
+export const getCachedProjects = unstable_cache(
+  async () => getRepository().getProjects(),
+  ["ecc-page-projects"],
+  trackerTag
+);
+
 /** Companies page momentum / stats columns. */
 export const getCachedCompanyStatsByCompanyId = unstable_cache(
   async (): Promise<Record<string, CompanyDirectoryStats>> =>

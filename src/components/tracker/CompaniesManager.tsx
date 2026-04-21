@@ -2,7 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Company, CompanyDirectoryStats } from "@/lib/types/tracker";
+import type {
+  Company,
+  CompanyDirectoryStats,
+  CompanyDirectoryTeamMember,
+} from "@/lib/types/tracker";
+import { firstNameFromFullName } from "@/lib/personDisplayName";
 import {
   groupCompaniesByRevenueTier,
   REVENUE_TIER_META,
@@ -24,7 +29,13 @@ import {
 } from "@/server/actions/tracker";
 import { CompanyDescriptionGenerateExtras } from "./CompanyDescriptionGenerateExtras";
 import { RoadmapViewProvider } from "./roadmap-view-context";
-import { RoadmapStickyToolbar } from "./RoadmapStickyToolbar";
+import { PageToolbar } from "./PageToolbar";
+import { EmptyState } from "./EmptyState";
+import { RoadmapStickyBelowToolbarGap } from "./RoadmapStickyBelowToolbarGap";
+import {
+  CompaniesGroupingSelect,
+  type CompaniesGroupingMode,
+} from "./CompaniesGroupingSelect";
 import { Building2, Plus, Rocket } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatWebsiteFaviconDisplay } from "@/lib/formatWebsiteDisplay";
@@ -33,6 +44,7 @@ const EMPTY_STATS: CompanyDirectoryStats = {
   goals: 0,
   projects: 0,
   owners: 0,
+  teamMembers: [],
   activeGoals: 0,
   activeProjects: 0,
   goalsWithSpotlight: 0,
@@ -49,8 +61,6 @@ const MOMENTUM_SECTION = {
   mrrRange:
     "Highest composite score first (active work, spotlight, milestones; at-risk reduces score)",
 } as const;
-
-type CompaniesViewMode = "mrr_tier" | "momentum";
 
 interface CompaniesManagerProps {
   initialCompanies: Company[];
@@ -77,13 +87,82 @@ const NEW_COMPANY_DEFAULT = {
   pinned: false,
 } as const;
 
-export function CompaniesManager({
+/** Overlapping faces for goal/project owners on the Companies table. */
+function CompanyTeamAvatarStack({
+  members,
+}: {
+  /** Missing when older cached payloads omit `teamMembers`. */
+  members?: CompanyDirectoryTeamMember[] | null;
+}) {
+  const list = members ?? [];
+  const n = list.length;
+  if (n === 0) {
+    return (
+      <span
+        className="text-xs text-zinc-600"
+        title="No goal or project owners yet"
+        aria-label="No goal or project owners yet"
+      >
+        —
+      </span>
+    );
+  }
+  const show = n <= 5 ? list : list.slice(0, 4);
+  const overflow = n > 5 ? n - 4 : 0;
+  const title = list.map((m) => m.name).join(", ");
+
+  return (
+    <div
+      className="flex justify-center"
+      title={title}
+      role="group"
+      aria-label={`Team: ${title}`}
+    >
+      <div className="flex items-center justify-end -space-x-1.5">
+        {show.map((m, i) => (
+          <span
+            key={m.id}
+            className="relative inline-flex shrink-0 rounded-full ring-2 ring-zinc-950"
+            style={{ zIndex: show.length - i }}
+          >
+            {m.profilePicturePath?.trim() ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={m.profilePicturePath.trim()}
+                alt=""
+                className="h-6 w-6 rounded-full object-cover"
+              />
+            ) : (
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-zinc-200">
+                {(
+                  firstNameFromFullName(m.name).charAt(0) ||
+                  m.name.trim().charAt(0) ||
+                  "?"
+                ).toUpperCase()}
+              </span>
+            )}
+          </span>
+        ))}
+        {overflow > 0 ? (
+          <span
+            className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold tabular-nums text-zinc-200 ring-2 ring-zinc-950"
+            style={{ zIndex: show.length + 2 }}
+          >
+            +{overflow}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CompaniesManagerInner({
   initialCompanies,
   companyStatsByCompanyId,
 }: CompaniesManagerProps) {
   const router = useRouter();
   const companies = initialCompanies;
-  const [viewMode, setViewMode] = useState<CompaniesViewMode>("mrr_tier");
+  const [viewMode, setViewMode] = useState<CompaniesGroupingMode>("mrr_tier");
   /** After adding a company, name cell opens in edit mode so the user can type immediately. */
   const [newCompanyNameFocusId, setNewCompanyNameFocusId] = useState<
     string | null
@@ -140,7 +219,7 @@ export function CompaniesManager({
   }, [viewMode, companies, tierGroups, companyStatsByCompanyId]);
 
   const companyRowGridClass =
-    "grid grid-cols-[3rem_minmax(8rem,10.5rem)_minmax(12rem,20rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_3.5rem_minmax(8rem,1fr)_minmax(5rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
+    "grid grid-cols-[3rem_minmax(8rem,10.5rem)_minmax(12rem,20rem)_minmax(11rem,1fr)_8.5rem_8.5rem_4rem_5rem_3.5rem_3.5rem_minmax(6.5rem,9rem)_minmax(8rem,1fr)_minmax(5rem,auto)] gap-x-4 gap-y-2 items-center pl-3 pr-4 py-3 border-l-2";
 
   function validateWebsite(draft: string): string | undefined {
     const t = draft.trim();
@@ -161,72 +240,50 @@ export function CompaniesManager({
 
   if (companies.length === 0) {
     return (
-      <RoadmapViewProvider>
-        <RoadmapStickyToolbar>
-          <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-            <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
-              Companies
-            </h1>
-          </div>
-        </RoadmapStickyToolbar>
+      <>
+        <PageToolbar title="Companies" />
         <div className="min-w-0 max-w-full px-6 pb-6">
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-700/80 bg-zinc-900/30 px-6 py-20">
-            <div className="flex items-center justify-center h-14 w-14 rounded-full bg-zinc-800/80 ring-1 ring-zinc-700 mb-5">
-              <Building2 className="h-7 w-7 text-zinc-500" />
-            </div>
-            <h2 className="text-base font-semibold text-zinc-200 mb-1.5">No companies yet</h2>
-            <p className="text-sm text-zinc-500 text-center max-w-sm mb-6">
-              Companies are the building blocks of your portfolio. Add your first company to start tracking revenue, goals, and momentum.
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleAddCompany()}
-              className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
-            >
-              <Rocket className="h-4 w-4" />
-              Add your first company
-            </button>
-          </div>
+          <RoadmapStickyBelowToolbarGap />
+          <EmptyState
+            icon={Building2}
+            title="No companies yet"
+            description="Companies are the building blocks of your portfolio. Add your first company to start tracking revenue, goals, and momentum."
+            descriptionClassName="max-w-sm"
+            actions={
+              <button
+                type="button"
+                onClick={() => void handleAddCompany()}
+                className="inline-flex items-center gap-2 rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950"
+              >
+                <Rocket className="h-4 w-4" />
+                Add your first company
+              </button>
+            }
+          />
         </div>
-      </RoadmapViewProvider>
+      </>
     );
   }
 
   return (
-    <RoadmapViewProvider>
-      <RoadmapStickyToolbar>
-        <div className="flex flex-wrap items-center gap-3 px-1 min-h-[2.25rem]">
-          <h1 className="shrink-0 text-lg font-bold tracking-tight text-zinc-100 sm:text-xl">
-            Companies
-          </h1>
-          <div className="min-w-0">
-            <label htmlFor="companies-view-mode" className="sr-only">
-              Group companies by MRR tier or momentum
-            </label>
-            <select
-              id="companies-view-mode"
-              value={viewMode}
-              onChange={(e) =>
-                setViewMode(e.target.value as CompaniesViewMode)
-              }
-              aria-label="Group companies by MRR tier or momentum"
-              className={cn(
-                "min-h-[2.25rem] w-full min-w-[12rem] cursor-pointer rounded-md border border-zinc-700 bg-zinc-900/80 px-3 py-1.5 text-sm font-medium text-zinc-200",
-                "transition-colors hover:border-zinc-600 hover:text-zinc-100",
-                "focus:outline-none focus:ring-1 focus:ring-zinc-500"
-              )}
-            >
-              <option value="mrr_tier">Group by MRR tier</option>
-              <option value="momentum">Sort by momentum</option>
-            </select>
-          </div>
+    <>
+      <PageToolbar title="Companies">
+        <div className="ml-auto flex min-w-0 shrink-0 items-center justify-end">
+          <CompaniesGroupingSelect
+            value={viewMode}
+            onChange={setViewMode}
+          />
         </div>
-      </RoadmapStickyToolbar>
+      </PageToolbar>
 
       <div className="min-w-0 max-w-full px-6 pb-6">
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 max-w-full overflow-x-auto">
+      <RoadmapStickyBelowToolbarGap />
+      <div className="max-w-full overflow-x-auto rounded-lg border border-zinc-800/55 bg-zinc-900/45 shadow-sm ring-1 ring-black/25">
         <div
-          className={`${companyRowGridClass} border-b border-zinc-800 bg-zinc-900/80 text-xs font-medium text-zinc-500 border-l-zinc-800`}
+          className={cn(
+            companyRowGridClass,
+            "border-b border-zinc-700/70 bg-[var(--surface-toolbar)] text-[11px] font-medium uppercase tracking-wider text-zinc-400 border-l-zinc-800"
+          )}
         >
           <div className="text-left" aria-hidden="true" />
           <div className="text-left min-w-0" aria-hidden="true" />
@@ -243,7 +300,7 @@ export function CompaniesManager({
           <div className="text-left">Revenue</div>
           <div className="text-center tabular-nums">Goals</div>
           <div className="text-center tabular-nums">Projects</div>
-          <div className="text-center tabular-nums">Owners</div>
+          <div className="text-center text-zinc-400">Team</div>
           <div className="text-left min-w-0 text-zinc-400">Momentum</div>
           <div className="text-right">
             <span className="sr-only">Actions</span>
@@ -251,8 +308,10 @@ export function CompaniesManager({
         </div>
         {sections.map(({ key, title, subtitle, companies: tierCompanies }) => (
           <section key={key}>
-            <div className="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/80">
-              <h2 className="text-sm font-semibold text-zinc-200">{title}</h2>
+            <div className="border-b border-zinc-800/80 bg-zinc-900/50 px-4 py-2.5">
+              <h2 className="text-sm font-semibold tracking-tight text-zinc-100">
+                {title}
+              </h2>
               <p className="text-xs text-zinc-500 mt-0.5">{subtitle}</p>
             </div>
             <div className="divide-y divide-zinc-800">
@@ -267,7 +326,9 @@ export function CompaniesManager({
                   <div
                     key={company.id}
                     className={cn(
-                      `group ${companyRowGridClass}`,
+                      "group transition-colors",
+                      companyRowGridClass,
+                      "bg-zinc-950/55 hover:bg-zinc-900/45",
                       borderAccent
                     )}
                   >
@@ -409,8 +470,8 @@ export function CompaniesManager({
                         </span>
                       )}
                     </div>
-                    <div className="text-center text-zinc-300 tabular-nums text-sm">
-                      {st.owners}
+                    <div className="flex min-w-0 justify-center">
+                      <CompanyTeamAvatarStack members={st.teamMembers} />
                     </div>
 
                     <div className="min-w-0 w-full">
@@ -453,6 +514,14 @@ export function CompaniesManager({
         </button>
       </div>
       </div>
+    </>
+  );
+}
+
+export function CompaniesManager(props: CompaniesManagerProps) {
+  return (
+    <RoadmapViewProvider>
+      <CompaniesManagerInner {...props} />
     </RoadmapViewProvider>
   );
 }

@@ -12,10 +12,30 @@ import {
   savePersonProfileFromRemoteUrl,
 } from "@/server/imageFiles";
 import { getPeople, updatePerson } from "@/server/actions/tracker";
+import { buildSlackMessageEnrichmentForUser } from "./roster-enrich-from-messages";
 
 export type RefreshPersonResult =
   | { ok: true; person: Person; avatarWarning?: string }
   | { ok: false; error: string };
+
+/**
+ * Collects department labels currently in use on the roster (minus the passed-in person
+ * whose own value may be blank). Used to anchor the AI when inferring a new member's
+ * department from Slack messages, so "Engineering" doesn't get re-proposed as
+ * "Engineers" when the team already has the former.
+ */
+function collectKnownDepartments(
+  people: Person[],
+  excludePersonId?: string
+): string[] {
+  const set = new Set<string>();
+  for (const p of people) {
+    if (excludePersonId && p.id === excludePersonId) continue;
+    const d = p.department?.trim();
+    if (d) set.add(d);
+  }
+  return [...set];
+}
 
 /**
  * Fetches the latest profile from Slack for a person that already has a `slackHandle`.
@@ -85,6 +105,60 @@ export async function refreshPersonFromSlack(
   } else if (avatarUrl && !process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
     avatarWarning =
       "Profile photo not updated — BLOB_READ_WRITE_TOKEN is not set.";
+  }
+
+  /**
+   * Message-based enrichment — only reaches out to Slack `search.messages` when at least
+   * one of the inferred fields (role/department, join date) is actually missing on the
+   * roster row *after* profile data was applied. Empty role AND a join date we just set
+   * still skips the AI call, which keeps refresh latency reasonable for "everything is
+   * already filled in" rows.
+   */
+  const peopleBefore = await getPeople();
+  const existingPerson = peopleBefore.find((p) => p.id === personId);
+  const currentRole = (existingPerson?.role ?? "").trim();
+  /** Effective join date after profile data — empty means we STILL need a fallback. */
+  const effectiveJoinDate = (
+    updates.joinDate ??
+    existingPerson?.joinDate ??
+    ""
+  ).trim();
+  const wantRoleDept = currentRole === "";
+  const wantJoinDate = effectiveJoinDate === "";
+
+  if (wantRoleDept || wantJoinDate) {
+    const knownDepartments = collectKnownDepartments(peopleBefore, personId);
+    const enrichment = await buildSlackMessageEnrichmentForUser({
+      slackUserId: m.id,
+      skipRoleAndDepartment: !wantRoleDept,
+      skipJoinDate: !wantJoinDate,
+      knownDepartments,
+    });
+
+    logSlackJoinDate("refreshPersonFromSlack message-enrichment", {
+      personId,
+      slackUserId: m.id,
+      messageCount: enrichment.messageCount,
+      joinDateFromOldestMessage:
+        enrichment.joinDateFromOldestMessage || "(empty)",
+      roleGuess: enrichment.role ?? "(none)",
+      departmentGuess: enrichment.department ?? "(none)",
+      note: enrichment.note ?? "(ok)",
+    });
+
+    if (wantRoleDept && enrichment.role) {
+      updates.role = enrichment.role;
+    }
+    if (
+      wantRoleDept &&
+      enrichment.department &&
+      (existingPerson?.department ?? "").trim() === ""
+    ) {
+      updates.department = enrichment.department;
+    }
+    if (wantJoinDate && enrichment.joinDateFromOldestMessage) {
+      updates.joinDate = enrichment.joinDateFromOldestMessage;
+    }
   }
 
   if (Object.keys(updates).length === 0 && !avatarWarning) {

@@ -18,7 +18,7 @@ export function RoadmapStickyBelowToolbarGap() {
   return (
     <div
       aria-hidden
-      className="sticky z-[29] -mx-6 shrink-0 bg-zinc-950 pointer-events-none"
+      className="sticky z-[29] -mx-6 shrink-0 bg-[var(--surface-toolbar)] pointer-events-none"
       style={{
         top: toolbarPx,
         height: ROADMAP_STICKY_GAP_BELOW_TOOLBAR_PX,

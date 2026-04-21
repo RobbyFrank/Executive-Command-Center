@@ -19,6 +19,7 @@ import {
 import { useResolvedSlackChannelLabel } from "@/hooks/useResolvedSlackChannelLabel";
 import type { Person } from "@/lib/types/tracker";
 import { cn } from "@/lib/utils";
+import { useSmoothText } from "@/hooks/useSmoothText";
 import { SlackDraftMessagePreview } from "./SlackDraftMessagePreview";
 import { SlackLogo } from "./SlackLogo";
 import {
@@ -63,6 +64,12 @@ export function SlackCreateThreadDialog({
     "idle" | "drafting" | "ready" | "revising" | "sending"
   >("idle");
   const [draft, setDraft] = useState("");
+  const isStreamingDraft = phase === "drafting" || phase === "revising";
+  // Smooths the incoming draft characters for the preview pane so the
+  // Slack-styled preview doesn't flicker on every server chunk. The raw
+  // `draft` state still flows straight into the <textarea> so Edit mode
+  // always shows the true value.
+  const smoothedDraft = useSmoothText(draft, isStreamingDraft);
   const [reviseHint, setReviseHint] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -492,7 +499,7 @@ export function SlackCreateThreadDialog({
                     aria-labelledby="slack-draft-message-label"
                   >
                     <SlackDraftMessagePreview
-                      text={draft}
+                      text={smoothedDraft}
                       people={people}
                       rosterHints={rosterHints}
                       posterDisplayName={poster?.displayName ?? "You"}
@@ -538,7 +545,7 @@ export function SlackCreateThreadDialog({
                       phase === "revising" ||
                       phase === "sending"
                     }
-                    className="min-h-[2.75rem] min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                    className="min-h-11 min-w-0 flex-1 self-stretch rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                   />
                   <button
                     type="button"
@@ -550,7 +557,7 @@ export function SlackCreateThreadDialog({
                     }
                     onClick={() => void revise()}
                     className={cn(
-                      "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium sm:min-w-[7.5rem]",
+                      "inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-stretch rounded-lg border px-4 text-sm font-medium sm:min-w-[7.5rem]",
                       phase === "revising"
                         ? "cursor-wait border-zinc-500 bg-zinc-800 text-zinc-200"
                         : "border-zinc-600 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40"
@@ -576,7 +583,7 @@ export function SlackCreateThreadDialog({
               ) : null}
             </div>
 
-            <div className="sticky bottom-0 z-[1] flex justify-end gap-3 border-t border-zinc-800/90 bg-zinc-900/98 px-5 py-4 backdrop-blur-sm sm:px-6">
+            <div className="sticky bottom-0 z-[1] flex items-center justify-between gap-3 border-t border-zinc-800/90 bg-zinc-900/98 px-5 py-4 backdrop-blur-sm sm:px-6">
               <button
                 type="button"
                 className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800"

@@ -1,6 +1,6 @@
-# Executive Command Center
+# Portfolio OS
 
-Next.js app for **MLabs portfolio** roadmaps: companies, goals, projects, milestones, team roster, Slack-assisted workflows, and an in-app AI assistant. Tracker data is a single JSON document in **Upstash Redis** with **optimistic locking** (`revision` + compare-and-set).
+Next.js app for the **MLabs portfolio**: companies, goals, projects, milestones, team roster, Slack-assisted workflows, and an in-app AI assistant. Tracker data is a single JSON document in **Upstash Redis** with **optimistic locking** (`revision` + compare-and-set).
 
 **Where to read more**
 
@@ -8,12 +8,13 @@ Next.js app for **MLabs portfolio** roadmaps: companies, goals, projects, milest
 - **[docs/environment.md](docs/environment.md)** — Environment variables (Redis, AI, Blob, Slack tokens)
 - **[docs/data-storage.md](docs/data-storage.md)** — Redis key, seed/import, backups, images
 - **[docs/operations.md](docs/operations.md)** — CI, health check, caching, AI rate limits, PII in prompts
+- **[docs/onboarding.md](docs/onboarding.md)** — New hire Slack detection, pilot recommender, Team onboarding, digest lines
 - **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Scan Slack for suggested goals/projects (owner/assignee hints, goal Slack channel from evidence)
 - **[docs/design-system.md](docs/design-system.md)** — Brand primitives (glass surfaces, spotlight, buttons) and CSS tokens
 
 ## Design system
 
-Shared UI lives under **`src/components/brand/`**: `Logo`, `PageHeader`, `GlassSurface`, `PremiumButton`, `DashboardMain` (dashboard background + subtle pointer spotlight), `AmbientPad` / `AmbientSpotlightLayers` + `useSpotlightCssVars` (grid highlight). Global tokens and utilities (`.brand-gradient-text`, `.brand-aurora`, focus `--ring`) are in **`src/app/globals.css`**. Favicon and Open Graph images are generated from **`src/app/icon.tsx`**, **`src/app/apple-icon.tsx`**, and **`src/app/opengraph-image.tsx`**.
+Shared UI lives under **`src/components/brand/`**: `Logo`, `PageHeader`, `GlassSurface`, `PremiumButton`, `DashboardMain` (dashboard background + subtle pointer spotlight), `AmbientPad` / `AmbientSpotlightLayers` + `useSpotlightCssVars` (grid highlight). Global tokens and utilities (`.brand-gradient-text`, `.brand-aurora`, focus `--ring`, **`--surface-toolbar`** / **`--surface-group-header`** for tracker chrome) are in **`src/app/globals.css`**. The app body uses **Inter** via `next/font` in **`src/app/layout.tsx`**. Roadmap / Team / Companies share **`PageToolbar`** and **`EmptyState`** in **`src/components/tracker/`**. Favicon and Open Graph images are generated from **`src/app/icon.tsx`**, **`src/app/apple-icon.tsx`**, and **`src/app/opengraph-image.tsx`**.
 
 ## Prerequisites
 
@@ -43,9 +44,9 @@ Shared UI lives under **`src/components/brand/`**: `Logo`, `PageHeader`, `GlassS
    npm run dev
    ```
 
-5. Open [http://localhost:3000](http://localhost:3000) and sign in. Use the sidebar for **Roadmap**, **Companies**, and **Team**.
+5. Open [http://localhost:3000](http://localhost:3000) and sign in. Use the sidebar for **Roadmap**, **Companies**, and **Team**. The **Team** page shows a **New hires** strip (first 30 days) with **Assign onboarding project** (AI-assisted assignment and Slack message) and **Skip** (dismiss someone from the strip until their join date changes). See [docs/onboarding.md](docs/onboarding.md).
 
-**Roadmap UI:** goal rows use a darker band than the project list; each project is a bordered card under the goal; milestones sit on a light shelf under the project bar (compact rows); project rows are indented vs goals; owner cells are compact avatars; goal Slack uses a compact channel chip (hash + add icon when unset). **Collapsed goals** show a compact **on-time / AI confidence / one-line summary** strip after the Slack column (rollup from child milestone likelihoods + `assessGoalOneLiner`; see [docs/strategic-tracker-slack.md](docs/strategic-tracker-slack.md)). Goal **Due date** / **Progress** are rollups (latest milestone due date across projects; milestone completion across projects). See [docs/strategic-tracker-roadmap-ui.md](docs/strategic-tracker-roadmap-ui.md).
+**Roadmap UI:** goal rows use a darker band than the project list; each project is a bordered card under the goal; milestones sit on a light shelf under the project bar (compact rows); project rows are indented vs goals; owner cells are compact avatars; goal Slack uses a compact channel chip (hash + add icon when unset). **Collapsed goals** show a clickable **goal delivery strip** after the Slack column: an overlapping **owner avatar stack** (distinct project owners sorted by autonomy desc), rollup **on-time %**, **AI confidence**, and a one-line summary (rollup from child milestone likelihoods + `assessGoalOneLiner`). Clicking opens a **goal delivery popover** with stats, reasoning, a per-project drill-down (worst-first), and an **Actions → New message in channel…** composer that posts a top-level message to the goal's Slack channel via `postGoalChannelMessage`. See [docs/strategic-tracker-slack.md](docs/strategic-tracker-slack.md). Goal **Due date** / **Progress** are rollups (latest milestone due date across projects; milestone completion across projects). **Milestone auto-complete:** when the AI-estimated progress for a milestone's Slack thread reaches **100%**, the milestone is automatically marked **Done** (one-shot per thread reply-count; respects manual reversion until new activity re-triggers the AI). See [docs/strategic-tracker-roadmap-ui.md](docs/strategic-tracker-roadmap-ui.md).
 
 ## Data
 
@@ -66,7 +67,9 @@ Redis key **`ecc:tracker:data`**; schema in `src/lib/schemas/tracker.ts`. Seed w
 
 - **CI** — GitHub Actions runs `npm run lint` and `npm run typecheck` on pushes and PRs to `main` / `master`.
 - **`GET /api/health`** — JSON liveness: Redis `PING` (no login). Details: [docs/operations.md](docs/operations.md).
+- **Draft goal/project AI** — The first “ideas” shortlist when opening the dialog is **server-cached for 10 minutes** (per company for new goals, per parent goal for new projects). The cache is dropped immediately when substantive goal or project fields change, or after TTL. See [docs/operations.md](docs/operations.md#draft-goalproject-ai--ideas-shortlist-cache).
 - **Daily executive digest** — Vercel Cron posts an AI summary to `#executive-priorities` every morning at **12:00 UTC (≈ 8:00 AM ET)** from `GET /api/cron/executive-digest`. It reads the last 7 days of channel messages, cross-references the tracker, and only surfaces **new / interesting / problematic** items since the previous digest (deduped in Redis). Configure `SLACK_EXECUTIVE_PRIORITIES_CHANNEL_ID`, `ECC_PUBLIC_BASE_URL` (default `https://admin.mlabs.vc`), and `CRON_SECRET` — see [docs/environment.md](docs/environment.md) and [docs/operations.md](docs/operations.md#daily-executive-digest).
+- **Onboarding detector** — Vercel Cron calls `GET /api/cron/onboarding-detector` three times daily to scan Slack for new-hire welcome threads and update the roster. Same `CRON_SECRET` auth. See [docs/onboarding.md](docs/onboarding.md) and [docs/operations.md](docs/operations.md#onboarding-detector-cron).
 
 ## Troubleshooting
 
@@ -84,6 +87,7 @@ Stale Next.js cache: see [docs/development.md](docs/development.md).
 | [docs/environment.md](docs/environment.md) | `.env.local` reference (Redis, AI, Blob, Slack) |
 | [docs/data-storage.md](docs/data-storage.md) | Redis key, seed, backup, uploads |
 | [docs/operations.md](docs/operations.md) | CI, health, cache tags, AI rate limits, PII redaction |
+| [docs/onboarding.md](docs/onboarding.md) | New hire detection, pilot recommender, Team onboarding |
 | [docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md) | Slack scan API and batch import |
 | [docs/development.md](docs/development.md) | Local dev troubleshooting |
 | [docs/design-system.md](docs/design-system.md) | Brand components, spotlight intensities, tokens |

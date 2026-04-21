@@ -1,8 +1,11 @@
 "use server";
 
-import { updateTag } from "next/cache";
+import { revalidateTag, updateTag } from "next/cache";
 import { getRepository } from "@/server/repository";
-import { ECC_TRACKER_DATA_TAG } from "@/lib/cache-tags";
+import {
+  ECC_AI_CREATE_IDEAS_TAG,
+  ECC_TRACKER_DATA_TAG,
+} from "@/lib/cache-tags";
 import { deleteFileIfInUploads } from "@/server/imageFiles";
 import { v4 as uuid } from "uuid";
 import type {
@@ -13,7 +16,7 @@ import type {
   Milestone,
   Person,
 } from "@/lib/types/tracker";
-import { isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
+import { isFounderPerson, isGoalDriEligiblePerson } from "@/lib/autonomyRoster";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import { isValidHttpUrl } from "@/lib/httpUrl";
 import { isBlockingProjectIncomplete } from "@/lib/blocked-status";
@@ -47,10 +50,50 @@ async function maybePromoteProjectToInProgressWhenMilestoneGetsSlackUrl(
   if (!project) return;
   if (project.status !== "Idea" && project.status !== "Pending") return;
   await repo.updateProject(projectId, { status: "In Progress" });
+  revalidateAiCreateIdeasCache();
 }
 
 function revalidateTrackerPages() {
   updateTag(ECC_TRACKER_DATA_TAG);
+}
+
+/** Busts the 10-minute cache for the initial AI "ideas shortlist" in Draft goal/project. */
+function revalidateAiCreateIdeasCache() {
+  revalidateTag(ECC_AI_CREATE_IDEAS_TAG, { expire: 0 });
+}
+
+/** Fields that change the substance of a goal for AI brainstorming context. */
+const GOAL_FIELDS_THAT_INVALIDATE_AI_IDEAS_CACHE = new Set([
+  "description",
+  "measurableTarget",
+  "whyItMatters",
+  "currentValue",
+  "priority",
+  "status",
+]);
+
+/** Fields that change the substance of a project for AI brainstorming context. */
+const PROJECT_FIELDS_THAT_INVALIDATE_AI_IDEAS_CACHE = new Set([
+  "name",
+  "description",
+  "definitionOfDone",
+  "priority",
+  "status",
+  "goalId",
+]);
+
+function goalPatchInvalidatesAiIdeasCache(updates: Partial<Goal>): boolean {
+  for (const k of Object.keys(updates)) {
+    if (GOAL_FIELDS_THAT_INVALIDATE_AI_IDEAS_CACHE.has(k)) return true;
+  }
+  return false;
+}
+
+function projectPatchInvalidatesAiIdeasCache(updates: Partial<Project>): boolean {
+  for (const k of Object.keys(updates)) {
+    if (PROJECT_FIELDS_THAT_INVALIDATE_AI_IDEAS_CACHE.has(k)) return true;
+  }
+  return false;
 }
 
 // --- Companies ---
@@ -113,6 +156,7 @@ export async function createGoal(
   };
   await repo.createGoal(goal);
   revalidateTrackerPages();
+  revalidateAiCreateIdeasCache();
   return goal;
 }
 
@@ -138,6 +182,9 @@ export async function updateGoal(
   const { createdAt: _omitCreatedAt, ...goalUpdates } = updates;
   const result = await repo.updateGoal(id, goalUpdates);
   revalidateTrackerPages();
+  if (goalPatchInvalidatesAiIdeasCache(goalUpdates)) {
+    revalidateAiCreateIdeasCache();
+  }
   return result;
 }
 
@@ -152,6 +199,7 @@ export async function deleteGoal(
     };
   }
   revalidateTrackerPages();
+  revalidateAiCreateIdeasCache();
   return { error: null };
 }
 
@@ -181,6 +229,7 @@ export async function createProject(
   };
   await repo.createProject(project);
   revalidateTrackerPages();
+  revalidateAiCreateIdeasCache();
   return project;
 }
 
@@ -209,12 +258,16 @@ export async function updateProject(
 
   const result = await repo.updateProject(id, next);
   revalidateTrackerPages();
+  if (projectPatchInvalidatesAiIdeasCache(next)) {
+    revalidateAiCreateIdeasCache();
+  }
   return result;
 }
 
 export async function deleteProject(id: string): Promise<void> {
   await repo.deleteProject(id);
   revalidateTrackerPages();
+  revalidateAiCreateIdeasCache();
 }
 
 /** Attach a project to an additional goal (mirror). Primary goal remains `goalId`. */
@@ -474,6 +527,7 @@ export async function createScrapedItems(
     };
   }
   revalidateTrackerPages();
+  revalidateAiCreateIdeasCache();
   return { ok: true };
 }
 
@@ -493,7 +547,23 @@ export async function updatePerson(
   id: string,
   updates: Partial<Omit<Person, "passwordHash">>
 ): Promise<Person> {
-  const result = await repo.updatePerson(id, updates);
+  const prev = await repo.getPerson(id);
+  if (!prev) {
+    throw new Error(`Person ${id} not found`);
+  }
+
+  let patch = { ...updates };
+  const nextJoin =
+    updates.joinDate !== undefined ? (updates.joinDate ?? "").trim() : undefined;
+  if (
+    nextJoin !== undefined &&
+    nextJoin !== "" &&
+    nextJoin !== (prev.joinDate ?? "").trim()
+  ) {
+    patch = { ...patch, skippedFromNewHires: false };
+  }
+
+  const result = await repo.updatePerson(id, patch);
   revalidateTrackerPages();
   return result;
 }
@@ -502,6 +572,9 @@ export async function deletePerson(
   id: string
 ): Promise<{ error: string | null }> {
   const person = await repo.getPerson(id);
+  if (person && isFounderPerson(person)) {
+    return { error: "Founders cannot be removed from the team." };
+  }
   try {
     await repo.deletePerson(id);
   } catch (e) {

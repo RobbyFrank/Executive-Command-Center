@@ -1428,3 +1428,400 @@ export async function fetchSlackUserLabelForToken(
   const name = (data.user.name ?? "").trim();
   return real || disp || name || id;
 }
+
+// ---------------------------------------------------------------------------
+// MPIM / DM helpers (onboarding detector, recommender intro context)
+// ---------------------------------------------------------------------------
+
+type ConversationsMembersResponse = {
+  ok?: boolean;
+  error?: string;
+  members?: string[];
+  response_metadata?: { next_cursor?: string };
+};
+
+/**
+ * Paginates `conversations.members` for a channel, IM, or MPIM.
+ */
+export async function fetchConversationMembers(
+  channelId: string
+): Promise<{ ok: true; memberIds: string[] } | { ok: false; error: string }> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scopes channels:read, groups:read, im:read, mpim:read.",
+    };
+  }
+
+  const collected: string[] = [];
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set("channel", channelId.trim());
+    params.set("limit", "200");
+    if (cursor) params.set("cursor", cursor);
+
+    const res = await fetch(
+      `https://slack.com/api/conversations.members?${params.toString()}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Slack API request failed (${res.status}).`,
+      };
+    }
+
+    const data = (await res.json()) as ConversationsMembersResponse;
+
+    if (!data.ok) {
+      const err = data.error ?? "unknown_error";
+      if (err === "missing_scope") {
+        return {
+          ok: false,
+          error:
+            "Slack token is missing conversations.members scope (often needs im:read, mpim:read, or channels:read).",
+        };
+      }
+      return { ok: false, error: `Slack API error: ${err}` };
+    }
+
+    for (const id of data.members ?? []) {
+      if (id) collected.push(id.trim().toUpperCase());
+    }
+
+    const next = data.response_metadata?.next_cursor?.trim();
+    if (!next) break;
+    cursor = next;
+  }
+
+  return { ok: true, memberIds: [...new Set(collected)] };
+}
+
+type ConversationsOpenResponse = {
+  ok?: boolean;
+  error?: string;
+  channel?: { id?: string };
+  no_op?: boolean;
+  already_open?: boolean;
+};
+
+/**
+ * Opens (or returns the existing) MPIM/IM with the given Slack user ids.
+ * Uses the user OAuth token so the resulting DM is owned by the workspace member,
+ * not the bot. Slack DM/MPIM cap is **8** users excluding the caller.
+ */
+export async function openSlackMpim(
+  userIds: string[]
+): Promise<
+  | { ok: true; channelId: string; alreadyOpen: boolean }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with mpim:write/im:write.",
+    };
+  }
+  const ids = [
+    ...new Set(
+      userIds
+        .map((u) => u.trim().toUpperCase())
+        .filter((u) => u.length > 0)
+    ),
+  ];
+  if (ids.length === 0) {
+    return { ok: false, error: "No Slack user ids provided." };
+  }
+
+  const body = new URLSearchParams();
+  body.set("users", ids.join(","));
+  body.set("return_im", "true");
+
+  const res = await fetch("https://slack.com/api/conversations.open", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `Slack API request failed (${res.status}).` };
+  }
+
+  const data = (await res.json()) as ConversationsOpenResponse;
+  if (!data.ok) {
+    const err = data.error ?? "unknown_error";
+    if (err === "missing_scope") {
+      return {
+        ok: false,
+        error:
+          "Slack token is missing mpim:write or im:write (User Token Scope). Add it and reinstall the app.",
+      };
+    }
+    if (err === "user_not_found" || err === "users_not_found") {
+      return {
+        ok: false,
+        error:
+          "One or more Slack user ids are unknown to the workspace. Verify each person's slackHandle.",
+      };
+    }
+    if (
+      err === "too_many_users" ||
+      err === "method_not_supported_for_channel_type"
+    ) {
+      return {
+        ok: false,
+        error:
+          "Slack rejected this DM size. Group DMs (MPIMs) cap at 8 users besides yourself.",
+      };
+    }
+    if (err === "not_enough_users" || err === "users_list_not_supplied") {
+      return {
+        ok: false,
+        error: "Need at least one Slack user id to open a DM.",
+      };
+    }
+    if (err === "user_disabled") {
+      return {
+        ok: false,
+        error:
+          "One of the Slack users is deactivated. Remove them and try again.",
+      };
+    }
+    return { ok: false, error: `Slack API error: ${err}` };
+  }
+
+  const channelId = data.channel?.id?.trim();
+  if (!channelId) {
+    return { ok: false, error: "Slack did not return a channel id." };
+  }
+  return {
+    ok: true,
+    channelId,
+    alreadyOpen: Boolean(data.already_open ?? data.no_op),
+  };
+}
+
+/**
+ * Lists `mpim` conversations the Slack user is in (group DMs).
+ */
+export async function fetchUserMpims(): Promise<
+  | { ok: true; channels: SlackApiChannel[] }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with mpim:read.",
+    };
+  }
+  return fetchConversationsListByTypesParam(token, "mpim");
+}
+
+/**
+ * Lists `im` direct messages the Slack user is in (1:1 DMs).
+ */
+export async function fetchUserIms(): Promise<
+  | { ok: true; channels: SlackApiChannel[] }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with im:read.",
+    };
+  }
+  return fetchConversationsListByTypesParam(token, "im");
+}
+
+/**
+ * Top-level DM/MPIM history (same semantics as {@link fetchSlackChannelHistory}).
+ */
+export async function fetchDmHistory(
+  channelId: string,
+  options: { maxMessages?: number } = {}
+): Promise<
+  | { ok: true; messages: SlackChannelHistoryMessage[] }
+  | { ok: false; error: string }
+> {
+  return fetchSlackChannelHistory(channelId, {
+    maxMessages: options.maxMessages ?? 50,
+    limitPerPage: 100,
+  });
+}
+
+/**
+ * Paginates `conversations.history` until the channel is exhausted or `maxTotal` messages
+ * (top-level only). Sorted ascending by `ts` (oldest first).
+ */
+export async function fetchAllSlackChannelMessagesForChannel(
+  channelId: string,
+  options: { maxTotal?: number } = {}
+): Promise<
+  | { ok: true; messages: SlackChannelHistoryMessage[] }
+  | { ok: false; error: string }
+> {
+  const token = slackUserTokenForThreads();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack user token is not configured for history. Set SLACK_BILLING_USER_TOKEN or SLACK_CHANNEL_LIST_USER_TOKEN (xoxp-) with User scopes channels:history, groups:history, im:history, mpim:history.",
+    };
+  }
+
+  const maxTotal = Math.min(Math.max(1, options.maxTotal ?? 2000), 2000);
+  const collected: SlackChannelHistoryMessage[] = [];
+  let cursor: string | undefined;
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set("channel", channelId.trim());
+    params.set("limit", "200");
+    if (cursor) params.set("cursor", cursor);
+
+    const res = await fetch(
+      `https://slack.com/api/conversations.history?${params.toString()}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `Slack API request failed (${res.status}).`,
+      };
+    }
+
+    const data = (await res.json()) as ConversationsHistoryResponse;
+
+    if (!data.ok) {
+      const err = data.error ?? "unknown_error";
+      if (err === "missing_scope") {
+        return {
+          ok: false,
+          error:
+            "Slack token is missing a required scope (channels:history, groups:history, im:history, or mpim:history).",
+        };
+      }
+      return { ok: false, error: `Slack API error: ${err}` };
+    }
+
+    const page = data.messages ?? [];
+    for (const m of page) {
+      if (!m?.ts) continue;
+      if (m.thread_ts && m.thread_ts !== m.ts) continue;
+      collected.push(m);
+      if (collected.length >= maxTotal) break;
+    }
+
+    if (collected.length >= maxTotal) break;
+
+    const next = data.response_metadata?.next_cursor?.trim();
+    if (!next) break;
+    cursor = next;
+  }
+
+  collected.sort((a, b) => compareSlackTs(a.ts, b.ts));
+  return { ok: true, messages: collected };
+}
+
+export type OnboardingMpimMatch = {
+  channelId: string;
+  memberCount: number;
+};
+
+/**
+ * Finds a group DM that includes Robby, Nadav, and the new hire. If multiple match,
+ * picks the most recently active (latest message `ts`).
+ */
+export async function findOnboardingMpimForPerson(options: {
+  robbySlackId: string;
+  nadavSlackId: string;
+  newHireSlackId: string;
+}): Promise<
+  | { ok: true; match: OnboardingMpimMatch | null }
+  | { ok: false; error: string }
+> {
+  const r = options.robbySlackId.trim().toUpperCase();
+  const n = options.nadavSlackId.trim().toUpperCase();
+  const h = options.newHireSlackId.trim().toUpperCase();
+  if (!r || !n || !h) {
+    return { ok: true, match: null };
+  }
+
+  const mpims = await fetchUserMpims();
+  if (!mpims.ok) return mpims;
+
+  const candidates: { channelId: string; memberCount: number; latestTs: string }[] =
+    [];
+
+  for (const ch of mpims.channels) {
+    if (!ch.id || !ch.is_mpim) continue;
+    const members = await fetchConversationMembers(ch.id);
+    if (!members.ok) continue;
+    const set = new Set(members.memberIds);
+    if (!set.has(r) || !set.has(n) || !set.has(h)) continue;
+    const hist = await fetchSlackChannelHistory(ch.id, {
+      maxMessages: 200,
+      limitPerPage: 100,
+    });
+    const latestTs =
+      hist.ok && hist.messages.length > 0
+        ? hist.messages[hist.messages.length - 1]!.ts
+        : "0";
+    candidates.push({
+      channelId: ch.id,
+      memberCount: members.memberIds.length,
+      latestTs,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return { ok: true, match: null };
+  }
+
+  candidates.sort((a, b) => compareSlackTs(b.latestTs, a.latestTs));
+  const best = candidates[0]!;
+  return {
+    ok: true,
+    match: { channelId: best.channelId, memberCount: best.memberCount },
+  };
+}
+
+/** Re-export for onboarding code; same as {@link getSlackMessagePermalink}. */
+export const getMessagePermalink = getSlackMessagePermalink;
+
+/**
+ * Searches a single user's Slack message history via `search.messages` (user OAuth token,
+ * `search:read` scope). Used by Team roster enrichment (Import from Slack / Refresh all)
+ * to fill in blank **Role / Department** (AI-inferred from recent chatter) and blank
+ * **Join Date** (oldest surviving message `ts`).
+ */
+export {
+  fetchSlackUserMessageHistory,
+  slackTsToYmdUtc,
+  type SlackUserMessageMatch,
+  type SlackUserMessageKind,
+} from "./slack/user-messages";

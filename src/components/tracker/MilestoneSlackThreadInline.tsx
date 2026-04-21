@@ -6,8 +6,14 @@ import type { SlackThreadStatusOk } from "@/lib/slackThreadStatusCache";
 import { displayInitials } from "@/lib/displayInitials";
 import { cn } from "@/lib/utils";
 
-const BODY_PREVIEW_MAX_CHARS = 200;
-const BODY_PREVIEW_MAX_CHARS_COMPACT = 110;
+/**
+ * Safety caps only — CSS `truncate` still clips with an ellipsis when the row is narrower
+ * than the full string. Kept generous so wider viewports show a full sentence before the
+ * row's flex container forces truncation (previously 200 / 110 clipped readable summaries
+ * inside otherwise-empty horizontal space).
+ */
+const BODY_PREVIEW_MAX_CHARS = 320;
+const BODY_PREVIEW_MAX_CHARS_COMPACT = 240;
 
 /** Reserve width ≥ two digits + % so on-time / progress don’t shift; `4.5ch` fits `100%` in tabular nums. */
 const PERCENT_SPAN_CLASS =

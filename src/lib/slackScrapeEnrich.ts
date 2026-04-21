@@ -104,6 +104,27 @@ function validPersonId(id: string, people: Person[]): string {
   return t && people.some((p) => p.id === t) ? t : "";
 }
 
+function attachEvidenceMessageAuthors(
+  evidence: Array<{ channel: string; ts: string; quote: string }>,
+  messageAuthors: Map<string, string>,
+  people: Person[]
+): void {
+  for (const e of evidence) {
+    const uid =
+      messageAuthors.get(
+        `${normalizeSlackChannelKey(e.channel)}::${e.ts.trim()}`
+      ) ?? "";
+    if (!uid) continue;
+    const row = e as {
+      authorSlackUserId?: string;
+      authorPersonId?: string;
+    };
+    row.authorSlackUserId = uid;
+    const pid = resolvePersonIdFromSlackUserId(uid, people);
+    if (pid) row.authorPersonId = pid;
+  }
+}
+
 /**
  * Resolves Slack channel on new goals from evidence, and fills owner/assignee person ids
  * using model output, @mentions in quotes, or message author lines.
@@ -123,6 +144,11 @@ export function enrichSlackScrapeSuggestions(
   }
 
   for (const s of suggestions) {
+    attachEvidenceMessageAuthors(
+      s.evidence,
+      options.messageAuthors,
+      options.people
+    );
     const mentionPerson = firstPersonIdFromEvidenceQuotes(
       s.evidence,
       options.people

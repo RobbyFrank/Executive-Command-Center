@@ -14,6 +14,7 @@ import {
 import {
   savePersonProfileFromRemoteUrl,
 } from "@/server/imageFiles";
+import { buildSlackMessageEnrichmentForUser } from "./roster-enrich-from-messages";
 
 export async function fetchSlackMembers() {
   return fetchSlackWorkspaceMembers();
@@ -64,6 +65,18 @@ export async function importSlackMembers(
       .filter((s): s is string => Boolean(s))
   );
 
+  /**
+   * Department labels already in use on the roster — passed to the AI so it snaps new
+   * members into existing buckets (Sales/Marketing/etc.) instead of minting near-duplicates.
+   */
+  const knownDepartmentsAtStart = [
+    ...new Set(
+      roster
+        .map((p) => p.department?.trim())
+        .filter((d): d is string => Boolean(d))
+    ),
+  ];
+
   const imported: Person[] = [];
   const avatarWarnings: string[] = [];
 
@@ -91,11 +104,37 @@ export async function importSlackMembers(
       slackHandle: slackId,
       profilePicturePath: "",
       joinDate,
+      welcomeSlackUrl: "",
+      welcomeSlackChannelId: "",
       email: (m.email ?? "").trim(),
       phone: "",
       estimatedMonthlySalary: 0,
       employment: "inhouse_salaried",
     });
+
+    /**
+     * Newly imported rows always start with role="" + department="". We also may be
+     * missing a joinDate when the workspace profile doesn't expose start_date. Pull the
+     * person's `search.messages` history once to backfill all three at once (AI-inferred
+     * role/dept + oldest-message join date). Best-effort: a missing `search:read` scope
+     * silently falls through without aborting the whole import.
+     */
+    const postCreateUpdates: Partial<Person> = {};
+    const enrichment = await buildSlackMessageEnrichmentForUser({
+      slackUserId: slackId,
+      skipRoleAndDepartment: false,
+      skipJoinDate: Boolean(joinDate),
+      knownDepartments: knownDepartmentsAtStart,
+    });
+    if (enrichment.role) {
+      postCreateUpdates.role = enrichment.role;
+    }
+    if (enrichment.department) {
+      postCreateUpdates.department = enrichment.department;
+    }
+    if (!joinDate && enrichment.joinDateFromOldestMessage) {
+      postCreateUpdates.joinDate = enrichment.joinDateFromOldestMessage;
+    }
 
     const url = (m.avatarUrl ?? "").trim();
     if (url) {
@@ -104,13 +143,18 @@ export async function importSlackMembers(
         imageUrl: url,
       });
       if (saved.ok) {
-        const updated = await updatePerson(person.id, {
-          profilePicturePath: saved.webPath,
-        });
-        imported.push(updated);
+        postCreateUpdates.profilePicturePath = saved.webPath;
       } else {
         avatarWarnings.push(`${label}: ${saved.error}`);
-        imported.push(person);
+      }
+    }
+
+    if (Object.keys(postCreateUpdates).length > 0) {
+      const updated = await updatePerson(person.id, postCreateUpdates);
+      imported.push(updated);
+      /** Newly guessed department label feeds the next row's AI call in the same import. */
+      if (updated.department && !knownDepartmentsAtStart.includes(updated.department)) {
+        knownDepartmentsAtStart.push(updated.department);
       }
     } else {
       imported.push(person);

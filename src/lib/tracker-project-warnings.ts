@@ -82,7 +82,7 @@ export function getGoalHeaderWarnings(
   const includeProjectWarnings = options?.includeProjectWarnings !== false;
 
   if (goal.projects.length === 0) {
-    /** No “no projects” chip — Roadmap shows Add project + AI on the goal row instead. */
+    /** Goal row shows a “No projects” badge in {@link GoalSection}; no rollup warnings. */
     return [];
   }
 

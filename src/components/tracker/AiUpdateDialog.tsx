@@ -5,6 +5,7 @@ import { X, Loader2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { updateGoal, updateProject } from "@/server/actions/tracker";
+import { StreamingText } from "@/components/ui/StreamingText";
 
 type MessageRole = "user" | "assistant";
 interface Message {
@@ -398,9 +399,12 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
               >
                 AI
               </span>
-              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words [text-wrap:pretty]">
-                {stripJsonFence(currentStreaming)}
-              </div>
+              <StreamingText
+                text={stripJsonFence(currentStreaming)}
+                isStreaming={loading}
+                className="min-w-0 flex-1 whitespace-pre-wrap break-words [text-wrap:pretty]"
+                caretClassName="bg-amber-400/70"
+              />
             </div>
           )}
 
@@ -505,7 +509,7 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
               </button>
             </div>
           ) : (
-            <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 items-stretch gap-2">
               <label htmlFor="ai-update-answer" className="sr-only">
                 Your answer (Shift+Enter for a new line)
               </label>
@@ -520,22 +524,20 @@ export function AiUpdateDialog(props: AiUpdateDialogProps) {
                     handleSend();
                   }
                 }}
-                rows={4}
+                rows={3}
                 placeholder="Your answer… (Shift+Enter for a new line)"
                 disabled={loading}
                 spellCheck
-                className="min-h-[5.5rem] max-h-48 w-full resize-y rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+                className="box-border min-h-[5.5rem] max-h-48 min-w-0 flex-1 resize-y self-stretch rounded-md border border-zinc-600 bg-zinc-950 px-2.5 py-2 text-sm leading-relaxed text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
               />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={loading || !input.trim()}
-                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Send
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={loading || !input.trim()}
+                className="inline-flex min-h-11 min-w-[5.25rem] shrink-0 items-center justify-center self-stretch rounded-md bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Send
+              </button>
             </div>
           )}
         </div>

@@ -43,6 +43,7 @@ import {
   unmirrorProjectFromGoal,
 } from "@/server/actions/tracker";
 import {
+  Calendar,
   ChevronRight,
   ChevronDown,
   Flag,
@@ -80,6 +81,7 @@ import { MirrorGoalPickerDialog } from "./MirrorGoalPickerDialog";
 import { MoveProjectGoalPickerDialog } from "./MoveProjectGoalPickerDialog";
 import { BlockedByPickerDialog } from "./BlockedByPickerDialog";
 import {
+  calendarDateTodayLocal,
   formatCalendarDateHint,
   formatRelativeCalendarDate,
   formatRelativeCalendarDateCompact,
@@ -103,12 +105,19 @@ import { RowActionIcons } from "./RowActionIcons";
 import { useAssistantOptional } from "@/contexts/AssistantContext";
 import { useSlackThreadStatus } from "@/hooks/useSlackThreadStatus";
 import { useMilestoneLikelihood } from "@/hooks/useMilestoneLikelihood";
+import { useAutoCompleteMilestoneAt100 } from "@/hooks/useAutoCompleteMilestoneAt100";
 import { MilestoneSlackThreadInline } from "./MilestoneSlackThreadInline";
+import {
+  consumePendingOpenProjectSlackThread,
+  notifyProjectSlackThreadClosed,
+  subscribeOpenProjectSlackThread,
+} from "@/lib/openProjectSlackThread";
 import {
   SlackMilestoneThreadPopovers,
   type SlackPingMode,
 } from "./SlackMilestoneThreadPopovers";
 import { isValidHttpUrl } from "@/lib/httpUrl";
+import { isPilotProject } from "@/lib/onboarding";
 import {
   ROADMAP_DATA_COL_CLASS,
   ROADMAP_DELAY_COMPLEXITY_COL_CLASS,
@@ -119,6 +128,7 @@ import {
   ROADMAP_NEXT_MILESTONE_COL_CLASS,
   ROADMAP_OWNER_COL_CLASS,
   ROADMAP_PROJECT_CARD_SHELL_NEUTRAL_CLASS,
+  ROADMAP_PROJECT_INNER_ROW_NEUTRAL_CLASS,
   ROADMAP_PROJECT_GRID_PADDING_CLASS,
   ROADMAP_PROJECT_TITLE_COL_CLASS,
 } from "@/lib/tracker-roadmap-columns";
@@ -164,23 +174,6 @@ export function ProjectRow({
   goalSlackChannelId = "",
   goalSlackChannelName = "",
 }: ProjectRowProps) {
-  const [expanded, setExpanded] = useState(false);
-  /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
-  const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
-  const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
-  const [moveGoalPickerOpen, setMoveGoalPickerOpen] = useState(false);
-  const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
-  /** When expanded, whether milestone rows (and add-milestone) are shown */
-  const [showMilestones, setShowMilestones] = useState(true);
-  const [futureMilestonesOpen, setFutureMilestonesOpen] = useState(false);
-  /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
-  const [newMilestoneNameFocusId, setNewMilestoneNameFocusId] = useState<
-    string | null
-  >(null);
-  /** Increment to focus the project name field (context menu Rename). */
-  const [projectRenameNonce, setProjectRenameNonce] = useState(0);
-  const assistant = useAssistantOptional();
-  const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
   const {
     bulkTick,
     expandPreset,
@@ -190,6 +183,39 @@ export function ProjectRow({
     setFocusedProjectId,
     focusEnforceTick,
   } = useTrackerExpandBulk();
+  /*
+    Derive the first-mount expanded/showMilestones values from the restored
+    expand preset (and any active search/filters) so project rows don't briefly
+    show collapsed-then-expanded (or vice versa) right after the roadmap
+    toolbar prefs hydrate.
+  */
+  const [expanded, setExpanded] = useState(() => {
+    if (expandForSearch) return true;
+    if (focusProjectMode) return false;
+    return (
+      expandPreset === "goals_and_projects" ||
+      expandPreset === "goals_projects_milestones"
+    );
+  });
+  /** Keep AI context icon visible while the AI context panel is open (even if pointer left the row). */
+  const [aiContextUiOpen, setAiContextUiOpen] = useState(false);
+  const [mirrorPickerOpen, setMirrorPickerOpen] = useState(false);
+  const [moveGoalPickerOpen, setMoveGoalPickerOpen] = useState(false);
+  const [blockedByPickerOpen, setBlockedByPickerOpen] = useState(false);
+  /** When expanded, whether milestone rows (and add-milestone) are shown */
+  const [showMilestones, setShowMilestones] = useState(() => {
+    if (expandForSearch) return true;
+    return expandPreset !== "goals_only" && expandPreset !== "collapse";
+  });
+  const [futureMilestonesOpen, setFutureMilestonesOpen] = useState(false);
+  /** After adding a milestone, name cell opens in edit mode so the user can type immediately. */
+  const [newMilestoneNameFocusId, setNewMilestoneNameFocusId] = useState<
+    string | null
+  >(null);
+  /** Increment to focus the project name field (context menu Rename). */
+  const [projectRenameNonce, setProjectRenameNonce] = useState(0);
+  const assistant = useAssistantOptional();
+  const [aiUpdateOpen, setAiUpdateOpen] = useState(false);
   const projectContext = useContextMenu();
   const nextMsSlackConnectMenu = useContextMenu();
   const projectActionsRef = useRef<HTMLButtonElement>(null);
@@ -210,6 +236,9 @@ export function ProjectRow({
     const g = allGoals.find((x) => x.id === goalId);
     return g?.description?.trim() ?? "";
   }, [allGoals, goalId]);
+
+  const todayYmd = useMemo(() => calendarDateTodayLocal(), []);
+  const showNewHirePilotBadge = isPilotProject(project, people, todayYmd);
 
   /** Company of the project's primary goal — move picker lists other goals here only. */
   const projectCompanyId = useMemo(() => {
@@ -269,6 +298,70 @@ export function ProjectRow({
       setShowMilestones(true);
     }
   }, [expandForSearch]);
+
+  /**
+   * Tracks whether the current Slack-thread popover session was triggered
+   * externally (Goal popover). When true, we emit a "closed" event on dismiss
+   * so the Goal popover can re-open itself — but only for that session, so
+   * in-roadmap clicks on `MilestoneSlackThreadInline` don't cause side effects.
+   */
+  const nextMsThreadOpenedExternallyRef = useRef(false);
+
+  /**
+   * External requests (e.g. from the Goal popover's clickable project cards)
+   * to open this project's next-milestone Slack thread popover. On a live
+   * subscription hit we open immediately; on mount we also claim any pending
+   * request so a request fired just before the goal expanded still resolves.
+   */
+  useEffect(() => {
+    const openExternally = () => {
+      nextMsThreadOpenedExternallyRef.current = true;
+      setExpanded(true);
+      setNextMsThreadPopoverOpen(true);
+    };
+    if (consumePendingOpenProjectSlackThread(project.id)) {
+      openExternally();
+    }
+    const unsubscribe = subscribeOpenProjectSlackThread((pid) => {
+      if (pid !== project.id) return;
+      openExternally();
+    });
+    return unsubscribe;
+  }, [project.id]);
+
+  /**
+   * Wraps `setNextMsThreadPopoverOpen` so every close path (X button, ESC,
+   * outside-click on the spotlight backdrop) fires the "thread closed" signal
+   * when the session was externally-triggered. We notify synchronously inside
+   * the state setter so the Goal popover re-opens in the same React commit as
+   * the thread popover tear-down — no stuck frames with everything unmounted.
+   *
+   * Reply/Ask/Nudge shortcuts in the thread popover call `onClose` before
+   * opening a ping dialog — we must NOT notify in that case, or the Goal
+   * popover would reopen underneath the ping dialog. Those callers open the
+   * ping dialog immediately after `onClose`, so we defer to the next tick and
+   * bail out if `pingOpen` flipped true in the meantime.
+   */
+  const handleNextMsThreadPopoverOpenChange = useCallback(
+    (next: boolean) => {
+      setNextMsThreadPopoverOpen(next);
+      if (next || !nextMsThreadOpenedExternallyRef.current) return;
+      const projectId = project.id;
+      setTimeout(() => {
+        if (nextMsThreadPingOpenRef.current) return;
+        if (!nextMsThreadOpenedExternallyRef.current) return;
+        nextMsThreadOpenedExternallyRef.current = false;
+        notifyProjectSlackThreadClosed(projectId);
+      }, 0);
+    },
+    [project.id]
+  );
+
+  /** Mirrors `nextMsThreadPingOpen` for deferred notify callbacks (stale closures). */
+  const nextMsThreadPingOpenRef = useRef(nextMsThreadPingOpen);
+  useEffect(() => {
+    nextMsThreadPingOpenRef.current = nextMsThreadPingOpen;
+  }, [nextMsThreadPingOpen]);
 
   const toggleProjectRow = useCallback(() => {
     if (focusProjectMode) {
@@ -493,6 +586,16 @@ export function ProjectRow({
     projectComplexity: project.complexityScore,
     rosterHints: nextMilestoneSlackThread.rosterHints,
     roadmapContext: roadmapForNextMilestoneAi,
+    threadReplyCount:
+      nextMilestoneSlackFetchUrl != null
+        ? nextThreadReplyCountForLikelihood
+        : null,
+  });
+
+  useAutoCompleteMilestoneAt100({
+    milestoneId: nextPendingMilestone?.id,
+    status: nextPendingMilestone?.status,
+    progressEstimate: nextMilestoneLikelihood.result?.progressEstimate ?? null,
     threadReplyCount:
       nextMilestoneSlackFetchUrl != null
         ? nextThreadReplyCountForLikelihood
@@ -819,7 +922,7 @@ export function ProjectRow({
           ROADMAP_PROJECT_GRID_PADDING_CLASS,
           !project.atRisk &&
             !project.spotlight &&
-            "bg-zinc-950/55"
+            ROADMAP_PROJECT_INNER_ROW_NEUTRAL_CLASS
         )}
       >
         <div className="w-8 shrink-0 flex items-center justify-center">
@@ -933,6 +1036,14 @@ export function ProjectRow({
               goals={allGoals}
               companies={allCompanies}
             />
+            {showNewHirePilotBadge ? (
+              <span
+                className="inline-flex items-center rounded border border-amber-500/40 bg-amber-950/45 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200/95"
+                title="New hire pilot (first 90 days)"
+              >
+                Pilot
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -1027,7 +1138,8 @@ export function ProjectRow({
         >
           <span
             className={cn(
-              "block truncate px-1 py-0.5 text-xs font-medium leading-tight",
+              "inline-flex min-h-[1.25rem] w-full max-w-full items-center px-1 py-0.5 text-xs font-medium leading-tight",
+              project.targetDate.trim() && "min-w-0 overflow-hidden",
               projectNeedsDueDate
                 ? "rounded border border-amber-500/45 bg-amber-950/40 text-amber-100/95 ring-1 ring-amber-500/25"
                 : projectDueUrgency === "past"
@@ -1040,10 +1152,25 @@ export function ProjectRow({
             )}
           >
             {project.targetDate.trim()
-              ? formatRelativeCalendarDate(project.targetDate, new Date(), {
-                  omitFuturePreposition: true,
-                })
-              : "—"}
+              ? (
+                <span className="min-w-0 flex-1 truncate">
+                  {formatRelativeCalendarDate(project.targetDate, new Date(), {
+                    omitFuturePreposition: true,
+                  })}
+                </span>
+              )
+              : (
+                <Calendar
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0",
+                    projectNeedsDueDate
+                      ? "text-amber-200/80"
+                      : "text-zinc-500/75"
+                  )}
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+              )}
           </span>
         </div>
 
@@ -1057,8 +1184,20 @@ export function ProjectRow({
           />
         </div>
 
-        {/* Next milestone — horizon + name; fades when milestones are expanded inline */}
-        <div className={cn(ROADMAP_NEXT_MILESTONE_COL_CLASS, "overflow-hidden")}>
+        {/*
+          Next milestone — horizon + name; fades when milestones are expanded inline.
+          When the project is collapsed AND a Slack thread preview is rendered we let the
+          column grow into the flex-1 spacer (`!w-auto !grow`) so the thread preview has
+          room for the author + body summary instead of truncating inside the fixed 36rem
+          slot. `min-w-[36rem]` preserves the baseline grid alignment on narrower viewports.
+        */}
+        <div
+          className={cn(
+            ROADMAP_NEXT_MILESTONE_COL_CLASS,
+            "overflow-hidden",
+            showNextMilestoneSlackInline && "!w-auto !grow min-w-[36rem]"
+          )}
+        >
           {project.milestones.length === 0 ? (
             <div
               className={cn(
@@ -1125,7 +1264,15 @@ export function ProjectRow({
               {renderNextMilestoneSlackInline ? (
                 <div
                   className={cn(
-                    "min-w-0 max-w-[min(28rem,58%)] shrink-0 transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
+                    /*
+                      Slack thread preview slot: stays `shrink-0` so the milestone name to its
+                      left always truncates first. The cap used to be `min(28rem,58%)` which
+                      cropped the author + body aggressively on typical laptop widths — we
+                      raise it to `48rem` (matches the milestone-row inline cap). The column
+                      itself grows beyond its 36rem baseline (see column wrapper), so this
+                      extra width actually lands on the thread preview.
+                    */
+                    "min-w-0 max-w-[48rem] shrink-0 transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
                     milestonesVisible && "opacity-0 motion-reduce:opacity-0"
                   )}
                   onClick={(e) => e.stopPropagation()}
@@ -1273,7 +1420,7 @@ export function ProjectRow({
           status={nextMilestoneSlackThread.status}
           rosterHints={nextMilestoneSlackThread.rosterHints}
           popoverOpen={nextMsThreadPopoverOpen}
-          onPopoverOpenChange={setNextMsThreadPopoverOpen}
+          onPopoverOpenChange={handleNextMsThreadPopoverOpenChange}
           pingOpen={nextMsThreadPingOpen}
           onPingOpenChange={setNextMsThreadPingOpen}
           pingMode={nextMsPingMode}

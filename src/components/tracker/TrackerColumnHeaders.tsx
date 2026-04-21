@@ -45,15 +45,19 @@ export function GoalsColumnHeaders({
   return (
     <div
       className={cn(
-        "sticky max-w-full min-w-0 border-0 border-b border-zinc-800/90",
+        "sticky max-w-full min-w-0 border-0 border-b border-zinc-700/70",
         stickyZClass ?? "z-20",
-        "bg-zinc-950/95 backdrop-blur-sm"
+        /*
+          Solid fill (no backdrop-blur) — paired with the company header above it;
+          content scrolling beneath does not smear through.
+        */
+        "bg-[var(--surface-toolbar)]",
       )}
       style={{ top }}
     >
       <div
         className={cn(
-          "flex w-full min-w-max items-center py-1 text-xs font-medium text-zinc-500",
+          "flex w-full min-w-max items-center py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400",
           ROADMAP_GRID_GAP_CLASS,
           ROADMAP_GOAL_GRID_PADDING_CLASS,
         )}
@@ -141,7 +145,7 @@ export function ProjectsColumnHeaders({
       className={cn(
         "sticky max-w-full min-w-0 border-b border-zinc-800/60",
         stickyZClass ?? "z-20",
-        "bg-zinc-900/55 backdrop-blur-sm"
+        "bg-zinc-900/55"
       )}
       style={{ top }}
     >

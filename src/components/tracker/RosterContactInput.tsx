@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { normalizePersonEmail } from "@/lib/personContactValidation";
 
 type Props = {
   kind: "email" | "tel";
@@ -21,13 +23,15 @@ export function RosterContactInput({
   validate,
   className,
 }: Props) {
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState(() =>
+    kind === "email" ? normalizePersonEmail(value) : value
+  );
   const [error, setError] = useState<string | undefined>();
   const hintId = useId();
 
   useEffect(() => {
-    setDraft(value);
-  }, [value]);
+    setDraft(kind === "email" ? normalizePersonEmail(value) : value);
+  }, [value, kind]);
 
   const commit = () => {
     const err = validate(draft);
@@ -36,21 +40,39 @@ export function RosterContactInput({
       return;
     }
     setError(undefined);
-    const t = draft.trim();
-    if (t !== value.trim()) onSave(t);
+    const t = kind === "email" ? normalizePersonEmail(draft) : draft.trim();
+    const prev =
+      kind === "email" ? normalizePersonEmail(value) : value.trim();
+    if (t !== prev) onSave(t);
+    if (kind === "email" && draft !== t) setDraft(t);
   };
 
-  const looksFilled = draft.trim().length > 0;
+  const looksFilled =
+    (kind === "email" ? normalizePersonEmail(draft) : draft.trim()).length > 0;
+
+  const showTelHintIcon =
+    kind === "tel" && !looksFilled && !error;
 
   return (
-    <div className={cn("min-w-0", className)}>
+    <div className={cn("relative min-w-0", className)}>
+      {showTelHintIcon ? (
+        <Phone
+          className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500/65"
+          strokeWidth={1.5}
+          aria-hidden
+        />
+      ) : null}
       <input
         type={kind}
         autoComplete={kind === "email" ? "email" : "tel"}
         inputMode={kind === "tel" ? "tel" : "email"}
         value={draft}
         onChange={(e) => {
-          setDraft(e.target.value);
+          setDraft(
+            kind === "email"
+              ? e.target.value.toLowerCase()
+              : e.target.value
+          );
           if (error) setError(undefined);
         }}
         onBlur={commit}
@@ -59,22 +81,24 @@ export function RosterContactInput({
             e.currentTarget.blur();
           }
           if (e.key === "Escape") {
-            setDraft(value);
+            setDraft(kind === "email" ? normalizePersonEmail(value) : value);
             setError(undefined);
             e.currentTarget.blur();
           }
         }}
-        placeholder={kind === "email" ? "name@company.com" : "+1 …"}
+        placeholder={kind === "email" ? "name@company.com" : undefined}
+        aria-label={kind === "tel" ? "Phone number" : undefined}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? hintId : undefined}
         className={cn(
-          "w-full min-w-0 rounded px-2 py-1.5 text-sm transition-[background-color,border-color,box-shadow] duration-150",
+          "w-full min-w-0 rounded py-1.5 text-sm transition-[background-color,border-color,box-shadow] duration-150",
+          showTelHintIcon ? "pl-7 pr-2" : "px-2",
           "placeholder:text-zinc-600 focus:outline-none",
           error
             ? "border border-red-600 bg-zinc-900/80 text-zinc-200 focus:ring-1 focus:ring-red-600"
             : looksFilled
               ? "border border-transparent bg-transparent text-zinc-300 shadow-none hover:border-zinc-700 hover:bg-zinc-900/80 focus:border-zinc-700 focus:bg-zinc-900/80 focus:ring-1 focus:ring-emerald-600"
-              : "border border-zinc-700 bg-zinc-900/80 text-zinc-200 focus:border-zinc-600 focus:ring-1 focus:ring-emerald-600"
+              : "border border-transparent bg-transparent text-zinc-200 shadow-none hover:border-zinc-700 hover:bg-zinc-900/80 focus:border-zinc-600 focus:bg-zinc-900/80 focus:ring-1 focus:ring-emerald-600"
         )}
       />
       {error ? (

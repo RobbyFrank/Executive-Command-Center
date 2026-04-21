@@ -93,15 +93,20 @@ function formatSlackStyleTimestamp(d: Date): string {
 function SlackStyleUserMention({
   displayName,
   avatarSrc,
+  compact,
 }: {
   displayName: string;
   avatarSrc?: string | null;
+  compact?: boolean;
 }) {
   const label = displayName.replace(/^@+/, "").trim() || "?";
   const photo = avatarSrc?.trim();
   return (
     <span
-      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-[3px] bg-[rgba(29,155,209,0.16)] py-px pl-0.5 pr-[6px] align-baseline text-[16px] leading-snug"
+      className={cn(
+        "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-[3px] bg-[rgba(29,155,209,0.16)] py-px pl-0.5 pr-[6px] align-baseline leading-snug",
+        compact ? "text-[12px]" : "text-[16px]"
+      )}
       title={`@${label}`}
     >
       {photo ? (
@@ -109,11 +114,19 @@ function SlackStyleUserMention({
         <img
           src={photo}
           alt=""
-          className="h-4 w-4 shrink-0 rounded-[2px] object-cover"
+          className={cn(
+            "shrink-0 rounded-[2px] object-cover",
+            compact ? "h-3 w-3" : "h-4 w-4"
+          )}
         />
       ) : (
         <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] bg-[rgba(29,155,209,0.22)] text-[9px] font-bold leading-none text-[#1d9bd1]"
+          className={cn(
+            "flex shrink-0 items-center justify-center rounded-[2px] bg-[rgba(29,155,209,0.22)] font-bold leading-none text-[#1d9bd1]",
+            compact
+              ? "h-3 w-3 text-[7px]"
+              : "h-4 w-4 text-[9px]"
+          )}
           aria-hidden
         >
           {displayInitials(label)}
@@ -156,23 +169,27 @@ function renderBoldPlain(processed: string, keyBase: string): ReactNode[] {
   return out.length ? out : [<span key={keyBase}>{processed}</span>];
 }
 
-function renderMrkdwnFragment(raw: string, keyBase: string): ReactNode[] {
+function renderMrkdwnFragment(
+  raw: string,
+  keyBase: string,
+  compact?: boolean
+): ReactNode[] {
   if (!raw) return [];
   const out: ReactNode[] = [];
   const codeRe = /`([^`]+)`/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let idx = 0;
+  const codeCls = compact
+    ? "mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[11px] font-normal leading-snug text-[#e8912d] ring-1 ring-white/10"
+    : "mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[13px] font-normal leading-snug text-[#e8912d] ring-1 ring-white/10";
   while ((m = codeRe.exec(raw)) !== null) {
     if (m.index > last) {
       const plain = slackInlineMrkdwnForPreviewPlain(raw.slice(last, m.index));
       out.push(...renderBoldPlain(plain, `${keyBase}-bp-${idx++}`));
     }
     out.push(
-      <code
-        key={`${keyBase}-c-${idx++}`}
-        className="mx-0.5 inline rounded-[3px] bg-[#1b1d21] px-1 py-px font-mono text-[13px] font-normal leading-snug text-[#e8912d] ring-1 ring-white/10"
-      >
+      <code key={`${keyBase}-c-${idx++}`} className={codeCls}>
         {expandSlackEmojiShortcodes(m[1])}
       </code>
     );
@@ -193,6 +210,7 @@ export function SlackDraftMessagePreview({
   posterAvatarSrc,
   postedAt,
   className,
+  compact,
 }: {
   text: string;
   people: Person[];
@@ -204,6 +222,8 @@ export function SlackDraftMessagePreview({
   posterAvatarSrc: string | null;
   postedAt: Date;
   className?: string;
+  /** Smaller typography (e.g. Slack scrape evidence cards). */
+  compact?: boolean;
 }) {
   const localById = useMemo(
     () => buildLocalRosterDisplayMap(people, rosterHints),
@@ -253,7 +273,7 @@ export function SlackDraftMessagePreview({
         const chunk = text.slice(last, m.index);
         out.push(
           <Fragment key={`frag-${k++}`}>
-            {renderMrkdwnFragment(chunk, `f-${m.index}-${k}`)}
+            {renderMrkdwnFragment(chunk, `f-${m.index}-${k}`, compact)}
           </Fragment>
         );
       }
@@ -271,6 +291,7 @@ export function SlackDraftMessagePreview({
           key={nodeKey}
           displayName={disp.name}
           avatarSrc={disp.avatarSrc}
+          compact={compact}
         />
       );
       last = re.lastIndex;
@@ -278,12 +299,12 @@ export function SlackDraftMessagePreview({
     if (last < text.length) {
       out.push(
         <Fragment key={`frag-${k++}`}>
-          {renderMrkdwnFragment(text.slice(last), `tail-${k}`)}
+          {renderMrkdwnFragment(text.slice(last), `tail-${k}`, compact)}
         </Fragment>
       );
     }
     return out;
-  }, [text, localById, remoteDisplays]);
+  }, [text, localById, remoteDisplays, compact]);
 
   const empty = text.trim() === "";
   const timeLabel = formatSlackStyleTimestamp(postedAt);
@@ -292,25 +313,36 @@ export function SlackDraftMessagePreview({
   return (
     <div
       className={cn(
-        "slack-draft-preview rounded-md border border-[#35373b] bg-[#1a1d21] px-3 py-2.5 font-sans text-[16px] leading-[1.5] text-[#f8f8f8]",
+        "slack-draft-preview rounded-md border border-[#35373b] bg-[#1a1d21] font-sans leading-[1.5] text-[#f8f8f8]",
+        compact
+          ? "px-2.5 py-2 text-[12px] leading-relaxed"
+          : "px-3 py-2.5 text-[16px]",
         className
       )}
     >
       {empty ? (
         <span className="text-[#9a9b9d]">Nothing to preview yet.</span>
       ) : (
-        <div className="flex gap-2.5">
+        <div className={cn("flex", compact ? "gap-2" : "gap-2.5")}>
           <div className="shrink-0 pt-0.5">
             {showPhoto ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={posterAvatarSrc!}
                 alt=""
-                className="h-9 w-9 rounded-[3px] object-cover"
+                className={cn(
+                  "rounded-[3px] object-cover",
+                  compact ? "h-7 w-7" : "h-9 w-9"
+                )}
               />
             ) : (
               <span
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] bg-[#363636] text-[11px] font-bold text-[#e0e0e0]"
+                className={cn(
+                  "flex shrink-0 items-center justify-center rounded-[3px] bg-[#363636] font-bold text-[#e0e0e0]",
+                  compact
+                    ? "h-7 w-7 text-[9px]"
+                    : "h-9 w-9 text-[11px]"
+                )}
                 aria-hidden
               >
                 {displayInitials(posterDisplayName)}
@@ -319,14 +351,29 @@ export function SlackDraftMessagePreview({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span className="text-[16px] font-bold leading-tight text-[#f8f8f8]">
+              <span
+                className={cn(
+                  "font-bold leading-tight text-[#f8f8f8]",
+                  compact ? "text-[12px]" : "text-[16px]"
+                )}
+              >
                 {posterDisplayName}
               </span>
-              <span className="text-[12px] font-normal leading-none text-[#ababab]">
+              <span
+                className={cn(
+                  "font-normal leading-none text-[#ababab]",
+                  compact ? "text-[10px]" : "text-[12px]"
+                )}
+              >
                 {timeLabel}
               </span>
             </div>
-            <div className="mt-0.5 min-w-0 whitespace-pre-wrap break-words [word-break:break-word] text-[16px] leading-[1.5] text-[#f8f8f8]">
+            <div
+              className={cn(
+                "mt-0.5 min-w-0 whitespace-pre-wrap break-words [word-break:break-word] text-[#f8f8f8]",
+                compact ? "text-[12px] leading-relaxed" : "text-[16px] leading-[1.5]"
+              )}
+            >
               {nodes}
             </div>
           </div>

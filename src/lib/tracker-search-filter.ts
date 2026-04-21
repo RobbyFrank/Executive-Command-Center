@@ -11,6 +11,7 @@ import { resolveOwnerFilterTokensToOwnerIds } from "@/lib/owner-filter";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
 import { projectMatchesCloseWatchByOwnerMap } from "@/lib/closeWatch";
 import { isProjectZombie } from "@/lib/zombie";
+import { isPilotProject } from "@/lib/onboarding";
 
 /** Multi-select status filters on the tracker (OR within selection). */
 export type TrackerStatusTagId =
@@ -18,7 +19,8 @@ export type TrackerStatusTagId =
   | "spotlight"
   | "unassigned"
   | "zombie"
-  | "stalled";
+  | "stalled"
+  | "new_hire_pilot";
 
 export function normalizeTrackerSearchQuery(raw: string): string {
   return raw.trim().toLowerCase();
@@ -355,8 +357,18 @@ function goalMatchesStatusTags(
 
 function projectMatchesStatusTags(
   p: ProjectWithMilestones,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  people?: Person[],
+  todayYmd?: string
 ): boolean {
+  if (
+    tags.has("new_hire_pilot") &&
+    people &&
+    todayYmd &&
+    isPilotProject(p, people, todayYmd)
+  ) {
+    return true;
+  }
   if (tags.has("at_risk") && p.atRisk) return true;
   if (tags.has("spotlight") && p.spotlight) return true;
   if (tags.has("unassigned") && !p.ownerId) return true;
@@ -366,11 +378,13 @@ function projectMatchesStatusTags(
 
 function filterGoalByStatusTags(
   g: GoalWithProjects,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  people?: Person[],
+  todayYmd?: string
 ): GoalWithProjects | null {
   const goalMatches = goalMatchesStatusTags(g, tags);
   const projects = g.projects.filter((p) =>
-    projectMatchesStatusTags(p, tags)
+    projectMatchesStatusTags(p, tags, people, todayYmd)
   );
   if (goalMatches) return g;
   if (projects.length > 0) return { ...g, projects };
@@ -379,10 +393,12 @@ function filterGoalByStatusTags(
 
 function filterCompanyByStatusTags(
   c: CompanyWithGoals,
-  tags: Set<TrackerStatusTagId>
+  tags: Set<TrackerStatusTagId>,
+  people?: Person[],
+  todayYmd?: string
 ): CompanyWithGoals | null {
   const goals = c.goals
-    .map((g) => filterGoalByStatusTags(g, tags))
+    .map((g) => filterGoalByStatusTags(g, tags, people, todayYmd))
     .filter((g): g is GoalWithProjects => g !== null);
   if (goals.length === 0) return null;
   return { ...c, goals };
@@ -395,13 +411,17 @@ function filterCompanyByStatusTags(
  */
 export function filterTrackerHierarchyByStatusTags(
   hierarchy: CompanyWithGoals[],
-  tagIds: TrackerStatusTagId[] | null
+  tagIds: TrackerStatusTagId[] | null,
+  /** Required for `new_hire_pilot` signal matching. */
+  pilotContext?: { people: Person[]; todayYmd: string } | null
 ): CompanyWithGoals[] {
   if (!tagIds || tagIds.length === 0) return hierarchy;
 
   const tags = new Set(tagIds);
+  const people = pilotContext?.people;
+  const todayYmd = pilotContext?.todayYmd;
   return hierarchy
-    .map((c) => filterCompanyByStatusTags(c, tags))
+    .map((c) => filterCompanyByStatusTags(c, tags, people, todayYmd))
     .filter((c): c is CompanyWithGoals => c !== null);
 }
 
@@ -412,7 +432,9 @@ export function filterTrackerHierarchyByStatusTags(
  */
 function countProjectsMatchingSingleStatusTag(
   hierarchy: CompanyWithGoals[],
-  tagId: TrackerStatusTagId
+  tagId: TrackerStatusTagId,
+  people?: Person[],
+  todayYmd?: string
 ): number {
   const tags = new Set<TrackerStatusTagId>([tagId]);
   let n = 0;
@@ -420,7 +442,10 @@ function countProjectsMatchingSingleStatusTag(
     for (const g of c.goals) {
       const goalMatches = goalMatchesStatusTags(g, tags);
       for (const p of g.projects) {
-        if (goalMatches || projectMatchesStatusTags(p, tags)) {
+        if (
+          goalMatches ||
+          projectMatchesStatusTags(p, tags, people, todayYmd)
+        ) {
           n++;
         }
       }
@@ -434,7 +459,9 @@ function countProjectsMatchingSingleStatusTag(
  * {@link countProjectsByDueDateBucket}).
  */
 export function countProjectsByStatusTagBucket(
-  hierarchy: CompanyWithGoals[]
+  hierarchy: CompanyWithGoals[],
+  people?: Person[],
+  todayYmd?: string
 ): Record<TrackerStatusTagId, number> {
   return {
     at_risk: countProjectsMatchingSingleStatusTag(hierarchy, "at_risk"),
@@ -442,6 +469,12 @@ export function countProjectsByStatusTagBucket(
     unassigned: countProjectsMatchingSingleStatusTag(hierarchy, "unassigned"),
     zombie: countProjectsMatchingSingleStatusTag(hierarchy, "zombie"),
     stalled: countProjectsMatchingSingleStatusTag(hierarchy, "stalled"),
+    new_hire_pilot: countProjectsMatchingSingleStatusTag(
+      hierarchy,
+      "new_hire_pilot",
+      people,
+      todayYmd
+    ),
   };
 }
 
