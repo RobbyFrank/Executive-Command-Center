@@ -917,7 +917,7 @@ export function ProjectRow({
         onClick={onProjectRowClick}
         onContextMenuCapture={projectContext.onContextMenuCapture}
         className={cn(
-          "group/project group/project-row flex min-h-[28px] w-full min-w-max cursor-pointer items-center border-b border-zinc-900 py-1 transition-colors motion-reduce:transition-none",
+          "group/project group/project-row flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center border-b border-zinc-900 py-1 transition-colors motion-reduce:transition-none",
           ROADMAP_GRID_GAP_CLASS,
           ROADMAP_PROJECT_GRID_PADDING_CLASS,
           !project.atRisk &&
@@ -1189,13 +1189,14 @@ export function ProjectRow({
           When the project is collapsed AND a Slack thread preview is rendered we let the
           column grow into the flex-1 spacer (`!w-auto !grow`) so the thread preview has
           room for the author + body summary instead of truncating inside the fixed 36rem
-          slot. `min-w-[36rem]` preserves the baseline grid alignment on narrower viewports.
+          slot. `min-w-[min(100%,36rem)]` preserves the baseline on wide viewports without forcing
+          the project row wider than the roadmap shell on narrow ones.
         */}
         <div
           className={cn(
             ROADMAP_NEXT_MILESTONE_COL_CLASS,
             "overflow-hidden",
-            showNextMilestoneSlackInline && "!w-auto !grow min-w-[36rem]"
+            showNextMilestoneSlackInline && "!w-auto !grow min-w-[min(100%,36rem)]"
           )}
         >
           {project.milestones.length === 0 ? (
@@ -1234,7 +1235,7 @@ export function ProjectRow({
             </div>
           ) : nextPendingMilestone && nextMilestoneUi ? (
             <div
-              className="flex min-w-0 items-center gap-6 px-1.5 py-1"
+              className="flex w-full min-w-0 items-center gap-6 px-1.5 py-1"
               title={nextMilestoneUi.title}
               inert={milestonesVisible ? true : undefined}
               aria-hidden={milestonesVisible}
@@ -1272,7 +1273,7 @@ export function ProjectRow({
                       itself grows beyond its 36rem baseline (see column wrapper), so this
                       extra width actually lands on the thread preview.
                     */
-                    "min-w-0 max-w-[48rem] shrink-0 transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
+                    "min-w-0 max-w-[48rem] shrink-0 overflow-hidden transition-opacity duration-200 ease-out delay-75 motion-reduce:transition-none motion-reduce:delay-0 motion-reduce:duration-0",
                     milestonesVisible && "opacity-0 motion-reduce:opacity-0"
                   )}
                   onClick={(e) => e.stopPropagation()}

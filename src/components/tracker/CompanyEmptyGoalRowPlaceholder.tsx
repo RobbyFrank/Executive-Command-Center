@@ -56,7 +56,7 @@ export function CompanyEmptyGoalRowPlaceholder({
       >
         <div
           className={cn(
-            "group/goal flex min-h-[28px] w-full min-w-max max-w-full cursor-default items-center py-1 transition-colors",
+            "group/goal flex min-h-[28px] w-full min-w-0 max-w-full cursor-default items-center py-1 transition-colors",
             ROADMAP_GRID_GAP_CLASS,
             ROADMAP_GOAL_GRID_PADDING_CLASS,
           )}

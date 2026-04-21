@@ -251,7 +251,8 @@ export const GoalLikelihoodInline = forwardRef<
       type="button"
       onClick={onOpen}
       className={cn(
-        "group/goal-inline flex min-w-0 max-w-full min-h-7 flex-1 items-center justify-start gap-2 rounded-md py-0.5 pl-0 pr-1 text-left transition-colors",
+        /* `w-full` (not `flex-1`): parent in GoalSection is often a plain block; flex-1 only works inside a flex container. */
+        "group/goal-inline flex min-h-7 w-full min-w-0 max-w-full items-center justify-start gap-2 rounded-md py-0.5 pl-0 pr-1 text-left transition-colors",
         "text-[11px] leading-snug",
         "hover:bg-zinc-800/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40"
       )}

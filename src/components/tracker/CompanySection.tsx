@@ -178,6 +178,13 @@ export function CompanySection({
   );
   const statsLabel = `${goalCount} goal${goalCount !== 1 ? "s" : ""} · ${projectCount} project${projectCount !== 1 ? "s" : ""}`;
 
+  const companyNoLaunchLabel =
+    company.launchDate.trim() === ""
+      ? company.developmentStartDate.trim() !== ""
+        ? "In Development"
+        : "Pre-Launch"
+      : null;
+
   const companyMenuEntries = useMemo((): ContextMenuEntry[] => {
     async function addGoal() {
       const goal = await createGoal({
@@ -282,9 +289,23 @@ export function CompanySection({
 
         <div className="flex-1 min-w-0">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-            <h2 className="min-w-0 max-w-full shrink truncate font-semibold tracking-tight text-zinc-50 text-lg leading-tight">
-              {company.name}
-            </h2>
+            <div className="flex min-w-0 max-w-full items-baseline gap-2">
+              <h2 className="min-w-0 flex-1 truncate font-semibold tracking-tight text-zinc-50 text-lg leading-tight">
+                {company.name}
+              </h2>
+              {companyNoLaunchLabel ? (
+                <span
+                  className="shrink-0 rounded-md border border-zinc-700/60 bg-zinc-900/50 px-2 py-0.5 text-[11px] font-medium leading-none text-zinc-400"
+                  title={
+                    companyNoLaunchLabel === "In Development"
+                      ? "No launch date set; development start is recorded"
+                      : "No launch date set"
+                  }
+                >
+                  {companyNoLaunchLabel}
+                </span>
+              ) : null}
+            </div>
             <span
               className="shrink-0 inline-flex cursor-default items-center gap-2 text-xs tabular-nums text-zinc-500 whitespace-nowrap"
               aria-label={statsLabel}

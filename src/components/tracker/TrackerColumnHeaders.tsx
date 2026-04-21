@@ -57,7 +57,7 @@ export function GoalsColumnHeaders({
     >
       <div
         className={cn(
-          "flex w-full min-w-max items-center py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400",
+          "flex w-full min-w-0 max-w-full items-center py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400",
           ROADMAP_GRID_GAP_CLASS,
           ROADMAP_GOAL_GRID_PADDING_CLASS,
         )}
@@ -151,7 +151,7 @@ export function ProjectsColumnHeaders({
     >
       <div
         className={cn(
-          "flex w-full min-w-max items-center py-1 text-xs font-medium text-zinc-500",
+          "flex w-full min-w-0 max-w-full items-center py-1 text-xs font-medium text-zinc-500",
           ROADMAP_GRID_GAP_CLASS,
           ROADMAP_PROJECT_GRID_PADDING_CLASS,
         )}

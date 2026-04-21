@@ -1015,7 +1015,7 @@ export function GoalSection({
           ref={goalInlineSpotlightRef}
           onClick={onGoalHeaderClick}
           className={cn(
-            "group/goal flex min-h-[28px] w-full min-w-max max-w-full cursor-pointer items-center py-1 transition-colors",
+            "group/goal flex min-h-[28px] w-full min-w-0 max-w-full cursor-pointer items-center py-1 transition-colors",
             ROADMAP_GRID_GAP_CLASS,
             ROADMAP_GOAL_GRID_PADDING_CLASS
           )}
@@ -1290,22 +1290,24 @@ export function GoalSection({
         <div
           className={cn(
             ROADMAP_NEXT_MILESTONE_COL_CLASS,
+            "overflow-hidden",
             /*
               Collapsed goal with a rollup: let the Next-milestone column grow into the
               flex-1 spacer so the one-line summary has room to read well on wider viewports
               instead of truncating inside the fixed 36rem slot. `!w-auto` + `!grow` overrides
-              `w-[36rem]` / `grow-0` from {@link ROADMAP_NEXT_MILESTONE_COL_CLASS}; `min-w-[36rem]`
-              keeps the same baseline width so narrower viewports still match the header grid.
+              `w-[36rem]` / `grow-0` from {@link ROADMAP_NEXT_MILESTONE_COL_CLASS}. Cap minimum
+              with `min(100%,36rem)` so a narrow roadmap shell cannot be forced wider than its
+              parent (plain `min-w-[36rem]` blew out the whole goal row on smaller viewports).
             */
             !expanded && goalLikelihoodRollup != null &&
-              "!w-auto !grow min-w-[36rem]"
+              "!w-auto !grow min-w-[min(100%,36rem)]"
           )}
           aria-hidden={expanded || goalLikelihoodRollup == null}
         >
           {!expanded && goalLikelihoodRollup != null ? (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 max-w-full pr-1"
+              className="flex w-full min-w-0 max-w-full pr-1"
             >
               <GoalLikelihoodInline
                 ref={goalInlineRef}

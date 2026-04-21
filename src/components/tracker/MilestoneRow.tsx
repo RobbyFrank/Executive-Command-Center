@@ -646,7 +646,7 @@ export function MilestoneRow({
             left: TRACKER_ROADMAP_MILESTONE_SLACK_INLINE_AT_GOAL_CONFIDENCE_LEFT,
           }}
         >
-          <div className="pointer-events-auto min-w-0 w-max max-w-full">
+          <div className="pointer-events-auto min-w-0 w-full max-w-full">
             {slackThreadPreview}
           </div>
         </div>
