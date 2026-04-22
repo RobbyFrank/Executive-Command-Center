@@ -10,6 +10,7 @@ import { getSidebarCollapsedFromCookie } from "@/lib/sidebar-prefs";
 import { getCachedPeople, getCachedProjects } from "@/server/tracker-page-data";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import { countUnattendedNewHires } from "@/lib/onboarding";
+import { getUnrepliedAsksOpenCount } from "@/server/actions/unrepliedAsks";
 
 export default async function DashboardLayout({
   children,
@@ -38,6 +39,7 @@ export default async function DashboardLayout({
     projects,
     todayYmd
   );
+  const unrepliedAsksCount = await getUnrepliedAsksOpenCount();
 
   return (
     <AssistantProvider>
@@ -56,6 +58,7 @@ export default async function DashboardLayout({
           profilePicturePath={sidebarProfilePicturePath}
           initialCollapsed={initialSidebarCollapsed}
           unattendedNewHireCount={unattendedNewHireCount}
+          unrepliedAsksCount={unrepliedAsksCount}
         />
         <main className="relative min-h-0 min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
           <div className="relative z-10 min-h-0">{children}</div>

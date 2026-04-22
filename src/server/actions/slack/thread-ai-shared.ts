@@ -11,6 +11,7 @@ import {
   slackMessageTextForDisplay,
 } from "@/lib/slackDisplay";
 import { parseCalendarDateString } from "@/lib/relativeCalendarDate";
+import { resolveSlackUserDisplays } from "./user-profile";
 
 export const THREAD_STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -53,24 +54,59 @@ export async function buildSlackUserDisplayMaps(
   ].filter(Boolean);
   const labelMap = new Map<string, string>();
   const avatarById = new Map<string, string | null>();
+  if (normalized.length === 0) return { labelMap, avatarById };
 
+  // Roster first: local names + photo paths take precedence so thread previews
+  // match the rest of the app's roster UI.
+  const offRoster: string[] = [];
+  for (const uid of normalized) {
+    const roster = rosterById.get(uid);
+    const rosterName = roster?.name?.trim();
+    const rosterPath = roster?.profilePicturePath?.trim() || null;
+    if (rosterName) {
+      labelMap.set(uid, rosterName);
+      avatarById.set(uid, rosterPath);
+      continue;
+    }
+    offRoster.push(uid);
+  }
+
+  if (offRoster.length === 0) return { labelMap, avatarById };
+
+  // Off-roster: one cache-backed batch lookup that reuses whatever the
+  // Followups page has already fetched for group-header avatars (Redis 7d,
+  // tries both user + bot tokens). This keeps mention chips and thread-preview
+  // message avatars in lockstep with the group headers.
+  const slackDisplays = await resolveSlackUserDisplays(offRoster);
+
+  // Parallel per-user label fetch for any IDs the cached resolver couldn't
+  // label (e.g. unreachable external-workspace users) — falls back to the
+  // per-token `auth.test`-style label helper so we don't regress from the
+  // previous behaviour.
   await Promise.all(
-    normalized.map(async (uid) => {
-      const roster = rosterById.get(uid);
-      let label: string;
+    offRoster.map(async (uid) => {
+      const slack = slackDisplays[uid];
+      const slackName = slack?.name?.trim();
+      const slackAvatar = slack?.avatarSrc ?? null;
+      const hasUsableName = slackName && slackName !== uid;
+
+      if (hasUsableName) {
+        labelMap.set(uid, slackName);
+        avatarById.set(uid, slackAvatar);
+        return;
+      }
+
+      // Last resort: the token-scoped label helper (no avatar).
       if (token) {
         const apiLabel = await fetchSlackUserLabelForToken(token, uid);
         if (apiLabel && apiLabel !== uid && apiLabel !== "Unknown") {
-          label = apiLabel;
-        } else {
-          label = roster?.name ?? apiLabel;
+          labelMap.set(uid, apiLabel);
+          avatarById.set(uid, slackAvatar);
+          return;
         }
-      } else {
-        label = roster?.name ?? uid;
       }
-      labelMap.set(uid, label);
-      const path = roster?.profilePicturePath?.trim();
-      avatarById.set(uid, path ? path : null);
+      labelMap.set(uid, uid);
+      avatarById.set(uid, slackAvatar);
     })
   );
 
@@ -96,9 +132,14 @@ export function sortMessagesByTs<T extends { ts: string }>(messages: T[]): T[] {
   );
 }
 
+/**
+ * Non-streaming Claude completion. Defaults to {@link getAnthropicModel}; pass
+ * `options.model` for task-specific models (e.g. Haiku for unreplied-asks classify).
+ */
 export async function claudePlainText(
   system: string,
-  user: string
+  user: string,
+  options?: { model?: string }
 ): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
@@ -106,7 +147,7 @@ export async function claudePlainText(
   }
   const anthropic = new Anthropic({ apiKey });
   const res = await anthropic.messages.create({
-    model: getAnthropicModel(),
+    model: options?.model?.trim() || getAnthropicModel(),
     max_tokens: 1024,
     system,
     messages: [{ role: "user", content: user }],

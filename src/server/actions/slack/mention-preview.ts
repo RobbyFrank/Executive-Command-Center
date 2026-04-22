@@ -1,23 +1,22 @@
 "use server";
 
-import { slackUserTokenForThreads } from "@/lib/slack";
 import { rosterMapFromHints, type SlackMemberRosterHint } from "./thread-ai-shared";
+import { resolveSlackUserDisplays } from "./user-profile";
 
 export type SlackMentionPreviewDisplay = {
   name: string;
   avatarSrc: string | null;
 };
 
-type UsersInfoProfile = {
-  real_name?: string;
-  display_name?: string;
-  image_72?: string;
-  image_48?: string;
-};
-
 /**
- * Resolves Slack user IDs in draft text for the in-app preview: display name and avatar
- * (Team roster photos when set, otherwise Slack CDN URLs via users.info).
+ * Resolves Slack user IDs in draft text for the in-app preview: display name and avatar.
+ *
+ * Prefers Team roster entries (roster name + **local** profile photo path) so the
+ * chip matches the rest of the roster UI. For off-roster users (guests, Slack Connect
+ * from other workspaces, etc.), delegates to `resolveSlackUserDisplays` which is
+ * **cache-backed (Redis 7d)** and tries **both** the user token and the bot token
+ * — the same resolver the Followups page uses for group-header avatars, so anything
+ * that resolves there also resolves in mention chips.
  */
 export async function resolveSlackMentionPreviewDisplays(
   userIds: string[],
@@ -29,63 +28,35 @@ export async function resolveSlackMentionPreviewDisplays(
   if (normalized.length === 0) return {};
 
   const rosterById = rosterMapFromHints(rosterHints);
-  const token = slackUserTokenForThreads();
-
   const out: Record<string, SlackMentionPreviewDisplay> = {};
+  const offRoster: string[] = [];
 
-  await Promise.all(
-    normalized.map(async (uid) => {
-      const roster = rosterById.get(uid);
-      const rosterPath = roster?.profilePicturePath?.trim();
-      const rosterName = roster?.name?.trim();
+  for (const uid of normalized) {
+    const roster = rosterById.get(uid);
+    const rosterPath = roster?.profilePicturePath?.trim();
+    const rosterName = roster?.name?.trim();
+    if (rosterPath && rosterName) {
+      out[uid] = { name: rosterName, avatarSrc: rosterPath };
+      continue;
+    }
+    offRoster.push(uid);
+  }
 
-      if (rosterPath && rosterName) {
-        out[uid] = { name: rosterName, avatarSrc: rosterPath };
-        return;
-      }
+  if (offRoster.length === 0) return out;
 
-      if (token) {
-        try {
-          const params = new URLSearchParams();
-          params.set("user", uid);
-          const res = await fetch(
-            `https://slack.com/api/users.info?${params.toString()}`,
-            {
-              method: "GET",
-              headers: { Authorization: `Bearer ${token}` },
-              cache: "no-store",
-            }
-          );
-          if (res.ok) {
-            const data = (await res.json()) as {
-              ok?: boolean;
-              user?: { profile?: UsersInfoProfile };
-            };
-            if (data.ok && data.user?.profile) {
-              const profile = data.user.profile;
-              const real = (profile.real_name ?? "").trim();
-              const disp = (profile.display_name ?? "").trim();
-              const name = real || disp || rosterName || uid;
-              const avatarSrc =
-                profile.image_72?.trim() ||
-                profile.image_48?.trim() ||
-                rosterPath ||
-                null;
-              out[uid] = { name, avatarSrc };
-              return;
-            }
-          }
-        } catch {
-          /* fall through */
-        }
-      }
-
-      out[uid] = {
-        name: rosterName || uid,
-        avatarSrc: rosterPath || null,
-      };
-    })
-  );
+  const slackDisplays = await resolveSlackUserDisplays(offRoster);
+  for (const uid of offRoster) {
+    const rosterHit = rosterById.get(uid);
+    const rosterPath = rosterHit?.profilePicturePath?.trim();
+    const rosterName = rosterHit?.name?.trim();
+    const slack = slackDisplays[uid];
+    // Prefer Slack-resolved name/avatar when the roster hint is sparse; fall
+    // back to the roster hint; finally fall back to the bare UID so the chip
+    // always renders something readable.
+    const name = slack?.name?.trim() || rosterName || uid;
+    const avatarSrc = rosterPath || slack?.avatarSrc || null;
+    out[uid] = { name, avatarSrc };
+  }
 
   return out;
 }

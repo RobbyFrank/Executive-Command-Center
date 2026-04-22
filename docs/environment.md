@@ -17,6 +17,7 @@ Copy `.env.example` to `.env.local` and set values below. The app does not commi
 | -------- | ------- |
 | `ANTHROPIC_API_KEY` | Enables the **Assistant** (floating button), **Update with AI…**, **AI create**, company **Generate from website…**, Slack thread drafting/summaries, and milestone likelihood. Without it, those features return a configuration error. |
 | `ANTHROPIC_MODEL` | Optional override for the default Claude model (e.g. `claude-sonnet-4-6`). |
+| `ANTHROPIC_CLASSIFY_MODEL` | Optional model for **Followups** classify-once (ask vs. noise). Default: `claude-haiku-4-5` (fast / high volume). Override if you want Sonnet for classification. |
 | `ROBBY_CALENDLY_URL` | Optional; included in **new hire pilot** assignment Slack drafts when set (Team onboarding). |
 | `NADAV_SLACK_USER_ID` | Optional fallback Slack user id for **Nadav** (used by the new hire **onboarding-partner group DM** when no roster `Person.id === "nadav"` with `slackHandle` exists). Format: `U01234ABCDE`. |
 

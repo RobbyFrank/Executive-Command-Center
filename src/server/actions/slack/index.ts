@@ -1,8 +1,10 @@
 export {
   fetchSlackChannelsList,
   fetchSlackMembers,
+  importSlackMemberByUserId,
   importSlackMembers,
   type FetchSlackChannelsResult,
+  type ImportSlackMemberByUserIdResult,
   type ImportSlackMembersResult,
   type SlackImportMemberPayload,
 } from "./import-list";
@@ -21,7 +23,9 @@ export {
   type MilestoneLikelihoodRiskLevel,
 } from "./milestone-likelihood";
 export {
+  getSlackPosterAuthContext,
   getSlackThreadPosterPreviewIdentity,
+  type SlackPosterAuthContext,
   type SlackThreadPosterPreviewIdentity,
 } from "./poster-preview";
 export {
@@ -40,8 +44,10 @@ export {
 } from "./thread-summarize";
 export {
   generateDeadlineNudgeMessage,
+  generateSlackQuickReply,
   generateThreadPingMessage,
   pingSlackThread,
+  reviseSlackQuickReply,
   reviseSlackThreadPingMessage,
   type GenerateDeadlineNudgeMessageResult,
   type GenerateThreadPingMessageResult,
@@ -53,6 +59,10 @@ export {
   type SlackMentionPreviewDisplay,
 } from "./mention-preview";
 export { resolveSlackChannelLabelFromId } from "./channel-label";
+export {
+  resolveMpimParticipantLabel,
+  type ResolveMpimParticipantLabelResult,
+} from "./mpim-label";
 export {
   postGoalChannelMessage,
   draftGoalChannelMessage,

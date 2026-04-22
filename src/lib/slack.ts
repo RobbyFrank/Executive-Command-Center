@@ -930,12 +930,26 @@ export function parseSlackThreadUrl(raw: string): ParsedSlackThreadUrl | null {
   return null;
 }
 
+/**
+ * Single emoji reaction on a Slack message as returned by `conversations.replies`
+ * / `conversations.history`. `name` is the Slack shortname (no colons, e.g.
+ * `thumbsup`, `white_check_mark`, custom `:company-logo:`). `users` may contain
+ * bot IDs in addition to user IDs.
+ */
+export type SlackMessageReaction = {
+  name: string;
+  count: number;
+  users: string[];
+};
+
 export type SlackThreadApiMessage = {
   ts: string;
   user?: string;
   text?: string;
   bot_id?: string;
   subtype?: string;
+  /** Only present when the message has at least one reaction. */
+  reactions?: SlackMessageReaction[];
 };
 
 type ConversationsRepliesResponse = {

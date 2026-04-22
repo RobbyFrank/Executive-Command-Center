@@ -123,6 +123,17 @@ export async function fetchSlackUserMessageHistory(
      * only needs join-date from self messages). Default true.
      */
     includeMentionSearch?: boolean;
+    /**
+     * When set, appends `after:YYYY-MM-DD` to every `search.messages` query. Slack
+     * restricts the result set server-side. Use for watermark-based incremental
+     * scans (only fetch messages newer than what we already have).
+     *
+     * `after:YYYY-MM-DD` is **exclusive** on Slack's side — messages at midnight
+     * UTC on that date are excluded — so callers who already have a precise
+     * watermark timestamp should subtract one day and additionally filter
+     * in-memory by `ts > watermark`.
+     */
+    afterYmdUtc?: string;
   } = {}
 ): Promise<
   | { ok: true; messages: SlackUserMessageMatch[] }
@@ -145,8 +156,12 @@ export async function fetchSlackUserMessageHistory(
   const maxMessages = Math.min(Math.max(1, options.maxMessages ?? 60), 200);
   const maxPages = Math.min(Math.max(1, options.maxPages ?? 2), 5);
   const perPage = Math.min(maxMessages, 100);
-  const queryFromSelf = `from:<@${uid}>`;
-  const queryMentions = `<@${uid}>`;
+  const afterClause =
+    options.afterYmdUtc && /^\d{4}-\d{2}-\d{2}$/.test(options.afterYmdUtc)
+      ? ` after:${options.afterYmdUtc}`
+      : "";
+  const queryFromSelf = `from:<@${uid}>${afterClause}`;
+  const queryMentions = `<@${uid}>${afterClause}`;
 
   const seenKeys = new Set<string>();
   const collected: SlackUserMessageMatch[] = [];

@@ -12,14 +12,18 @@ export type SlackThreadPosterPreviewIdentity = {
   avatarSrc: string | null;
 };
 
+export type SlackPosterAuthContext = SlackThreadPosterPreviewIdentity & {
+  /** Slack user id for the configured user token (for attribution checks). */
+  slackUserId: string | null;
+};
+
 /**
- * Resolves who will appear as the message author when posting with the thread
- * user token: Team roster match on `slackHandle`, else Slack `users.info` label + avatar.
+ * One `auth.test` round-trip plus roster / users.info resolution for the thread poster.
  */
-export async function getSlackThreadPosterPreviewIdentity(): Promise<SlackThreadPosterPreviewIdentity> {
+export async function getSlackPosterAuthContext(): Promise<SlackPosterAuthContext> {
   const token = slackUserTokenForThreads();
   if (!token) {
-    return { displayName: "You", avatarSrc: null };
+    return { slackUserId: null, displayName: "You", avatarSrc: null };
   }
 
   try {
@@ -36,7 +40,7 @@ export async function getSlackThreadPosterPreviewIdentity(): Promise<SlackThread
       user_id?: string;
     };
     if (!authData.ok || !authData.user_id) {
-      return { displayName: "You", avatarSrc: null };
+      return { slackUserId: null, displayName: "You", avatarSrc: null };
     }
 
     const uid = authData.user_id.trim().toUpperCase();
@@ -49,6 +53,7 @@ export async function getSlackThreadPosterPreviewIdentity(): Promise<SlackThread
     if (person) {
       const path = person.profilePicturePath?.trim();
       return {
+        slackUserId: uid,
         displayName: person.name,
         avatarSrc: path && path.length > 0 ? path : null,
       };
@@ -69,8 +74,17 @@ export async function getSlackThreadPosterPreviewIdentity(): Promise<SlackThread
       infoData.user?.profile?.image_48?.trim() ||
       null;
 
-    return { displayName, avatarSrc: url };
+    return { slackUserId: uid, displayName, avatarSrc: url };
   } catch {
-    return { displayName: "You", avatarSrc: null };
+    return { slackUserId: null, displayName: "You", avatarSrc: null };
   }
+}
+
+/**
+ * Resolves who will appear as the message author when posting with the thread
+ * user token: Team roster match on `slackHandle`, else Slack `users.info` label + avatar.
+ */
+export async function getSlackThreadPosterPreviewIdentity(): Promise<SlackThreadPosterPreviewIdentity> {
+  const ctx = await getSlackPosterAuthContext();
+  return { displayName: ctx.displayName, avatarSrc: ctx.avatarSrc };
 }

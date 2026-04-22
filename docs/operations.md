@@ -78,3 +78,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 ## Onboarding detector (cron)
 
 `GET /api/cron/onboarding-detector` runs three times daily (`0 3,11,19 * * *` in `vercel.json`). It uses the same **`Authorization: Bearer ${CRON_SECRET}`** pattern as the executive digest. The job scans Slack for Nadav welcome messages and may append new `Person` rows plus welcome metadata. Configure Slack + Anthropic as in [environment.md](environment.md). Full runbook: [onboarding.md](onboarding.md).
+
+## Followups (unreplied-asks cron)
+
+`GET /api/cron/unreplied-asks-scan` runs hourly (`0 * * * *` in `vercel.json`). Same **`Authorization: Bearer ${CRON_SECRET}`** header. It pulls each founder’s recent Slack messages via `search.messages`, classifies **new** message ids once with Anthropic, and refreshes `conversations.replies` for open asks. State is stored under Redis key **`ecc:unrepliedAsks:data`**. Manual **Refresh now** on **Followups** (`/unreplied`) calls **`POST /api/unreplied-asks/scan`** (session auth) and streams **NDJSON** progress while the same pipeline runs (AI rate limiting applies). Full runbook: [unreplied-asks.md](unreplied-asks.md).

@@ -8,6 +8,7 @@ import {
 import {
   collectSlackUserIdsFromMessageText,
   slackMessageTextForDisplay,
+  truncateSlackTextAvoidSplitMentions,
 } from "@/lib/slackDisplay";
 import {
   buildSlackUserDisplayMaps,
@@ -17,6 +18,16 @@ import {
   THREAD_STALE_MS,
   type SlackMemberRosterHint,
 } from "./thread-ai-shared";
+
+/**
+ * One emoji reaction on a preview message. `name` is the Slack shortname (no
+ * colons, e.g. `thumbsup`). Rendered as a small pill below the message text
+ * in the thread popover.
+ */
+export type SlackThreadPreviewReaction = {
+  name: string;
+  count: number;
+};
 
 export type SlackThreadStatusResult =
   | {
@@ -28,11 +39,29 @@ export type SlackThreadStatusResult =
       snippet: string;
       recentMessages: {
         userLabel: string;
+        /**
+         * Server-resolved plain text with mentions / channels / URLs flattened
+         * to `@Name` / `#channel` / raw URL. Used as a fallback for cached
+         * payloads created before `textRaw` existed; prefer `textRaw` on the
+         * client so inline mention chips can render.
+         */
         text: string;
+        /**
+         * Raw Slack message text (still contains `<@U…>`, `<#C…>`, `<http…>`,
+         * `<!channel>` tokens + `&gt;` / `&amp;` entities). Rendered client-side
+         * by `SlackMentionInlineText` so mentions become inline chips with
+         * avatars rather than flat `@Name` text. Truncated to a safe length
+         * without cutting angle-bracket tokens mid-way.
+         */
+        textRaw?: string;
         /** When present, per-message time (older cached payloads may omit). */
         postedRelative?: string;
         slackUserId?: string;
         avatarSrc?: string | null;
+        /** Slack message ts (`1700000000.012345`) — used by callers to match the focused message. */
+        ts?: string;
+        /** Emoji reactions; only set when the message has at least one. */
+        reactions?: SlackThreadPreviewReaction[];
       }[];
     }
   | { ok: false; error: string };
@@ -62,7 +91,18 @@ export async function fetchSlackThreadStatus(
   const rosterById = rosterMapFromHints(rosterHints);
 
   const forLabels = sorted.slice(-12);
-  const lastPreviewMessages = sorted.slice(-5);
+  /**
+   * Last 5 messages — plus the **thread root** prepended when it falls outside
+   * that window. Callers (Followups) rely on being able to locate the ask they
+   * opened the preview from; the ask is usually the root, so including it here
+   * lets the UI highlight it even when the thread has many replies.
+   */
+  const tailFive = sorted.slice(-5);
+  const parent = sorted[0];
+  const lastPreviewMessages =
+    parent && !tailFive.some((m) => m.ts === parent.ts)
+      ? [parent, ...tailFive]
+      : tailFive;
   const mentionIds = new Set<string>();
   for (const m of lastPreviewMessages) {
     for (const id of collectSlackUserIdsFromMessageText(m.text ?? "")) {
@@ -94,12 +134,24 @@ export async function fetchSlackThreadStatus(
     const avatar =
       uid != null ? (avatarById.get(uid) ?? null) : null;
     const postedAt = new Date(parseFloat(m.ts) * 1000);
+    const reactions =
+      m.reactions && m.reactions.length > 0
+        ? m.reactions.map((r) => ({ name: r.name, count: r.count }))
+        : undefined;
+    const raw = m.text ?? "";
     return {
       userLabel: label,
       slackUserId: uid,
       avatarSrc: avatar,
       postedRelative: formatShortRelative(postedAt),
-      text: slackMessageTextForDisplay(m.text ?? "", 500, labelMap),
+      // Flattened preview text — kept for back-compat (old cached popovers use this).
+      text: slackMessageTextForDisplay(raw, 500, labelMap),
+      // Raw Slack text so the client can render mention chips, channel links,
+      // broadcasts, and HTML-entity-escaped content via SlackMentionInlineText.
+      // Truncated safely so no angle-bracket token is split.
+      textRaw: truncateSlackTextAvoidSplitMentions(raw, 500),
+      ts: m.ts,
+      reactions,
     };
   });
 

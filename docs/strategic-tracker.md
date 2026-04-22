@@ -11,6 +11,7 @@ The Roadmap guide is split into focused pages:
 | [strategic-tracker-roadmap-ui.md](strategic-tracker-roadmap-ui.md) | Editing, scores, filters, sticky headers, URL params, persistence |
 | [strategic-tracker-ai-auth.md](strategic-tracker-ai-auth.md) | Auth, Assistant, AI create/update, future notes |
 | [onboarding.md](onboarding.md) | New hire detection, pilot recommender, Team onboarding, digest lines |
+| [unreplied-asks.md](unreplied-asks.md) | **Followups**: founder Slack asks with no teammate reply (wall, classify-once, thread nudge) |
 
 **Related**
 

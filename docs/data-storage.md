@@ -6,6 +6,8 @@
 - **Schema:** Zod-validated document in `src/lib/schemas/tracker.ts`; TypeScript types in `src/lib/types/tracker.ts`
 - **Concurrency:** Root field **`revision`** plus atomic compare-and-set in Redis so concurrent edits do not silently overwrite each other (`src/server/repository/tracker-storage.ts`)
 
+**Additional key:** **`ecc:unrepliedAsks:data`** — **Followups** (founder Slack unreplied-ask) scan state (separate schema: `src/lib/schemas/unrepliedAsks.ts`, storage: `src/server/repository/unreplied-asks-storage.ts`). See [unreplied-asks.md](unreplied-asks.md).
+
 Set `KV_REST_API_URL` + `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`) in `.env.local` before running the app locally or in production.
 
 ## Review notes

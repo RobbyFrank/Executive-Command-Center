@@ -12,6 +12,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  MessageSquareWarning,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -32,6 +33,16 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [{ href: "/", label: "Roadmap", icon: LayoutDashboard }],
   },
   {
+    title: "Communication",
+    items: [
+      {
+        href: "/unreplied",
+        label: "Followups",
+        icon: MessageSquareWarning,
+      },
+    ],
+  },
+  {
     title: "Organization",
     items: [
       { href: "/companies", label: "Companies", icon: Building2 },
@@ -45,6 +56,7 @@ export function Sidebar({
   profilePicturePath,
   initialCollapsed = false,
   unattendedNewHireCount = 0,
+  unrepliedAsksCount = 0,
 }: {
   displayName: string;
   /** Same source as Team roster (`/uploads/…` or remote blob URL). */
@@ -53,6 +65,8 @@ export function Sidebar({
   initialCollapsed?: boolean;
   /** New hires (≤30 days) with no pilot project — Team page onboarding. */
   unattendedNewHireCount?: number;
+  /** Open items on Followups (48+ business hours, no teammate reply). */
+  unrepliedAsksCount?: number;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -240,6 +254,16 @@ export function Sidebar({
                               : unattendedNewHireCount}
                           </span>
                         ) : null}
+                        {item.href === "/unreplied" && unrepliedAsksCount > 0 ? (
+                          <span
+                            className="shrink-0 tabular-nums rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-200 ring-1 ring-violet-500/35"
+                            title={`${unrepliedAsksCount} open followup${
+                              unrepliedAsksCount === 1 ? "" : "s"
+                            }`}
+                          >
+                            {unrepliedAsksCount > 9 ? "9+" : unrepliedAsksCount}
+                          </span>
+                        ) : null}
                       </>
                     )}
                     {collapsed &&
@@ -250,6 +274,16 @@ export function Sidebar({
                         title={`${unattendedNewHireCount} new hire${
                           unattendedNewHireCount === 1 ? "" : "s"
                         } without a pilot project`}
+                      />
+                    ) : null}
+                    {collapsed &&
+                    item.href === "/unreplied" &&
+                    unrepliedAsksCount > 0 ? (
+                      <span
+                        className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-violet-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                        title={`${unrepliedAsksCount} open followup${
+                          unrepliedAsksCount === 1 ? "" : "s"
+                        }`}
                       />
                     ) : null}
                   </Link>

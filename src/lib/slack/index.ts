@@ -37,6 +37,7 @@ export {
 export type {
   ParsedSlackThreadUrl,
   SlackChannelHistoryMessage,
+  SlackMessageReaction,
   SlackThreadApiMessage,
 } from "./threads";
 export {

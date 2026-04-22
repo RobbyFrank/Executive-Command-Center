@@ -259,7 +259,7 @@ function slackPreviewUrlsAndMentions(text: string): ReactNode[] {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="break-all text-[#1d9bd1] underline decoration-[#1d9bd1]/80 underline-offset-2 hover:text-[#56b8e6]"
+        className="break-words text-[#1d9bd1] underline decoration-[#1d9bd1]/80 underline-offset-2 hover:text-[#56b8e6]"
       >
         {href}
       </a>

@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/onboarding-detector",
       "schedule": "0 3,11,19 * * *"
+    },
+    {
+      "path": "/api/cron/unreplied-asks-scan",
+      "schedule": "0 * * * *"
     }
   ]
 }

@@ -1,9 +1,11 @@
 "use server";
 
 import type { Person } from "@/lib/types/tracker";
+import { trimSlackUserId } from "@/lib/loginSlackMessage";
 import {
   fetchSlackChannels as fetchSlackChannelsLib,
   fetchSlackJoinDateFromProfileGet,
+  fetchSlackUserById,
   fetchSlackWorkspaceMembers,
 } from "@/lib/slack";
 import {
@@ -162,4 +164,139 @@ export async function importSlackMembers(
   }
 
   return { ok: true, imported, avatarWarnings };
+}
+
+export type ImportSlackMemberByUserIdResult =
+  | { ok: true; alreadyOnTeam: true; person: Person }
+  | {
+      ok: true;
+      imported: Person;
+      /** Present when avatars could not be saved (e.g. missing Blob) or Slack upload failed. */
+      avatarWarning?: string;
+    }
+  | { ok: false; error: string };
+
+const AVATAR_SKIPPED_NO_BLOB =
+  "Profile photo was not imported. Set BLOB_READ_WRITE_TOKEN on the server to upload avatars from Slack.";
+
+/**
+ * Looks up one workspace member by Slack user id (`users.info` via bot token) and adds
+ * them to the Team roster using the same create + enrichment path as **Import from Slack**.
+ * When `BLOB_READ_WRITE_TOKEN` is unset, the person is still created but the avatar step is skipped.
+ */
+export async function importSlackMemberByUserId(
+  slackUserId: string
+): Promise<ImportSlackMemberByUserIdResult> {
+  const uid = trimSlackUserId(slackUserId);
+  if (!uid) {
+    return { ok: false, error: "Slack user id is empty." };
+  }
+
+  const fetched = await fetchSlackUserById(uid);
+  if (!fetched.ok) {
+    return { ok: false, error: fetched.error };
+  }
+
+  const m = fetched.member;
+  if (m.isBot) {
+    return { ok: false, error: "Cannot import Slack bots as team members." };
+  }
+  if (m.deleted) {
+    return {
+      ok: false,
+      error: "This Slack user is deleted or deactivated.",
+    };
+  }
+
+  const roster = await getPeople();
+  const existing = roster.find(
+    (p) => trimSlackUserId(p.slackHandle) === uid
+  );
+  if (existing) {
+    return { ok: true, alreadyOnTeam: true, person: existing };
+  }
+
+  const payload: SlackImportMemberPayload = {
+    id: m.id.trim(),
+    realName: m.realName,
+    displayName: m.displayName,
+    email: m.email,
+    avatarUrl: m.avatarUrl,
+    joinDate: m.joinDate,
+  };
+
+  const hasBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
+  if (hasBlob) {
+    const r = await importSlackMembers([payload]);
+    if (!r.ok) {
+      return { ok: false, error: r.error };
+    }
+    const imported = r.imported[0];
+    if (!imported) {
+      return { ok: false, error: "Import returned no person." };
+    }
+    const avatarWarning = r.avatarWarnings[0];
+    return avatarWarning
+      ? { ok: true, imported, avatarWarning }
+      : { ok: true, imported };
+  }
+
+  const knownDepartmentsAtStart = [
+    ...new Set(
+      roster
+        .map((p) => p.department?.trim())
+        .filter((d): d is string => Boolean(d))
+    ),
+  ];
+
+  const slackId = payload.id.trim().toUpperCase();
+  const label =
+    payload.realName.trim() ||
+    payload.displayName.trim() ||
+    `Team member (${slackId})`;
+
+  let joinDate = (payload.joinDate ?? "").trim();
+  if (!joinDate) {
+    joinDate = (await fetchSlackJoinDateFromProfileGet(payload.id)).trim();
+  }
+
+  const person = await createPerson({
+    name: label,
+    role: "",
+    department: "",
+    autonomyScore: 0,
+    slackHandle: slackId,
+    profilePicturePath: "",
+    joinDate,
+    welcomeSlackUrl: "",
+    welcomeSlackChannelId: "",
+    email: (payload.email ?? "").trim(),
+    phone: "",
+    estimatedMonthlySalary: 0,
+    employment: "inhouse_salaried",
+  });
+
+  const postCreateUpdates: Partial<Person> = {};
+  const enrichment = await buildSlackMessageEnrichmentForUser({
+    slackUserId,
+    skipRoleAndDepartment: false,
+    skipJoinDate: Boolean(joinDate),
+    knownDepartments: knownDepartmentsAtStart,
+  });
+  if (enrichment.role) {
+    postCreateUpdates.role = enrichment.role;
+  }
+  if (enrichment.department) {
+    postCreateUpdates.department = enrichment.department;
+  }
+  if (!joinDate && enrichment.joinDateFromOldestMessage) {
+    postCreateUpdates.joinDate = enrichment.joinDateFromOldestMessage;
+  }
+
+  if (Object.keys(postCreateUpdates).length > 0) {
+    const updated = await updatePerson(person.id, postCreateUpdates);
+    return { ok: true, imported: updated, avatarWarning: AVATAR_SKIPPED_NO_BLOB };
+  }
+
+  return { ok: true, imported: person, avatarWarning: AVATAR_SKIPPED_NO_BLOB };
 }

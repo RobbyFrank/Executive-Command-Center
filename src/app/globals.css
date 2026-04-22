@@ -84,3 +84,41 @@ body {
   }
 
 }
+
+/* Followups (/unreplied): scan overlay + list entrance (respect reduced motion via Tailwind motion-reduce: variants on elements) */
+@keyframes unrepliedBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes unrepliedPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes unrepliedFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes unrepliedShimmer {
+  to {
+    background-position: 200% 0;
+  }
+}

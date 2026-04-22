@@ -165,6 +165,126 @@ export async function reviseSlackThreadPingMessage(
   }
 }
 
+/**
+ * Generates a short, context-grounded reply to a Slack ask — no user intent
+ * required. Reads the last several thread messages and drafts something that
+ * fits naturally as a one-click status update / acknowledgment. Used by the
+ * Followups "Draft reply" one-click popover.
+ */
+export async function generateSlackQuickReply(
+  slackUrl: string,
+  rosterHints?: SlackMemberRosterHint[],
+  assigneeName?: string | null
+): Promise<GenerateThreadPingMessageResult> {
+  const tr = await buildRecentThreadPingTranscript(slackUrl, rosterHints);
+  if (!tr.ok) return tr;
+
+  const token = slackUserTokenForThreads();
+  const rosterById = rosterMapFromHints(rosterHints);
+  const sender = await resolveThreadReplySenderIdentity(token, rosterById);
+  const authorship = buildThreadReplyAuthorshipBackground(
+    sender,
+    assigneeName?.trim() || undefined,
+    rosterHints
+  );
+
+  const system = [
+    "You are drafting a short reply that the sender can post immediately in a Slack thread, with minimal editing.",
+    "The thread contains a question or request from the sender that has not yet been replied to (it's on the 'Followups' wall).",
+    "Goal: a natural, conversational one-click reply that moves the thread forward — typically a brief nudge, acknowledgment, clarification, or status check — grounded in what was actually said.",
+    "Length: 1-2 short sentences. Never add filler or signoffs.",
+    "Tone: friendly, direct, collegial — like a teammate, not a bot.",
+    "If the thread includes a specific question from the teammate, answer it if the context is clear; otherwise acknowledge and ask for the concrete next step.",
+    "If a teammate already replied with useful info, thank them briefly and confirm the next action, rather than re-asking.",
+    "Follow the Authorship rules in the background strictly: first-person voice, never @-mention or name yourself, address the assigned teammate with their <@USER_ID> token only when calling them out is natural.",
+    "Never use an em dash (U+2014); use commas, colons, ASCII hyphens, or parentheses instead.",
+    "Output ONLY the message text to post — no quotes, no preamble, no explanation.",
+  ].join(" ");
+
+  const userPayload = [
+    authorship,
+    "",
+    "Recent thread messages (oldest to newest):",
+    "",
+    tr.transcript || "(no text in thread)",
+  ].join("\n");
+
+  try {
+    const message = await claudePlainText(system, userPayload);
+    return { ok: true, message };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Revise a one-click quick reply using the same thread context. `feedback`
+ * doubles as the initial intent when `currentDraft` is empty.
+ */
+export async function reviseSlackQuickReply(
+  slackUrl: string,
+  rosterHints: SlackMemberRosterHint[] | undefined,
+  currentDraft: string,
+  feedback: string,
+  assigneeName?: string | null
+): Promise<GenerateThreadPingMessageResult> {
+  const fb = feedback.trim();
+  if (!fb) {
+    return { ok: false, error: "Revision feedback is empty." };
+  }
+
+  const tr = await buildRecentThreadPingTranscript(slackUrl, rosterHints);
+  if (!tr.ok) return tr;
+
+  const token = slackUserTokenForThreads();
+  const rosterById = rosterMapFromHints(rosterHints);
+  const sender = await resolveThreadReplySenderIdentity(token, rosterById);
+  const authorship = buildThreadReplyAuthorshipBackground(
+    sender,
+    assigneeName?.trim() || undefined,
+    rosterHints
+  );
+
+  const prev = currentDraft.trim();
+  const draftBlock = prev
+    ? `Current draft:\n${prev}`
+    : "Current draft:\n(empty — generate from scratch using the feedback as the intent)";
+
+  const userPayload = [
+    authorship,
+    "",
+    "---",
+    "",
+    "Mode and goal:",
+    "This is a one-click quick reply on the Followups wall: a brief, friendly thread reply (1-2 sentences) grounded in the recent thread context. Apply the user's revision below while keeping the reply short and natural.",
+    "",
+    "Recent thread messages (oldest to newest):",
+    "",
+    tr.transcript || "(no text in thread)",
+    "",
+    "---",
+    "",
+    draftBlock,
+    "",
+    "---",
+    "",
+    "User revision:",
+    fb,
+  ].join("\n");
+
+  try {
+    const message = await claudePlainText(
+      THREAD_PING_REVISE_SYSTEM_PROMPT,
+      userPayload
+    );
+    return { ok: true, message };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
 export type PingSlackThreadResult = { ok: true } | { ok: false; error: string };
 
 export async function pingSlackThread(
