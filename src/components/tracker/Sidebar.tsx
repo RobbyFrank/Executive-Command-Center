@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquareWarning,
+  Orbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -30,7 +31,10 @@ type NavItem = {
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Planning",
-    items: [{ href: "/", label: "Roadmap", icon: LayoutDashboard }],
+    items: [
+      { href: "/", label: "Roadmap", icon: LayoutDashboard },
+      { href: "/atlas", label: "Atlas", icon: Orbit },
+    ],
   },
   {
     title: "Communication",
