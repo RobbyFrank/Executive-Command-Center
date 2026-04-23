@@ -35,6 +35,11 @@ interface PortfolioAtlasProps {
  */
 type FocusPath = string[];
 
+function truncate(s: string, max: number): string {
+  if (!s) return s;
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
 const HINTS = [
   "Click a company to zoom in",
   "Click a group to see its projects",
@@ -137,7 +142,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   }
   if (focusedGroup && focusedCompany) {
     crumbs.push({
-      label: focusedGroup.label,
+      label: truncate(focusedGroup.label, 40),
       onClick: () =>
         setFocusPath([focusedCompany.id, focusedGroup.bucketKey]),
       active: focusPath.length === 2,
@@ -157,7 +162,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   }
   if (focusedMilestoneLaid) {
     crumbs.push({
-      label: focusedMilestoneLaid.milestone.name,
+      label: truncate(focusedMilestoneLaid.milestone.name, 30),
       onClick: () => {},
       active: true,
     });
@@ -375,29 +380,23 @@ function renderCompanyInner(args: {
         const owner = peopleById.get(project.project.ownerId);
         const inFocusedGroup =
           focusedGroup?.projects.some((p) => p.id === project.id) ?? false;
-        const visible = level >= 2 ? inFocusedGroup : true;
         const isProjectFocused = focusedProject?.id === project.id;
-        const isProjectDimmed =
-          (level >= 2 && !inFocusedGroup) ||
-          (level >= 3 && !isProjectFocused);
 
-        if (!visible && level >= 2) {
-          // Projects in other groups fade out once a group is focused
-          return (
-            <g
-              key={project.id}
-              className="atlas-fade"
-              style={{ opacity: 0, pointerEvents: "none" }}
-            />
-          );
-        }
+        // Projects in other groups are hidden once a group is focused.
+        if (level >= 2 && !inFocusedGroup) return null;
+
+        const isProjectDimmed = level >= 3 && !isProjectFocused;
+        // Labels: all projects at level 1 (whole company), and the visible
+        // ones at level 2 (focused group only). Hidden once a specific
+        // project is focused since the camera zooms in.
+        const showProjectLabel = level === 1 || level === 2;
 
         return (
           <g key={project.id}>
             <AtlasProject
               project={project}
               owner={owner}
-              showLabel={level === 1}
+              showLabel={showProjectLabel}
               isFocused={isProjectFocused}
               isDimmed={isProjectDimmed}
               onClick={() => {

@@ -34,6 +34,16 @@ export function AtlasProject({
         ? `${p.progress}% · IDLE`
         : `${p.progress}%`;
 
+  // Strokes: at-risk gets an amber ring; stale gets dashed grey; otherwise the
+  // project's grouping color.
+  const strokeColor = project.isAtRisk
+    ? "#c06a6a"
+    : project.isStale
+      ? "#71717a"
+      : project.color;
+  const strokeDash = project.isStale ? "3 3" : "none";
+  const strokeOpacity = project.isStale ? 0.6 : 1;
+
   return (
     <g
       className="atlas-fade"
@@ -52,10 +62,10 @@ export function AtlasProject({
         r={project.r}
         fill={project.color}
         fillOpacity={fillOpacity}
-        stroke={project.isStale ? "#71717a" : project.color}
-        strokeOpacity={project.isStale ? 0.6 : 1}
+        stroke={strokeColor}
+        strokeOpacity={strokeOpacity}
         strokeWidth={p.status === "Done" || p.status === "For Review" ? 2 : 1.3}
-        strokeDasharray={project.isStale ? "3 3" : "none"}
+        strokeDasharray={strokeDash}
         vectorEffect="non-scaling-stroke"
       />
       {/* Progress arc */}
