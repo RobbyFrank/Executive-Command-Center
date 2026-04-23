@@ -146,19 +146,24 @@ export function layoutCompanyInner(
           company.r * 0.42,
           ringR * Math.sin(Math.PI / nGroups) * 0.92
         );
-  const maxProjects = Math.max(...buckets.map((b) => b.projects.length));
+  const maxProjects = Math.max(1, ...buckets.map((b) => b.projects.length));
 
   const groups: LaidGroup[] = [];
   const projects: LaidProject[] = [];
 
   buckets.forEach((bucket, i) => {
+    // Empty buckets (goals without projects) collapse to the minimum ring
+    // size so they're still visible but don't claim space from populated
+    // goals.
     const groupR =
       nGroups === 1
         ? maxGroupR
-        : Math.max(
-            maxGroupR * 0.5,
-            maxGroupR * Math.sqrt(bucket.projects.length / maxProjects)
-          );
+        : bucket.projects.length === 0
+          ? maxGroupR * 0.45
+          : Math.max(
+              maxGroupR * 0.5,
+              maxGroupR * Math.sqrt(bucket.projects.length / maxProjects)
+            );
     const angle =
       nGroups === 1 ? 0 : (i / nGroups) * Math.PI * 2 - Math.PI / 2;
     const gcx =
@@ -240,23 +245,95 @@ function placeProjectsInGroup(
   });
 }
 
-/** Milestones on a ring inside one project. */
+/**
+ * Milestones on a chronological arc across the bottom of the project circle.
+ *
+ * Left-to-right reads like a timeline (earliest `targetDate` first).
+ * Milestones without a target date sort to the right (they're effectively
+ * "later / unscheduled"). Ties break by original index to keep the layout
+ * stable when dates change.
+ *
+ * The arc spans ~140 degrees under the project center (SVG angles: 160° at
+ * the leftmost tip down to 20° on the rightmost). Keeping the sweep below
+ * the horizontal diameter keeps the top of the project circle free for the
+ * breadcrumb camera target + "today" tick.
+ */
 export function positionMilestones(project: LaidProject): LaidMilestone[] {
   const milestones = project.project.milestones;
   const n = milestones.length;
   if (n === 0) return [];
 
-  const ringR = project.r * 0.55;
-  return milestones.map((m, i) => {
-    const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+  // Sort chronologically; undated milestones drift right.
+  const order = milestones
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => {
+      const av = a.m.targetDate.trim();
+      const bv = b.m.targetDate.trim();
+      if (av && bv) return av < bv ? -1 : av > bv ? 1 : a.i - b.i;
+      if (av) return -1;
+      if (bv) return 1;
+      return a.i - b.i;
+    });
+
+  const ringR = project.r * 0.58;
+  // Angles in radians. In SVG: 0 = 3 o'clock, π/2 = 6 o'clock (below).
+  const startAngleDeg = 160; // leftmost (≈ 8 o'clock)
+  const endAngleDeg = 20; // rightmost (≈ 4 o'clock)
+  const startAngle = (startAngleDeg * Math.PI) / 180;
+  const endAngle = (endAngleDeg * Math.PI) / 180;
+
+  return order.map(({ m }, idx) => {
+    // Evenly distribute; with n === 1 pin to the arc's midpoint.
+    const t = n === 1 ? 0.5 : idx / (n - 1);
+    const angle = startAngle + (endAngle - startAngle) * t;
     return {
       id: m.id,
       projectId: project.id,
       cx: project.cx + Math.cos(angle) * ringR,
       cy: project.cy + Math.sin(angle) * ringR,
-      r: project.r * 0.2,
+      r: project.r * 0.18,
       milestone: m,
       color: milestoneColor(m.status, m.targetDate),
     };
   });
+}
+
+/**
+ * Extra geometry for the milestone arc: the path's center/radius + the
+ * chronological range used to interpolate the "today" tick. Exposed so the
+ * component layer can draw a connector curve under the milestones without
+ * re-deriving constants.
+ */
+export interface MilestoneArcGeometry {
+  cx: number;
+  cy: number;
+  r: number;
+  /** Radians, SVG angle (0 = 3 o'clock, π/2 = 6 o'clock). */
+  startAngle: number;
+  endAngle: number;
+  /** Earliest milestone targetDate in the sorted layout, or "" if all undated. */
+  firstYmd: string;
+  /** Latest dated milestone targetDate in the sorted layout, or "" if all undated. */
+  lastYmd: string;
+  /** Number of dated milestones — need ≥2 for a meaningful "today" interpolation. */
+  datedCount: number;
+}
+
+export function getMilestoneArcGeometry(
+  project: LaidProject
+): MilestoneArcGeometry {
+  const dated = project.project.milestones
+    .map((m) => m.targetDate.trim())
+    .filter((ymd) => ymd.length > 0)
+    .sort();
+  return {
+    cx: project.cx,
+    cy: project.cy,
+    r: project.r * 0.58,
+    startAngle: (160 * Math.PI) / 180,
+    endAngle: (20 * Math.PI) / 180,
+    firstYmd: dated[0] ?? "",
+    lastYmd: dated[dated.length - 1] ?? "",
+    datedCount: dated.length,
+  };
 }

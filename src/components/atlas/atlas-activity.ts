@@ -135,6 +135,20 @@ export function bucketsForCompany(
   const entries = flattenCompanyProjects(company);
   const byKey = new Map<string, GroupBucket>();
 
+  // Seed buckets for every goal when grouping by "goal" so goals without
+  // projects still appear (previously they were silently dropped because
+  // only project rows produced buckets).
+  if (grouping === "goal") {
+    for (const goal of company.goals) {
+      byKey.set(goal.id, {
+        key: goal.id,
+        label: goal.description,
+        color: colorForKey(goal.id),
+        projects: [],
+      });
+    }
+  }
+
   for (const { goal, project } of entries) {
     let key: string;
     let label: string;
