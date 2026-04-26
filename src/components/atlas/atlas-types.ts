@@ -6,14 +6,20 @@ import type {
   ProjectWithMilestones,
 } from "@/lib/types/tracker";
 
-/** What the second-level ring groups projects by inside a focused company. */
-export type GroupingKey = "goal" | "department" | "owner" | "type";
+/**
+ * How goals are color-coded (and, for "priority", softly clustered) inside a
+ * focused company at level 1. Each option resolves to a category color/label
+ * via `goalCategoryFor` in `atlas-activity.ts`. Replaces the old "type"
+ * (project type) bucket — project type is now conveyed by an icon inside
+ * each project bubble at level 2 instead.
+ */
+export type GroupingKey = "goal" | "department" | "owner" | "priority";
 
 export const GROUPING_OPTIONS: { key: GroupingKey; label: string }[] = [
   { key: "goal", label: "Goal" },
   { key: "department", label: "Department" },
   { key: "owner", label: "Owner" },
-  { key: "type", label: "Project type" },
+  { key: "priority", label: "Priority" },
 ];
 
 /** Stable color palette reused by department / project-type / owner bucket colors. */
@@ -52,27 +58,52 @@ export interface LaidCompany {
   company: CompanyWithGoals;
 }
 
-/** Circle inside a focused company — one per grouping bucket (goal / department / owner / type). */
-export interface LaidGroup {
-  /** Composite id: `${companyId}:${groupingKey}:${bucketKey}`. */
+/**
+ * Circle inside a focused company — one per **goal**, freely placed in the
+ * ether. The `categoryKey` / `categoryLabel` / `color` reflect the active
+ * `GroupingKey` (e.g. owner name when grouping by owner, priority label when
+ * grouping by priority). The goal itself is always the unit; the grouping
+ * only controls how the bubble is colored / clustered.
+ */
+export interface LaidGoal {
+  /** Composite id: `${companyId}:${goal.id}`. */
   id: string;
-  /** Raw bucket key (goalId, department name, ownerId, or project type). */
+  /** Raw goal id (matches `Goal.id`). Kept on `bucketKey` for back-compat with
+   *  components that still read the old `LaidGroup.bucketKey` slot. */
   bucketKey: string;
+  /** Goal description used as the bubble title. */
   label: string;
+  /** Category color (depends on `GroupingKey`). */
   color: string;
+  /** Category key (goalId / department / ownerId / priority code). */
+  categoryKey: string;
+  /** Category display label (department name, owner name, priority label, etc.). */
+  categoryLabel: string;
   cx: number;
   cy: number;
   r: number;
+  /** Number of non-mirror projects on this goal. */
   projectCount: number;
+  /** Projects on this goal (flattened). */
   projects: ProjectWithMilestones[];
+  /** The underlying goal record. */
+  goal: GoalWithProjects;
 }
 
-/** Circle inside a group — one per project. */
+/**
+ * @deprecated Use `LaidGoal`. Retained only as a structural type alias for
+ * any caller that still consumes the old shape.
+ */
+export type LaidGroup = LaidGoal;
+
+/** Circle inside a focused goal — one per project. */
 export interface LaidProject {
   id: string;
+  /** Owning company id (parsed from the parent `LaidGoal.id`). */
   companyId: string;
+  /** Composite parent goal id (`${companyId}:${goalId}`). */
   groupId: string;
-  /** The grouping bucket this project belongs to (goalId, department, ownerId, or type). */
+  /** Raw goal id this project belongs to (matches `LaidGoal.bucketKey`). */
   bucketKey: string;
   cx: number;
   cy: number;

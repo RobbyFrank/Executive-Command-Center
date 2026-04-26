@@ -1,31 +1,36 @@
+import {
+  formatRelativeCalendarDate,
+  getMilestoneDueHorizon,
+  type MilestoneDueHorizon,
+} from "@/lib/relativeCalendarDate";
+import type {
+  Person,
+  Priority,
+  ProjectType,
+} from "@/lib/types/tracker";
+import {
+  PRIORITY_COLOR,
+  PRIORITY_GLOW_ALPHA,
+  projectStatusStrokeColor,
+} from "./atlas-activity";
 import { AtlasAvatar } from "./AtlasAvatar";
-import type { LaidProject, Person } from "./atlas-types";
+import type { LaidProject } from "./atlas-types";
 
 interface AtlasProjectProps {
   project: LaidProject;
   owner: Person | undefined;
   /**
-   * Show the full text label (name + avatar + progress meta) below the
-   * project circle. Used at level 2 (focused group), where there are few
-   * enough projects that labels won't collide.
+   * Show the full label block (name + meta). Used at level 2 (focused goal)
+   * where projects float in the ether and there is room beside each bubble.
    */
   showLabel: boolean;
-  /**
-   * Compact mode used at level 1 (whole company). Just renders the owner
-   * avatar inside the project circle — no text — so ringed projects don't
-   * pile labels on top of each other. The avatar scales with the circle
-   * size in the outer camera's coordinate space.
-   */
-  showAvatarOnly: boolean;
   /** True when this project is the focused one (level 3+). */
   isFocused: boolean;
-  /** True when another project in the same company is focused — renders faded. */
+  /** True when another project in the same goal is focused — renders faded. */
   isDimmed: boolean;
   /**
-   * Current camera scale. Text labels are rendered inside a counter-scaled
-   * <g> so they stay at a readable on-screen size regardless of zoom depth.
-   * Inside that wrapper, offsets from (cx, cy) are in on-screen viewBox
-   * units (the outer camera scale and the inverse scale cancel out).
+   * Current camera scale. Text + chrome are wrapped in a counter-scaled
+   * `<g>` so they stay at a fixed on-screen size regardless of zoom depth.
    */
   scale: number;
   onClick: () => void;
@@ -57,7 +62,6 @@ function wrapLabel(
     if (lines.length === maxLines) break;
   }
   if (current && lines.length < maxLines) lines.push(current);
-  // Ellipsise if any words remain unaccommodated.
   const used = lines.join(" ");
   if (used.length < label.length && lines.length > 0) {
     const last = lines[lines.length - 1]!;
@@ -66,159 +70,504 @@ function wrapLabel(
   return lines;
 }
 
+/** Lucide-style filled `Flag` glyph (priority cue). */
+function SvgFlagIcon({
+  x,
+  y,
+  size,
+  fill,
+  stroke,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  fill: string;
+  stroke: string;
+}) {
+  return (
+    <svg
+      x={x}
+      y={y}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={fill}
+      stroke={stroke}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <line x1="4" y1="22" x2="4" y2="15" />
+    </svg>
+  );
+}
+
+/**
+ * Inline SVG glyph per `ProjectType`. Same lucide vocabulary used elsewhere
+ * in the app for consistency: Engineering = code-2, Product = box, Sales =
+ * trending-up, Strategic = compass, Operations = settings, Hiring =
+ * user-plus, Marketing = megaphone.
+ */
+function ProjectTypeGlyph({
+  type,
+  cx,
+  cy,
+  size,
+  stroke,
+}: {
+  type: ProjectType;
+  cx: number;
+  cy: number;
+  size: number;
+  stroke: string;
+}) {
+  const x = cx - size / 2;
+  const y = cy - size / 2;
+  const common = {
+    x,
+    y,
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none" as const,
+    stroke,
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  switch (type) {
+    case "Engineering":
+      return (
+        <svg {...common}>
+          <polyline points="18 16 22 12 18 8" />
+          <polyline points="6 8 2 12 6 16" />
+          <line x1="14" y1="4" x2="10" y2="20" />
+        </svg>
+      );
+    case "Product":
+      return (
+        <svg {...common}>
+          <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+          <line x1="12" y1="22.08" x2="12" y2="12" />
+        </svg>
+      );
+    case "Sales":
+      return (
+        <svg {...common}>
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+          <polyline points="16 7 22 7 22 13" />
+        </svg>
+      );
+    case "Strategic":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="10" />
+          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+        </svg>
+      );
+    case "Operations":
+      return (
+        <svg {...common}>
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      );
+    case "Hiring":
+      return (
+        <svg {...common}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <line x1="19" y1="8" x2="19" y2="14" />
+          <line x1="22" y1="11" x2="16" y2="11" />
+        </svg>
+      );
+    case "Marketing":
+      return (
+        <svg {...common}>
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      );
+  }
+}
+
+/** SVG color for a milestone status pip (mirrors company-level pips). */
+function milestonePipColor(
+  status: string,
+  targetDate: string,
+  today: string
+): string {
+  if (status === "Done") return "#7ba68a";
+  const has = targetDate.trim().length > 0;
+  if (has && targetDate < today) return "#ef4444";
+  if (has) {
+    const horizon = getMilestoneDueHorizon(targetDate);
+    return horizonChipFill(horizon);
+  }
+  return "#71717a";
+}
+
+function horizonChipFill(horizon: MilestoneDueHorizon): string {
+  switch (horizon) {
+    case "overdue":
+      return "#f87171";
+    case "within24h":
+    case "tomorrow":
+      return "#fb923c";
+    case "soon":
+      return "#fbbf24";
+    case "this_week":
+      return "#facc15";
+    case "later":
+      return "#a1a1aa";
+    case "none":
+    default:
+      return "#71717a";
+  }
+}
+
+function todayYmd(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Convert `#rrggbb` to a `"r, g, b"` triple for use inside `rgba(...)`. */
+function hexToRgb(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "113, 113, 122";
+  const n = parseInt(m[1]!, 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+/**
+ * One project as a freely-floating bubble inside the focused goal. Visual
+ * language at level 2 (icons + colour, almost no text):
+ *
+ * - **Project-type glyph** centered — the dominant differentiator between
+ *   sibling projects on the same goal.
+ * - **Outer ring** colored by workflow status (emerald moving, sage done,
+ *   amber for review, rose stuck/blocked, muted grey idle).
+ * - **Progress arc** wrapping the bubble — % complete at a glance.
+ * - **Priority flag** at 1 o'clock with priority color.
+ * - **Spotlight spark** (top-right) and **at-risk pulse** (bottom-left)
+ *   reusing the existing keyframes (`atlas-spark-pulse` / `atlas-pulse-soft`).
+ * - **Milestone status pips** along an inner arc at the bottom — capped at
+ *   8, colored by status / due horizon.
+ * - **Owner avatar** at 7 o'clock (small).
+ * - **Target-date chip** below the bubble, color-shifts when overdue.
+ * - **Subtle priority glow** — outer drop-shadow whose color and intensity
+ *   come from the project's priority.
+ */
 export function AtlasProject({
   project,
   owner,
   showLabel,
-  showAvatarOnly,
   isFocused,
   isDimmed,
   scale,
   onClick,
 }: AtlasProjectProps) {
   const p = project.project;
-  const fillOpacity = project.isStale ? 0.04 : project.isAtRisk ? 0.08 : 0.16;
-  const textOpacity = project.isStale ? 0.6 : 0.95;
+  const priority = p.priority as Priority;
+  const priorityColor = PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.P2;
+  const glowAlpha = PRIORITY_GLOW_ALPHA[priority] ?? 0;
+  const ringColor = projectStatusStrokeColor(p.status);
 
-  const arcLen = (p.progress / 100) * (2 * Math.PI * project.r * 0.82);
+  const fillOpacity = project.isStale ? 0.04 : project.isAtRisk ? 0.08 : 0.14;
 
-  const progressLabel =
-    project.isAtRisk && !project.isStale
-      ? `${p.progress}% · AT RISK`
-      : project.isStale
-        ? `${p.progress}% · IDLE`
-        : `${p.progress}%`;
+  const arcLen = (p.progress / 100) * (2 * Math.PI * project.r * 0.86);
 
-  // Strokes: at-risk gets an amber ring; stale gets dashed grey; otherwise
-  // the project's grouping color.
-  const strokeColor = project.isAtRisk
-    ? "#c06a6a"
-    : project.isStale
-      ? "#71717a"
-      : project.color;
-  const strokeDash = project.isStale ? "3 3" : "none";
-  const strokeOpacity = project.isStale ? 0.6 : 1;
-
-  // Counter-scale wrapper for the "big" text label block (level 2).
   const inv = 1 / Math.max(scale, 0.0001);
   const onScreenR = project.r * scale;
-  const nameFont = 12;
-  const metaFont = 9;
-  const lineGap = 2;
-  // Tight wrapping so ringed projects' labels don't collide horizontally.
-  // Labels sit BELOW the circle, stacked downward.
+
+  // Type glyph fills the disc center.
+  const glyphSize = project.r * 0.85;
+
+  // Priority flag — 1 o'clock just outside disc.
+  const flagAngleDeg = -55;
+  const flagAngle = (flagAngleDeg * Math.PI) / 180;
+  const flagX = project.cx + Math.cos(flagAngle) * project.r * 0.95;
+  const flagY = project.cy + Math.sin(flagAngle) * project.r * 0.95;
+
+  // Spotlight spark — slightly offset so it doesn't overlap the flag.
+  const sparkAngleDeg = -35;
+  const sparkAngle = (sparkAngleDeg * Math.PI) / 180;
+  const sparkX = project.cx + Math.cos(sparkAngle) * project.r * 1.12;
+  const sparkY = project.cy + Math.sin(sparkAngle) * project.r * 1.12;
+  const sparkSize = Math.max(4, project.r * 0.18);
+
+  // At-risk pulse — bottom-left.
+  const overdueAngleDeg = 215;
+  const overdueAngle = (overdueAngleDeg * Math.PI) / 180;
+  const overdueX = project.cx + Math.cos(overdueAngle) * project.r * 1.05;
+  const overdueY = project.cy + Math.sin(overdueAngle) * project.r * 1.05;
+  const overdueR = Math.max(2, project.r * 0.085);
+
+  // Milestone status pips along an inner arc near the bottom of the disc.
+  const today = todayYmd();
+  const pipCap = 8;
+  const pips = p.milestones.slice(0, pipCap);
+  const pipR = project.r * 0.72;
+  const pipDotR = Math.max(1.2, project.r * 0.055);
+  const pipSpanStart = 215;
+  const pipSpanEnd = 325;
+  const pipSpan = pipSpanEnd - pipSpanStart;
+
+  // Owner avatar — bottom-right inside the bubble.
+  const ownerAvatarR = Math.max(6, project.r * 0.22);
+  const ownerAngleDeg = 130;
+  const ownerAngle = (ownerAngleDeg * Math.PI) / 180;
+  const ownerX = project.cx + Math.cos(ownerAngle) * project.r * 0.6;
+  const ownerY = project.cy + Math.sin(ownerAngle) * project.r * 0.6;
+
+  // Target-date chip text + color.
+  const hasDate = p.targetDate.trim().length > 0;
+  const dateLabel = hasDate
+    ? formatRelativeCalendarDate(p.targetDate, new Date(), {
+        omitFuturePreposition: true,
+      })
+    : "";
+  const dateChipColor = (() => {
+    if (!hasDate) return "#71717a";
+    const horizon = getMilestoneDueHorizon(p.targetDate);
+    return horizonChipFill(horizon);
+  })();
+
   const nameLines = wrapLabel(p.name, 22, 2);
+
+  const isClickable = !isFocused;
 
   return (
     <g
       className="atlas-fade"
-      // Interactive only when not already focused (clicking the focused
-      // project is a no-op; panning should still work over its area).
-      data-atlas-interactive={isFocused ? undefined : "true"}
+      data-atlas-interactive={!isFocused ? "true" : undefined}
       style={{
-        opacity: isDimmed ? 0.12 : 1,
-        cursor: isFocused ? "default" : "pointer",
+        opacity: isDimmed ? 0.16 : 1,
+        cursor: isClickable ? "pointer" : "default",
+        filter:
+          glowAlpha > 0
+            ? `drop-shadow(0 0 ${isFocused ? 9 : 5}px rgba(${hexToRgb(priorityColor)}, ${glowAlpha}))`
+            : undefined,
+        transition: "filter 600ms ease",
       }}
       onClick={(e) => {
         e.stopPropagation();
-        if (!isFocused) onClick();
+        if (isClickable) onClick();
       }}
     >
       <title>{p.name}</title>
 
+      {/* Outer disc */}
       <circle
         cx={project.cx}
         cy={project.cy}
         r={project.r}
         fill={project.color}
         fillOpacity={fillOpacity}
-        stroke={strokeColor}
-        strokeOpacity={strokeOpacity}
-        // Thinner at-risk stroke (1.1px) so it doesn't compete with the
-        // company-level red arc at overview transitions. "Done" and
-        // "For Review" projects get a slightly heavier ring to signal
-        // completed/completing work.
+        stroke={ringColor}
+        strokeOpacity={project.isStale ? 0.55 : 0.92}
         strokeWidth={
           p.status === "Done" || p.status === "For Review"
             ? 2
             : project.isAtRisk
-              ? 1.1
+              ? 1.4
               : 1.3
         }
-        strokeDasharray={strokeDash}
+        strokeDasharray={project.isStale ? "3 3" : "none"}
         vectorEffect="non-scaling-stroke"
       />
+
       {/* Progress arc */}
       {!project.isStale && p.progress > 0 ? (
         <circle
           cx={project.cx}
           cy={project.cy}
-          r={project.r * 0.82}
+          r={project.r * 0.86}
           fill="none"
           stroke={project.color}
           strokeWidth={1.8}
           strokeDasharray={`${arcLen} 99999`}
           transform={`rotate(-90 ${project.cx} ${project.cy})`}
-          opacity={0.9}
+          opacity={0.92}
           vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
         />
       ) : null}
 
-      {/* Compact level-1 view: just the owner avatar centered in the circle.
-          No text — labels would collide on the tight project ring. */}
-      {showAvatarOnly && owner ? (
+      {/* Project-type glyph centered */}
+      <ProjectTypeGlyph
+        type={p.type}
+        cx={project.cx}
+        cy={project.cy - project.r * 0.06}
+        size={glyphSize}
+        stroke={project.isStale ? "#71717a" : "#e4e4e7"}
+      />
+
+      {/* Milestone status pips */}
+      {pips.length > 0 ? (
+        <g pointerEvents="none">
+          {pips.map((m, i) => {
+            const t = pips.length === 1 ? 0.5 : i / (pips.length - 1);
+            const deg = pipSpanStart + pipSpan * t;
+            const rad = (deg * Math.PI) / 180;
+            const x = project.cx + Math.cos(rad) * pipR;
+            const y = project.cy + Math.sin(rad) * pipR;
+            return (
+              <circle
+                key={m.id}
+                cx={x}
+                cy={y}
+                r={pipDotR}
+                fill={milestonePipColor(m.status, m.targetDate, today)}
+                fillOpacity={0.95}
+              />
+            );
+          })}
+        </g>
+      ) : null}
+
+      {/* Priority flag */}
+      <g
+        pointerEvents="none"
+        transform={`translate(${flagX} ${flagY}) scale(${inv}) translate(${-flagX} ${-flagY})`}
+      >
+        <SvgFlagIcon
+          x={flagX - 5}
+          y={flagY - 5}
+          size={10}
+          fill={priorityColor}
+          stroke={priorityColor}
+        />
+      </g>
+
+      {/* Owner avatar */}
+      {owner ? (
         <AtlasAvatar
           name={owner.name}
           profilePicturePath={owner.profilePicturePath}
-          cx={project.cx}
-          cy={project.cy}
-          r={project.r * 0.48}
-          clipId={`atlas-project-avatar-compact-${project.id}`}
+          cx={ownerX}
+          cy={ownerY}
+          r={ownerAvatarR}
+          clipId={`atlas-project-owner-${project.id}`}
         />
       ) : null}
 
-      {/* Full label block (level 2 only): name, owner row + progress, sitting
-          below the circle in counter-scaled on-screen units. */}
+      {/* Spotlight spark */}
+      {p.spotlight ? (
+        <g
+          pointerEvents="none"
+          transform={`translate(${sparkX} ${sparkY}) scale(${sparkSize / 3})`}
+        >
+          <g className="atlas-spark-pulse">
+            <path
+              d="M 0 -3 L 0.85 -0.85 L 3 0 L 0.85 0.85 L 0 3 L -0.85 0.85 L -3 0 L -0.85 -0.85 Z"
+              fill="#fbbf24"
+              stroke="#fde68a"
+              strokeWidth={0.3}
+              style={{ filter: "drop-shadow(0 0 3px rgba(251, 191, 36, 0.7))" }}
+            />
+          </g>
+        </g>
+      ) : null}
+
+      {/* At-risk pulse */}
+      {project.isAtRisk ? (
+        <g pointerEvents="none">
+          <circle
+            cx={overdueX}
+            cy={overdueY}
+            r={overdueR * 1.9}
+            fill="#c06a6a"
+            fillOpacity={0.18}
+            className="atlas-pulse-soft"
+          />
+          <circle
+            cx={overdueX}
+            cy={overdueY}
+            r={overdueR}
+            fill="#ef4444"
+            fillOpacity={0.95}
+          />
+        </g>
+      ) : null}
+
+      {/* Label block (level 2 only): name above + date chip below the disc. */}
       <g
         className="atlas-fade"
-        style={{ opacity: showLabel ? textOpacity : 0, pointerEvents: "none" }}
+        style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
         transform={`translate(${project.cx} ${project.cy}) scale(${inv}) translate(${-project.cx} ${-project.cy})`}
       >
         {nameLines.map((line, i) => (
           <text
             key={i}
             x={project.cx}
-            y={project.cy - onScreenR - 10 - (nameLines.length - 1 - i) * (nameFont + lineGap)}
+            y={
+              project.cy -
+              onScreenR -
+              10 -
+              (nameLines.length - 1 - i) * 13
+            }
             textAnchor="middle"
-            fontSize={nameFont}
-            fill="#f4f4f5"
+            fontSize={11}
+            fill={project.isStale ? "#a1a1aa" : "#f4f4f5"}
             fontWeight={500}
           >
             {line}
           </text>
         ))}
-        <g transform={`translate(0 ${onScreenR + metaFont + 6})`}>
-          {owner ? (
-            <AtlasAvatar
-              name={owner.name}
-              profilePicturePath={owner.profilePicturePath}
-              cx={project.cx - 14}
-              cy={project.cy}
-              r={7}
-              clipId={`atlas-project-avatar-label-${project.id}`}
-            />
-          ) : null}
-          <text
-            x={project.cx + (owner ? -2 : 0)}
-            y={project.cy + 3}
-            textAnchor="start"
-            fontSize={metaFont}
-            fill="#a1a1aa"
-            letterSpacing={0.8}
-          >
-            {progressLabel}
-          </text>
-        </g>
+
+        {hasDate ? (
+          <g transform={`translate(${project.cx} ${project.cy + onScreenR + 14})`}>
+            {(() => {
+              const fontSize = 9;
+              const padX = 6;
+              const padY = 3;
+              const charW = fontSize * 0.62;
+              const textW = dateLabel.length * charW;
+              const w = textW + padX * 2;
+              const h = fontSize + padY * 2;
+              return (
+                <>
+                  <rect
+                    x={-w / 2}
+                    y={-h / 2}
+                    width={w}
+                    height={h}
+                    rx={h / 2}
+                    fill="#09090b"
+                    fillOpacity={0.85}
+                    stroke={dateChipColor}
+                    strokeOpacity={0.7}
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <text
+                    x={0}
+                    y={0}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={fontSize}
+                    fontWeight={600}
+                    letterSpacing={0.6}
+                    fill={dateChipColor}
+                  >
+                    {dateLabel}
+                  </text>
+                </>
+              );
+            })()}
+          </g>
+        ) : null}
       </g>
     </g>
   );

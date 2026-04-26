@@ -60,10 +60,6 @@ export {
 } from "./mention-preview";
 export { resolveSlackChannelLabelFromId } from "./channel-label";
 export {
-  resolveMpimParticipantLabel,
-  type ResolveMpimParticipantLabelResult,
-} from "./mpim-label";
-export {
   postGoalChannelMessage,
   draftGoalChannelMessage,
   reviseGoalChannelMessage,

@@ -7,22 +7,28 @@ import type { LaidMilestone } from "./atlas-types";
 
 interface AtlasMilestoneProps {
   milestone: LaidMilestone;
-  /** Show the milestone's name + status (at level 2 or when focused at level 3). */
+  /**
+   * 1-based chronological index used for the sequence badge above the
+   * bubble. Computed by the parent (`PortfolioAtlas`) from the
+   * `positionMilestones` order so it stays consistent with the wandering
+   * path layout.
+   */
+  sequence: number;
+  /** Show the milestone's name + status (at level 3, or when focused at level 4). */
   showLabel: boolean;
   /** True when this milestone is the current focus target. */
   isFocused: boolean;
   /** True when another milestone is focused — renders faded. */
   isDimmed: boolean;
   /**
-   * Current camera scale. Labels are rendered inside a counter-scaled <g> so
-   * their on-screen size stays constant regardless of zoom depth. Positional
-   * offsets inside that <g> are in on-screen pixels (not SVG units).
+   * Current camera scale. Labels are rendered inside a counter-scaled `<g>`
+   * so their on-screen size stays constant regardless of zoom depth.
    */
   scale: number;
   /**
    * Which side of the bubble gets the milestone NAME. The status line goes
-   * on the opposite side. Alternating by arc-index parity prevents adjacent
-   * milestones from stacking name-over-name as they march along the arc.
+   * on the opposite side. Alternating by index parity prevents adjacent
+   * milestones' name blocks from stacking name-over-name.
    */
   labelSide: "above" | "below";
   onClick: () => void;
@@ -51,7 +57,6 @@ function wrapLabel(
     if (lines.length === maxLines) break;
   }
   if (current && lines.length < maxLines) lines.push(current);
-  // If there is still text we couldn't fit, ellipsise the last line.
   const consumed = lines.join(" ").split(/\s+/).length;
   if (consumed < words.length && lines.length > 0) {
     const last = lines[lines.length - 1]!;
@@ -91,8 +96,61 @@ function horizonFill(horizon: MilestoneDueHorizon, isDone: boolean): string {
   }
 }
 
+/** Inline check (Done) / hourglass (overdue) / dot (in-flight) glyphs. */
+function MilestoneStatusGlyph({
+  cx,
+  cy,
+  size,
+  kind,
+  color,
+}: {
+  cx: number;
+  cy: number;
+  size: number;
+  kind: "done" | "overdue" | "default";
+  color: string;
+}) {
+  const x = cx - size / 2;
+  const y = cy - size / 2;
+  const common = {
+    x,
+    y,
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none" as const,
+    stroke: color,
+    strokeWidth: 2.4,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  if (kind === "done") {
+    return (
+      <svg {...common}>
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    );
+  }
+  if (kind === "overdue") {
+    return (
+      <svg {...common}>
+        <path d="M5 22h14" />
+        <path d="M5 2h14" />
+        <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" />
+        <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common} fill={color} stroke={color}>
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 export function AtlasMilestone({
   milestone,
+  sequence,
   showLabel,
   isFocused,
   isDimmed,
@@ -106,11 +164,9 @@ export function AtlasMilestone({
   const horizon: MilestoneDueHorizon = hasDate
     ? getMilestoneDueHorizon(m.targetDate)
     : "none";
+  const isOverdue = !isDone && horizon === "overdue";
   const arcLen = (isDone ? 1 : 0) * (2 * Math.PI * milestone.r * 0.78);
 
-  // Short status: just the relative phrase (in 5d / 2d ago / Done / No date).
-  // The absolute date stays on the <title> tooltip and in the milestone
-  // panel — the arc only has room for one terse line.
   let statusLabel: string;
   if (isDone) {
     statusLabel = "Done";
@@ -124,20 +180,13 @@ export function AtlasMilestone({
 
   const statusColor = horizonFill(horizon, isDone);
 
-  // Inside the counter-scale wrapper, 1 SVG unit = 1 on-screen pixel (the
-  // outer camera scale and this inverse scale cancel out). Offsets from
-  // (cx, cy) are therefore in screen pixels.
   const inv = 1 / Math.max(scale, 0.0001);
   const onScreenR = milestone.r * scale;
   const nameFont = 11;
   const statusFont = 8;
   const lineGap = 2;
-  // Tight wrapping (short lines × 2 lines) so labels for arc-placed milestones
-  // don't collide horizontally. Longer names are ellipsised.
   const labelLines = wrapLabel(m.name, 18, 2);
 
-  // Name on `labelSide`, status on the opposite side — alternating parity
-  // across the arc prevents adjacent name labels from piling up.
   const nameSide = labelSide;
   const nameBlockHeight = labelLines.length * nameFont + (labelLines.length - 1) * lineGap;
   const nameTopY =
@@ -149,11 +198,25 @@ export function AtlasMilestone({
       ? milestone.cy + onScreenR + statusFont + 6
       : milestone.cy - onScreenR - 6;
 
+  // Sequence badge — small numbered chip above the bubble (regardless of
+  // which side the name label sits on, the sequence stays at the top so it
+  // reads naturally left-to-right along the path).
+  const badgeR = 8;
+  const badgeOffsetY = -onScreenR - badgeR - 2;
+
+  // Center status glyph size — sized in viewBox units so it scales with
+  // the bubble (intentional: we want it to feel like part of the bubble).
+  const glyphSize = milestone.r * 0.95;
+  const glyphKind: "done" | "overdue" | "default" = isDone
+    ? "done"
+    : isOverdue
+      ? "overdue"
+      : "default";
+  const glyphColor = isDone ? "#7ba68a" : isOverdue ? "#f87171" : "#a1a1aa";
+
   return (
     <g
       className="atlas-fade"
-      // Interactive only when not already focused — see AtlasProject for
-      // the rationale (lets the canvas pan over the focused bubble's area).
       data-atlas-interactive={isFocused ? undefined : "true"}
       style={{
         opacity: isDimmed ? 0.2 : 1,
@@ -165,7 +228,7 @@ export function AtlasMilestone({
       }}
     >
       <title>
-        {m.name}
+        {`${sequence}. ${m.name}`}
         {hasDate ? ` — due ${formatShortMonthDay(m.targetDate)}` : ""}
       </title>
 
@@ -191,8 +254,51 @@ export function AtlasMilestone({
           transform={`rotate(-90 ${milestone.cx} ${milestone.cy})`}
           opacity={0.75}
           vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
         />
       ) : null}
+
+      {/* Status glyph centered (sized in viewBox space, scales with bubble). */}
+      <g pointerEvents="none">
+        <MilestoneStatusGlyph
+          cx={milestone.cx}
+          cy={milestone.cy}
+          size={glyphSize}
+          kind={glyphKind}
+          color={glyphColor}
+        />
+      </g>
+
+      {/* Sequence badge — sits above the bubble, counter-scaled. */}
+      <g
+        pointerEvents="none"
+        transform={`translate(${milestone.cx} ${milestone.cy}) scale(${inv}) translate(${-milestone.cx} ${-milestone.cy})`}
+      >
+        <g transform={`translate(${milestone.cx} ${milestone.cy + badgeOffsetY})`}>
+          <circle
+            cx={0}
+            cy={0}
+            r={badgeR}
+            fill="#09090b"
+            stroke={milestone.color}
+            strokeOpacity={0.9}
+            strokeWidth={1.3}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text
+            x={0}
+            y={0}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={9.5}
+            fontWeight={700}
+            fill="#f4f4f5"
+            className="tabular-nums"
+          >
+            {sequence}
+          </text>
+        </g>
+      </g>
 
       <g
         className="atlas-fade"

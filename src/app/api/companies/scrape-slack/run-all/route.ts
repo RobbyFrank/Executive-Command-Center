@@ -4,7 +4,11 @@ import {
   checkAiRateLimit,
 } from "@/lib/ai-rate-limit";
 import { logSlackRoadmapSync } from "@/lib/slackRoadmapSyncLog";
+import { resolveCompanyScrapeChannels } from "@/lib/scrapeCompanyChannels";
+import { fetchSlackChannels } from "@/lib/slack";
 import type {
+  SlackScanAllPlanCompany,
+  SlackScanAllResult,
   SlackScanAllStage,
   SlackScanAllStreamPayload,
 } from "@/lib/slack-scrape-stream-types";
@@ -60,6 +64,44 @@ export async function POST(req: Request) {
     .filter((c) => (filterIds ? filterIds.has(c.id) : true))
     .map((c) => ({ id: c.id, name: c.name }));
 
+  // Pre-resolve channels for every company so the UI can size the progress bar
+  // by total work units (channels to fetch + 1 AI call per company) instead of
+  // just `companies.length`. The Slack list call is in-process cached, so each
+  // pipeline run reuses this fetch.
+  const channelsList = await fetchSlackChannels();
+  const planEntries: SlackScanAllPlanCompany[] = companies.map((c) => {
+    let channelCount = 0;
+    if (channelsList.ok) {
+      const company = data.companies.find((x) => x.id === c.id);
+      if (company) {
+        const goalsForCompany = data.goals.filter(
+          (g) => g.companyId === c.id
+        );
+        channelCount = resolveCompanyScrapeChannels({
+          company,
+          goalsForCompany,
+          allChannels: channelsList.channels,
+        }).length;
+      }
+    }
+    return { companyId: c.id, companyName: c.name, channelCount };
+  });
+  /** Each company contributes `channelCount + 1` units (one AI / finalize step). */
+  const planUnitsByCompany = new Map<string, number>(
+    planEntries.map((e) => [e.companyId, e.channelCount + 1])
+  );
+  const totalChannels = planEntries.reduce((s, e) => s + e.channelCount, 0);
+  const totalUnits = totalChannels + companies.length;
+  /** Cumulative units after company `i` finishes. */
+  const cumulativeUnits: number[] = [];
+  {
+    let sum = 0;
+    for (const c of companies) {
+      sum += planUnitsByCompany.get(c.id) ?? 1;
+      cumulativeUnits.push(sum);
+    }
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -67,15 +109,11 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(`${JSON.stringify(p)}\n`));
       };
 
-      const results: Array<{
-        companyId: string;
-        companyName: string;
-        ok: boolean;
-        pendingCount?: number;
-        error?: string;
-      }> = [];
+      const results: SlackScanAllResult[] = [];
       let okCount = 0;
       let failCount = 0;
+      /** Sum of finished work units across all companies (channels + AI step). */
+      let unitsDone = 0;
 
       let currentStage: SlackScanAllStage = "starting";
       let channelTotal = 0;
@@ -89,6 +127,8 @@ export async function POST(req: Request) {
           phase: "company",
           total: companies.length,
           completed: i,
+          totalUnits,
+          unitsDone,
           currentCompanyId: current?.id,
           currentCompanyName: current?.name,
           currentStage: current ? currentStage : undefined,
@@ -113,8 +153,16 @@ export async function POST(req: Request) {
           logTrigger: "api-sync-all",
           batchId,
           companyCount: companies.length,
+          totalChannels,
+          totalUnits,
           /** True when the request body included a `companyIds` array filter. */
           companyFilterApplied: filterIds != null,
+        });
+        write({
+          type: "plan",
+          companies: planEntries,
+          totalChannels,
+          totalUnits,
         });
         for (let i = 0; i < companies.length; i += 1) {
           if (req.signal.aborted) break;
@@ -149,6 +197,7 @@ export async function POST(req: Request) {
               channelCurrent = undefined;
               if (info.ok) channelDone += 1;
               else channelFailed += 1;
+              unitsDone += 1;
               emit(i, c);
             },
           });
@@ -160,6 +209,7 @@ export async function POST(req: Request) {
               companyName: c.name,
               ok: true,
               pendingCount: r.pending.length,
+              stats: r.stats,
             });
           } else {
             failCount += 1;
@@ -171,6 +221,10 @@ export async function POST(req: Request) {
             });
           }
 
+          // Snap to plan baseline so the AI / finalize unit and any unreported
+          // channel skips get accounted for, even on failure.
+          const target = cumulativeUnits[i] ?? unitsDone;
+          if (unitsDone < target) unitsDone = target;
           emit(i + 1, null);
         }
 
@@ -181,10 +235,14 @@ export async function POST(req: Request) {
           companyCount: companies.length,
           okCount,
           failCount,
+          unitsDone,
+          totalUnits,
         });
         write({
           type: "done",
           total: companies.length,
+          totalUnits,
+          unitsDone,
           okCount,
           failCount,
           results,

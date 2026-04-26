@@ -1,18 +1,19 @@
-import type { Person } from "@/lib/types/tracker";
+import type { Person, Priority } from "@/lib/types/tracker";
 import {
-  bucketsForCompany,
   companyActivityScore,
+  goalCategoryFor,
   isProjectAtRisk,
   isProjectStale,
   milestoneColor,
+  PRIORITY_RADIUS_KICKER,
   projectColor,
-  type GroupBucket,
 } from "./atlas-activity";
 import type {
   CompanyWithGoals,
+  GoalWithProjects,
   GroupingKey,
   LaidCompany,
-  LaidGroup,
+  LaidGoal,
   LaidMilestone,
   LaidProject,
   ProjectWithMilestones,
@@ -46,7 +47,6 @@ export function layoutCompanies(
     };
   });
 
-  // Sort descending by activity so the biggest lands first.
   withScores.sort((a, b) => b.activity - a.activity);
 
   const result: LaidCompany[] = [];
@@ -58,7 +58,7 @@ export function layoutCompanies(
       MIN_COMPANY_R + (MAX_COMPANY_R - MIN_COMPANY_R) * (entry.activity / 100)
     );
 
-    const { cx, cy } = placeCircle(result, r, margin, index, entry.company.id);
+    const { cx, cy } = placeCircleOnCanvas(result, r, margin, index, entry.company.id);
     result.push({
       id: entry.company.id,
       name: entry.company.name,
@@ -88,10 +88,11 @@ function seededRandom(seed: string, salt: number): number {
 }
 
 /**
- * Pick a non-overlapping center for a circle of radius `r`. Tries seeded
- * candidates; falls back to a ring around the canvas center if all collide.
+ * Pick a non-overlapping center for a circle of radius `r` against the full
+ * canvas. Used for the company-level layout. Tries seeded candidates; falls
+ * back to a ring around the canvas center if all collide.
  */
-function placeCircle(
+function placeCircleOnCanvas(
   placed: LaidCompany[],
   r: number,
   margin: number,
@@ -108,8 +109,7 @@ function placeCircle(
     const cx = minX + (maxX - minX) * seededRandom(seed, attempt * 2);
     const cy = minY + (maxY - minY) * seededRandom(seed, attempt * 2 + 1);
     const ok = placed.every(
-      (p) =>
-        Math.hypot(cx - p.cx, cy - p.cy) >= p.r + r + pad
+      (p) => Math.hypot(cx - p.cx, cy - p.cy) >= p.r + r + pad
     );
     if (ok) return { cx, cy };
   }
@@ -123,147 +123,302 @@ function placeCircle(
 }
 
 /**
- * Lay out the inside of one company: grouping circles on a ring, and projects
- * placed on an inner ring within each group. Milestones are placed on demand
- * via {@link positionMilestones}.
+ * Generic non-overlap rejection sampling inside an arbitrary bounding circle.
+ * Used for goals (inside a company) and projects (inside a focused goal).
+ *
+ * `existing` only needs `cx`/`cy`/`r`. `bias` (when provided) shifts the
+ * random target toward a point inside the bounding region — used for the
+ * priority quadrant clustering.
+ */
+interface PlacedCircle {
+  cx: number;
+  cy: number;
+  r: number;
+}
+
+function placeCircleInBoundingCircle(
+  existing: readonly PlacedCircle[],
+  r: number,
+  bound: { cx: number; cy: number; r: number },
+  seed: string,
+  pad: number,
+  bias?: { x: number; y: number; strength: number }
+): { cx: number; cy: number } {
+  const innerR = Math.max(0, bound.r - r - pad);
+  for (let attempt = 0; attempt < 220; attempt++) {
+    // Uniform sample inside a disc via sqrt() radius scaling.
+    const u = seededRandom(seed, attempt * 2);
+    const v = seededRandom(seed, attempt * 2 + 1);
+    const radius = innerR * Math.sqrt(u);
+    const angle = v * Math.PI * 2;
+    let cx = bound.cx + Math.cos(angle) * radius;
+    let cy = bound.cy + Math.sin(angle) * radius;
+    if (bias && bias.strength > 0) {
+      cx = cx + (bias.x - cx) * bias.strength;
+      cy = cy + (bias.y - cy) * bias.strength;
+    }
+    const ok = existing.every(
+      (p) => Math.hypot(cx - p.cx, cy - p.cy) >= p.r + r + pad
+    );
+    if (ok) return { cx, cy };
+  }
+  // Fallback: ring around the bounding center.
+  const ringR = Math.max(0, bound.r - r - pad);
+  const angle =
+    (existing.length / Math.max(1, existing.length + 1)) * Math.PI * 2;
+  return {
+    cx: bound.cx + Math.cos(angle) * ringR * 0.9,
+    cy: bound.cy + Math.sin(angle) * ringR * 0.9,
+  };
+}
+
+const MIN_GOAL_R = 22;
+const MAX_GOAL_R = 70;
+
+/**
+ * Place goals as freely-floating bubbles inside the focused company's
+ * bounding circle. Bubble size is driven by the goal's project count plus a
+ * subtle priority kicker so urgent goals quietly draw the eye even before
+ * the priority-tinted glow / flag color reach the user.
+ *
+ * When `grouping === "priority"`, candidate placements are softly biased
+ * toward a quadrant per priority — Urgent top-left, High top-right, Normal
+ * bottom-left, Low bottom-right. The bias is gentle (random jitter still
+ * dominates) so the layout reads as "subtle clustering" rather than a
+ * strict grid.
+ */
+export function layoutGoalsInEther(
+  company: LaidCompany,
+  grouping: GroupingKey,
+  peopleById: Map<string, Person>
+): LaidGoal[] {
+  const goals = company.company.goals;
+  if (goals.length === 0) return [];
+
+  const maxProjects = Math.max(
+    1,
+    ...goals.map((g) => g.projects.filter((p) => !p.isMirror).length)
+  );
+
+  // Bounding circle inside the focused company. Slight inset so labels can
+  // breathe and the company's own outer chrome doesn't get clipped.
+  const bound = { cx: company.cx, cy: company.cy, r: company.r * 0.82 };
+
+  // Dynamic radius envelope: a single goal can occupy up to ~45% of the
+  // bound; with N goals, the cap drops as 0.7/√N so they all have room to
+  // pack without colliding into the rejection-sampling fallback. Final
+  // values are clamped against the desktop-feel constants
+  // (MIN_GOAL_R / MAX_GOAL_R) so bubbles still feel goal-shaped.
+  const N = goals.length;
+  const dynamicMax = bound.r * Math.min(0.45, 0.7 / Math.sqrt(N));
+  const effectiveMaxR = Math.min(MAX_GOAL_R, dynamicMax);
+  const effectiveMinR = Math.min(MIN_GOAL_R, effectiveMaxR * 0.55);
+
+  const result: LaidGoal[] = [];
+  const sorted = [...goals].sort(priorityFirstThenName);
+
+  for (const goal of sorted) {
+    const projects = goal.projects.filter((p) => !p.isMirror);
+    const projectCount = projects.length;
+    const baseFrac =
+      0.45 + 0.55 * (projectCount / maxProjects);
+    const r = Math.max(
+      effectiveMinR,
+      Math.min(
+        effectiveMaxR,
+        (effectiveMinR + (effectiveMaxR - effectiveMinR) * baseFrac) *
+          PRIORITY_RADIUS_KICKER[goal.priority]
+      )
+    );
+
+    const cat = goalCategoryFor(goal, grouping, peopleById);
+    const seed = `${company.id}:${goal.id}:${grouping}`;
+
+    const bias =
+      grouping === "priority"
+        ? quadrantBiasFor(goal.priority, bound)
+        : undefined;
+
+    const { cx, cy } = placeCircleInBoundingCircle(
+      result,
+      r,
+      bound,
+      seed,
+      6,
+      bias
+    );
+
+    result.push({
+      id: `${company.id}:${goal.id}`,
+      bucketKey: goal.id,
+      label: goal.description,
+      color: cat.color,
+      categoryKey: cat.key,
+      categoryLabel: cat.label,
+      cx,
+      cy,
+      r,
+      projectCount,
+      projects: goal.projects,
+      goal,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Quadrant target inside a bounding circle for a given priority. Returned
+ * as `(x, y, strength)`; strength of 0.45 pulls a candidate roughly halfway
+ * toward the quadrant centroid, leaving plenty of room for jitter so two
+ * urgent goals don't sit on top of each other.
+ */
+function quadrantBiasFor(
+  priority: Priority,
+  bound: { cx: number; cy: number; r: number }
+): { x: number; y: number; strength: number } {
+  const offset = bound.r * 0.5;
+  switch (priority) {
+    case "P0":
+      return { x: bound.cx - offset, y: bound.cy - offset, strength: 0.45 };
+    case "P1":
+      return { x: bound.cx + offset, y: bound.cy - offset, strength: 0.45 };
+    case "P2":
+      return { x: bound.cx - offset, y: bound.cy + offset, strength: 0.45 };
+    case "P3":
+    default:
+      return { x: bound.cx + offset, y: bound.cy + offset, strength: 0.45 };
+  }
+}
+
+/** P0 first, then P1, P2, P3; ties break alphabetically by description. */
+function priorityFirstThenName(a: GoalWithProjects, b: GoalWithProjects): number {
+  const ord: Record<Priority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  const da = ord[a.priority] ?? 9;
+  const db = ord[b.priority] ?? 9;
+  if (da !== db) return da - db;
+  return a.description.localeCompare(b.description);
+}
+
+/**
+ * Inner layout for one focused company. Returns:
+ * - `goals` — the level-1 goal bubbles (always present, freely placed in the
+ *   ether).
+ * - `projects` — the level-2 project bubbles (one per non-mirror project on
+ *   any goal). Projects are placed inside their parent goal's bounding
+ *   circle via `layoutProjectsInEther`.
+ *
+ * Camera framing in `PortfolioAtlas` decides which level is currently
+ * visible; both layers are computed up front so the focus snap doesn't have
+ * to wait on layout.
  */
 export function layoutCompanyInner(
   company: LaidCompany,
   grouping: GroupingKey,
   peopleById: Map<string, Person>
-): { groups: LaidGroup[]; projects: LaidProject[] } {
-  const buckets = bucketsForCompany(company.company, grouping, peopleById);
-  if (buckets.length === 0) {
-    return { groups: [], projects: [] };
-  }
-
-  const nGroups = buckets.length;
-  const ringR = company.r * 0.5;
-  const maxGroupR =
-    nGroups === 1
-      ? company.r * 0.7
-      : Math.min(
-          company.r * 0.42,
-          ringR * Math.sin(Math.PI / nGroups) * 0.92
-        );
-  const maxProjects = Math.max(1, ...buckets.map((b) => b.projects.length));
-
-  const groups: LaidGroup[] = [];
+): { goals: LaidGoal[]; projects: LaidProject[] } {
+  const goals = layoutGoalsInEther(company, grouping, peopleById);
   const projects: LaidProject[] = [];
-
-  buckets.forEach((bucket, i) => {
-    // Empty buckets (goals without projects) collapse to the minimum ring
-    // size so they're still visible but don't claim space from populated
-    // goals.
-    const groupR =
-      nGroups === 1
-        ? maxGroupR
-        : bucket.projects.length === 0
-          ? maxGroupR * 0.45
-          : Math.max(
-              maxGroupR * 0.5,
-              maxGroupR * Math.sqrt(bucket.projects.length / maxProjects)
-            );
-    const angle =
-      nGroups === 1 ? 0 : (i / nGroups) * Math.PI * 2 - Math.PI / 2;
-    const gcx =
-      nGroups === 1 ? company.cx : company.cx + Math.cos(angle) * ringR;
-    const gcy =
-      nGroups === 1 ? company.cy : company.cy + Math.sin(angle) * ringR;
-
-    const groupId = `${company.id}:${grouping}:${bucket.key}`;
-    groups.push({
-      id: groupId,
-      bucketKey: bucket.key,
-      label: bucket.label,
-      color: bucket.color,
-      cx: gcx,
-      cy: gcy,
-      r: groupR,
-      projectCount: bucket.projects.length,
-      projects: bucket.projects,
-    });
-
-    projects.push(
-      ...placeProjectsInGroup(bucket, groupId, company.id, gcx, gcy, groupR, grouping, peopleById)
-    );
-  });
-
-  return { groups, projects };
+  for (const goal of goals) {
+    projects.push(...layoutProjectsInEther(goal, grouping, peopleById));
+  }
+  return { goals, projects };
 }
 
-function placeProjectsInGroup(
-  bucket: GroupBucket,
-  groupId: string,
-  companyId: string,
-  gcx: number,
-  gcy: number,
-  groupR: number,
+const MIN_PROJECT_R_FRAC = 0.18;
+const MAX_PROJECT_R_FRAC = 0.34;
+
+/**
+ * Place projects inside a focused goal's bubble as freely-floating circles.
+ * Same rejection-sampling primitive as goals/companies, scoped to the
+ * goal's bounding circle. Bubble size is driven by milestone count plus the
+ * project's priority kicker so urgent projects subtly read larger inside
+ * any goal.
+ */
+export function layoutProjectsInEther(
+  goal: LaidGoal,
   grouping: GroupingKey,
   peopleById: Map<string, Person>
 ): LaidProject[] {
-  const n = bucket.projects.length;
-  if (n === 0) return [];
+  const projects = goal.projects.filter((p) => !p.isMirror);
+  if (projects.length === 0) return [];
 
-  const toLaid = (
-    project: ProjectWithMilestones,
-    cx: number,
-    cy: number,
-    r: number
-  ): LaidProject => ({
-    id: project.id,
-    companyId,
-    groupId,
-    bucketKey: bucket.key,
-    cx,
-    cy,
-    r,
-    project,
-    color: projectColor(project, grouping, peopleById),
-    isStale: isProjectStale(project),
-    isAtRisk: isProjectAtRisk(project),
+  const maxMilestones = Math.max(1, ...projects.map((p) => p.milestones.length));
+
+  const bound = { cx: goal.cx, cy: goal.cy, r: goal.r * 0.78 };
+  const baseMin = goal.r * MIN_PROJECT_R_FRAC;
+  const baseMax = goal.r * MAX_PROJECT_R_FRAC;
+
+  // Same dynamic-cap scheme as goals: ensures multiple project bubbles can
+  // actually pack inside the goal's bounding circle without colliding into
+  // the rejection-sampling fallback. With 1 project, max ≈ 35% of bound;
+  // with 9 projects, ≈ 20%.
+  const N = projects.length;
+  const dynamicMax = bound.r * Math.min(0.55, 0.6 / Math.sqrt(N));
+  const effectiveMaxR = Math.min(baseMax, dynamicMax);
+  const effectiveMinR = Math.min(baseMin, effectiveMaxR * 0.55);
+
+  const result: LaidProject[] = [];
+  const sorted = [...projects].sort((a, b) => {
+    const ord: Record<Priority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+    const da = ord[a.priority] ?? 9;
+    const db = ord[b.priority] ?? 9;
+    if (da !== db) return da - db;
+    return a.name.localeCompare(b.name);
   });
 
-  if (n === 1) {
-    return [toLaid(bucket.projects[0]!, gcx, gcy, groupR * 0.6)];
+  for (const project of sorted) {
+    const baseFrac =
+      0.55 + 0.45 * (project.milestones.length / maxMilestones);
+    const r = Math.max(
+      effectiveMinR,
+      Math.min(
+        effectiveMaxR,
+        (effectiveMinR + (effectiveMaxR - effectiveMinR) * baseFrac) *
+          PRIORITY_RADIUS_KICKER[project.priority]
+      )
+    );
+    const seed = `${goal.id}:${project.id}`;
+    const { cx, cy } = placeCircleInBoundingCircle(result, r, bound, seed, 4);
+    result.push({
+      id: project.id,
+      companyId: goal.id.split(":")[0] ?? "",
+      groupId: goal.id,
+      bucketKey: goal.bucketKey,
+      cx,
+      cy,
+      r,
+      project,
+      color: projectColor(project, grouping, peopleById),
+      isStale: isProjectStale(project),
+      isAtRisk: isProjectAtRisk(project),
+    });
   }
 
-  const innerRingR = groupR * 0.48;
-  const pr = Math.min(
-    groupR * 0.4,
-    2 * innerRingR * Math.sin(Math.PI / n) * 0.45
-  );
-
-  return bucket.projects.map((project, j) => {
-    const angle = (j / n) * Math.PI * 2 - Math.PI / 2;
-    return toLaid(
-      project,
-      gcx + Math.cos(angle) * innerRingR,
-      gcy + Math.sin(angle) * innerRingR,
-      pr * (0.85 + (project.progress / 100) * 0.15)
-    );
-  });
+  return result;
 }
 
 /**
- * Milestones on a chronological arc across the bottom of the project circle.
+ * Place milestones along a chronologically-ordered, gently-wandering path
+ * inside the focused project's bubble. The path is a sine-wave serpentine
+ * scoped to the project's diameter — earliest milestone on the left,
+ * latest on the right — so the user reads the journey naturally left to
+ * right while the wander breaks the visual rigidity of a flat line.
  *
- * Left-to-right reads like a timeline (earliest `targetDate` first).
- * Milestones without a target date sort to the right (they're effectively
- * "later / unscheduled"). Ties break by original index to keep the layout
- * stable when dates change.
+ * Milestones without a target date sort to the right (effectively
+ * "later/unscheduled"). Ties break by original index so the layout is
+ * stable when dates coincide.
  *
- * The arc spans ~140 degrees under the project center (SVG angles: 160° at
- * the leftmost tip down to 20° on the rightmost). Keeping the sweep below
- * the horizontal diameter keeps the top of the project circle free for the
- * breadcrumb camera target + "today" tick.
+ * `radius` is modulated by status: Done milestones get a small +bonus
+ * (presence; "this happened"), undated ones get a small −penalty (less
+ * concrete). Phase of the wander is seeded by `project.id` so the curve
+ * looks organic but never shifts between renders.
  */
 export function positionMilestones(project: LaidProject): LaidMilestone[] {
   const milestones = project.project.milestones;
   const n = milestones.length;
   if (n === 0) return [];
 
-  // Sort chronologically; undated milestones drift right.
   const order = milestones
     .map((m, i) => ({ m, i }))
     .sort((a, b) => {
@@ -275,23 +430,26 @@ export function positionMilestones(project: LaidProject): LaidMilestone[] {
       return a.i - b.i;
     });
 
-  const ringR = project.r * 0.58;
-  // Angles in radians. In SVG: 0 = 3 o'clock, π/2 = 6 o'clock (below).
-  const startAngleDeg = 160; // leftmost (≈ 8 o'clock)
-  const endAngleDeg = 20; // rightmost (≈ 4 o'clock)
-  const startAngle = (startAngleDeg * Math.PI) / 180;
-  const endAngle = (endAngleDeg * Math.PI) / 180;
+  const baseR = project.r * 0.18;
+  const halfWidth = project.r * 0.7;
+  const amplitude = project.r * 0.32;
+  const phaseSeed = seededRandom(project.id, 1) * Math.PI * 2;
 
   return order.map(({ m }, idx) => {
-    // Evenly distribute; with n === 1 pin to the arc's midpoint.
     const t = n === 1 ? 0.5 : idx / (n - 1);
-    const angle = startAngle + (endAngle - startAngle) * t;
+    const x = project.cx - halfWidth + 2 * halfWidth * t;
+    const y =
+      project.cy + Math.sin(phaseSeed + t * Math.PI * 2.4) * amplitude;
+    const isDone = m.status === "Done";
+    const hasDate = m.targetDate.trim().length > 0;
+    const radius =
+      baseR * (isDone ? 1.08 : hasDate ? 1.0 : 0.9);
     return {
       id: m.id,
       projectId: project.id,
-      cx: project.cx + Math.cos(angle) * ringR,
-      cy: project.cy + Math.sin(angle) * ringR,
-      r: project.r * 0.18,
+      cx: x,
+      cy: y,
+      r: radius,
       milestone: m,
       color: milestoneColor(m.status, m.targetDate),
     };
@@ -299,39 +457,32 @@ export function positionMilestones(project: LaidProject): LaidMilestone[] {
 }
 
 /**
- * Extra geometry for the milestone arc: the path's center/radius + the
- * chronological range used to interpolate the "today" tick. Exposed so the
- * component layer can draw a connector curve under the milestones without
- * re-deriving constants.
+ * Geometry for the wandering milestone path: the polyline through every
+ * milestone center, plus the chronological range used to interpolate the
+ * "today" marker. Exposed so the component layer can draw a smooth
+ * connector spline without re-deriving the layout.
  */
-export interface MilestoneArcGeometry {
-  cx: number;
-  cy: number;
-  r: number;
-  /** Radians, SVG angle (0 = 3 o'clock, π/2 = 6 o'clock). */
-  startAngle: number;
-  endAngle: number;
-  /** Earliest milestone targetDate in the sorted layout, or "" if all undated. */
+export interface MilestonePathGeometry {
+  /** Polyline points (chronological order). */
+  points: { x: number; y: number }[];
+  /** Earliest dated milestone targetDate, or "" if all undated. */
   firstYmd: string;
-  /** Latest dated milestone targetDate in the sorted layout, or "" if all undated. */
+  /** Latest dated milestone targetDate, or "" if all undated. */
   lastYmd: string;
   /** Number of dated milestones — need ≥2 for a meaningful "today" interpolation. */
   datedCount: number;
 }
 
-export function getMilestoneArcGeometry(
+export function getMilestonePathGeometry(
   project: LaidProject
-): MilestoneArcGeometry {
+): MilestonePathGeometry {
+  const laid = positionMilestones(project);
   const dated = project.project.milestones
     .map((m) => m.targetDate.trim())
     .filter((ymd) => ymd.length > 0)
     .sort();
   return {
-    cx: project.cx,
-    cy: project.cy,
-    r: project.r * 0.58,
-    startAngle: (160 * Math.PI) / 180,
-    endAngle: (20 * Math.PI) / 180,
+    points: laid.map((m) => ({ x: m.cx, y: m.cy })),
     firstYmd: dated[0] ?? "",
     lastYmd: dated[dated.length - 1] ?? "",
     datedCount: dated.length,

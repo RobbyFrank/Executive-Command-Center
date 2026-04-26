@@ -57,12 +57,6 @@ Clicking the **Quick reply** icon (✨ Sparkles, violet tint) on a row opens a c
 
 The icon itself shows a hover tooltip ("Quick reply — AI drafts a short reply grounded in the thread"). The popover closes on outside click / Escape / scroll, and disables everything while posting so double-submit is impossible. The heavier `SlackPingDialog` (full-page modal with spotlight backdrop) is still used by the Roadmap milestone flows but no longer by Followups.
 
-### Bulk reply (per assignee group)
-
-When a person (or combined assignee group) has **two or more** open asks, the sticky group header shows a hover-revealed **Bulk reply** chip (violet outline, Sparkles). It opens `BulkReplyAllDialog` (`src/components/unreplied/BulkReplyAllDialog.tsx`): every ask in that group renders as a card with the original message on the left and the AI draft on the right (side-by-side on `md+`, stacked on narrow screens, with matching shells so both columns align vertically). The **original ask** is capped to roughly **7 lines** of height with `overflow-y` scrolling when longer. Drafts are generated in parallel via `generateSlackQuickReply` as soon as the dialog opens. The draft uses the same **preview-first** affordance as `QuickReplyPopover`: `SlackMentionInlineText` renders `<@U…>` as readable chips until you **click to edit**, then a textarea shows the raw tokens for precise edits. Per card you can **Skip** or **Send** (`pingSlackThread` + `markUnrepliedAskNudged`, same as the single-row Quick reply). **Send all remaining** shows an amber confirmation strip before sequentially posting every still-ready draft. Closing the dialog after any successful send triggers a page refresh so the wall updates. The dialog intentionally omits `Revise with AI` — the single-row Quick reply popover still has it for one-off revision flows; bulk review keeps the action set deliberately small (Skip / Send).
-
-Group DM (`mpim`) rows show participant names instead of the raw `mpdm-…` Slack id. On open, the dialog calls `resolveMpimParticipantLabel(channelId, rosterHints)` (`src/server/actions/slack/mpim-label.ts`) which paginates `conversations.members` and resolves each id through the same Redis-cached `resolveSlackUserDisplays` batch used elsewhere on the Followups page, joining with the `"Dave", "Dave & James", "Dave, James & Priya"` convention. Fallback text is the neutral label **Group DM** if resolution fails.
-
 The three sibling icons in the action cluster are:
 
 - **Preview thread** (`MessageSquare`, neutral zinc) — opens the read-only `FollowupThreadPopover` with the last 5 thread messages, reactions, and the focused ask highlighted.
@@ -101,7 +95,6 @@ Replies are posted with the configured **single** Slack user token. If that toke
 - **Dismiss** — hides the row (`state: dismissed`).
 - **Add to Team** — when the assignee has a Slack user id from the classifier but is **not** on the roster, creates a `Person` via `users.info` + the same pipeline as **Team → Import from Slack** (`importSlackMemberByUserId`). If `BLOB_READ_WRITE_TOKEN` is unset, the row is still created but the profile photo step is skipped (toast explains).
 - **Quick reply** → AI-drafted popover → post — sets `state: nudged` after a successful post (see "Quick reply flow" below).
-- **Bulk reply** (hover-revealed on group header, 2+ open asks) — side-by-side review dialog; each sent thread sets `state: nudged` (see "Bulk reply" above).
 
 ## Related code
 
@@ -116,8 +109,6 @@ Replies are posted with the configured **single** Slack user token. If that toke
 | Reactions pill row | `src/components/unreplied/SlackReactionsRow.tsx` |
 | Thread preview popover | `src/components/unreplied/FollowupThreadPopover.tsx` |
 | Quick reply popover | `src/components/unreplied/QuickReplyPopover.tsx` |
-| Bulk reply dialog | `src/components/unreplied/BulkReplyAllDialog.tsx` |
-| Group DM label resolver | `src/server/actions/slack/mpim-label.ts` |
 | Quick reply AI actions | `src/server/actions/slack/thread-ping-revise.ts` (`generateSlackQuickReply` / `reviseSlackQuickReply`) |
 
 See also [strategic-tracker-slack.md](strategic-tracker-slack.md) for milestone thread tooling.

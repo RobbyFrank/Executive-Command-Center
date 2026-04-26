@@ -10,7 +10,7 @@ Next.js app for the **MLabs portfolio**: companies, goals, projects, milestones,
 - **[docs/operations.md](docs/operations.md)** — CI, health check, caching, AI rate limits, PII in prompts
 - **[docs/onboarding.md](docs/onboarding.md)** — New hire Slack detection, pilot recommender, Team onboarding, digest lines
 - **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Slack Roadmap scan: threads, two-pass AI (suggest + reconcile), Redis pending queue, approve/reject, daily Vercel cron
-- **[docs/unreplied-asks.md](docs/unreplied-asks.md)** — **Followups**: founder Slack asks in Slack (channels + group DMs, AI classify-once, nudge via thread reply or hover-revealed **Bulk reply** when someone has multiple open asks)
+- **[docs/unreplied-asks.md](docs/unreplied-asks.md)** — **Followups**: founder Slack asks in Slack (channels + group DMs, AI classify-once, nudge via AI-drafted thread reply)
 - **[docs/design-system.md](docs/design-system.md)** — Brand primitives (glass surfaces, spotlight, buttons) and CSS tokens
 
 ## Design system

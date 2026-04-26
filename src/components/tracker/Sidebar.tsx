@@ -13,12 +13,10 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquareWarning,
-  Loader2,
   Orbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatSlackSyncAge } from "@/lib/formatSlackSyncAge";
-import { useRoadmapReview } from "./RoadmapReviewContext";
 import { SlackLogo } from "./SlackLogo";
 import {
   SIDEBAR_COLLAPSED_PREF_KEY,
@@ -83,12 +81,11 @@ export function Sidebar({
   slackLastSyncedAt?: string | null;
 }) {
   const pathname = usePathname();
-  const { openSheet, slackQueueSyncing, slackQueueSyncProgress } =
-    useRoadmapReview();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [profilePhotoBroken, setProfilePhotoBroken] = useState(false);
   /** Bumps every minute so the “2m ago” label stays fresh while the app is open. */
   const [syncAgeTick, setSyncAgeTick] = useState(0);
+  const syncActive = pathname === "/sync" || pathname.startsWith("/sync/");
 
   useEffect(() => {
     if (!slackLastSyncedAt) return;
@@ -108,16 +105,6 @@ export function Sidebar({
     slackLastSyncedAt && !Number.isNaN(new Date(slackLastSyncedAt).getTime())
       ? `Last sync ${new Date(slackLastSyncedAt).toLocaleString()}`
       : undefined;
-
-  const syncPercentLabel = (() => {
-    if (!slackQueueSyncing) return null;
-    const t = slackQueueSyncProgress?.total ?? 0;
-    const c = slackQueueSyncProgress?.completed ?? 0;
-    if (t > 0) {
-      return Math.min(100, Math.max(0, Math.round((c / t) * 100)));
-    }
-    return 0;
-  })();
 
   // Apply browser preference before paint (localStorage wins; seed from server cookie if unset).
   // Keeps cookie aligned so the next full reload matches without a flash.
@@ -245,60 +232,31 @@ export function Sidebar({
 
       <nav className="relative z-10 flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
         <div className={cn("mb-3 border-b border-zinc-800/70 pb-3")}>
-          <button
-            type="button"
-            onClick={openSheet}
-            title={
-              collapsed
-                ? slackQueueSyncing
-                  ? `Syncing ${syncPercentLabel ?? 0}% — keep this tab open`
-                  : "Slack — sync & review"
-                : undefined
-            }
-            aria-label={
-              slackQueueSyncing
-                ? "Slack sync in progress"
-                : "Open Slack sync and review"
-            }
-            aria-busy={slackQueueSyncing}
+          <Link
+            href="/sync"
+            title={collapsed ? "Slack — sync & review" : undefined}
+            aria-label="Open Slack sync and review"
+            aria-current={syncActive ? "page" : undefined}
             className={cn(
               "group relative flex w-full items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
-              collapsed
-                ? "justify-center px-2 py-2"
-                : "gap-3 px-3 py-2",
-              slackQueueSyncing
-                ? "bg-cyan-500/10 text-cyan-100 ring-1 ring-cyan-500/25 hover:bg-cyan-500/15"
+              collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2",
+              syncActive
+                ? "bg-zinc-900/90 text-zinc-100"
                 : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
             )}
           >
-            {slackQueueSyncing ? (
-              <Loader2
-                className="h-4 w-4 shrink-0 animate-spin"
-                aria-hidden
-              />
-            ) : (
-              <SlackLogo
-                className="h-4 w-4 opacity-80 grayscale group-hover:opacity-100"
-                alt=""
-              />
-            )}
+            <SlackLogo
+              className="h-4 w-4 opacity-80 grayscale group-hover:opacity-100"
+              alt=""
+            />
             {!collapsed && (
               <>
                 <span className="min-w-0 flex-1">
                   <span className="flex w-full min-w-0 items-baseline justify-between gap-1.5">
                     <span className="min-w-0 flex-1 truncate text-left text-zinc-200">
-                      {slackQueueSyncing
-                        ? `Syncing — ${syncPercentLabel}%`
-                        : "Sync"}
+                      Sync
                     </span>
-                    {slackQueueSyncing ? (
-                      <span
-                        className="shrink-0 text-[9px] text-zinc-500"
-                        title="In progress"
-                      >
-                        …
-                      </span>
-                    ) : syncAgeLabel ? (
+                    {syncAgeLabel ? (
                       <span
                         className="shrink-0 text-[9px] tabular-nums leading-none text-zinc-500/90"
                         title={syncAgeTitle}
@@ -320,20 +278,13 @@ export function Sidebar({
                 ) : null}
               </>
             )}
-            {collapsed &&
-            !slackQueueSyncing &&
-            pendingSlackSuggestionsCount > 0 ? (
+            {collapsed && pendingSlackSuggestionsCount > 0 ? (
               <span
                 className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-cyan-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
                 title="Pending Slack suggestions"
               />
             ) : null}
-          </button>
-          {slackQueueSyncing && !collapsed ? (
-            <p className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-amber-200/90">
-              Sync in progress — don&apos;t close or refresh this tab.
-            </p>
-          ) : null}
+          </Link>
         </div>
         {NAV_GROUPS.map((group, groupIndex) => (
           <div

@@ -8,7 +8,10 @@ import { mutateSlackSuggestions } from "@/server/repository/slack-suggestions-st
 import { resolveCompanyScrapeChannels } from "@/lib/scrapeCompanyChannels";
 import { fetchSlackChannels } from "@/lib/slack";
 import { reconcileSlackSuggestionsForCompany } from "@/server/actions/slackRoadmapSync/reconcile";
-import { runSlackRoadmapSyncForCompany } from "@/server/actions/slackRoadmapSync/run";
+import {
+  runSlackRoadmapSyncForCompany,
+  type SlackRoadmapSyncRunStats,
+} from "@/server/actions/slackRoadmapSync/run";
 import {
   isFullyAppliedEdit,
   isPendingRecordOrphaned,
@@ -84,6 +87,18 @@ function replacePendingForCompany(
   };
 }
 
+/**
+ * Diagnostic counters for the full pipeline run. Inherits all counters from the
+ * inner Slack/Claude run plus the post-reconcile `freshCount` / `pendingCount`
+ * pair so the UI can explain a "0 new" outcome.
+ */
+export type SlackPipelineStats = SlackRoadmapSyncRunStats & {
+  /** Suggestions Claude returned (after schema/validation). */
+  freshCount: number;
+  /** After dedup against existing pending + previously-rejected. */
+  pendingCount: number;
+};
+
 /** Sub-stage of the per-company sync (used by the global "Sync all" UI for progress detail). */
 export type SlackSyncStage =
   | "starting"
@@ -127,6 +142,8 @@ export async function runSlackSyncPipelineForCompany(
       ok: true;
       fresh: SlackScrapeSuggestion[];
       pending: SlackSuggestionRecord[];
+      /** Per-run diagnostic counters (transcript size, model output, parse/validation/dedup). */
+      stats: SlackPipelineStats;
     }
   | { ok: false; error: string }
 > {
@@ -219,7 +236,23 @@ export async function runSlackSyncPipelineForCompany(
       freshCount: 0,
       pendingCount: 0,
     });
-    return { ok: true, fresh: [], pending: [] };
+    return {
+      ok: true,
+      fresh: [],
+      pending: [],
+      stats: {
+        channelsScanned: 0,
+        channelsWithMessages: 0,
+        totalMessages: 0,
+        transcriptChars: 0,
+        maxTranscriptChars: 0,
+        modelOutputChars: 0,
+        parsedItemCount: 0,
+        schemaRejectedOrInvalidCount: 0,
+        freshCount: 0,
+        pendingCount: 0,
+      },
+    };
   }
 
   const rate2 = await checkAiRateLimit();
@@ -239,26 +272,27 @@ export async function runSlackSyncPipelineForCompany(
   try {
     onStage?.("history");
     let modelStreamStarted = false;
-    const { suggestions: fresh } = await runSlackRoadmapSyncForCompany({
-      companyId,
-      channelIds,
-      days: options.days,
-      includeThreads: options.includeThreads,
-      onModelTextChunk: (t) => {
-        if (!modelStreamStarted) {
-          modelStreamStarted = true;
-          onStage?.("analyzing");
-        }
-        options.onModelTextChunk?.(t);
-      },
-      onChannelStart,
-      onChannelDone,
-      trackerData: data,
-      signal: options.signal,
-      correlationId,
-      logTrigger,
-      batchId,
-    });
+    const { suggestions: fresh, stats: runStats } =
+      await runSlackRoadmapSyncForCompany({
+        companyId,
+        channelIds,
+        days: options.days,
+        includeThreads: options.includeThreads,
+        onModelTextChunk: (t) => {
+          if (!modelStreamStarted) {
+            modelStreamStarted = true;
+            onStage?.("analyzing");
+          }
+          options.onModelTextChunk?.(t);
+        },
+        onChannelStart,
+        onChannelDone,
+        trackerData: data,
+        signal: options.signal,
+        correlationId,
+        logTrigger,
+        batchId,
+      });
 
     onStage?.("reconciling");
     const dataLive = await getRepository().load();
@@ -287,7 +321,16 @@ export async function runSlackSyncPipelineForCompany(
       freshCount: fresh.length,
       pendingCount: pending.length,
     });
-    return { ok: true, fresh, pending };
+    return {
+      ok: true,
+      fresh,
+      pending,
+      stats: {
+        ...runStats,
+        freshCount: fresh.length,
+        pendingCount: pending.length,
+      },
+    };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     const stack = e instanceof Error ? e.stack : undefined;

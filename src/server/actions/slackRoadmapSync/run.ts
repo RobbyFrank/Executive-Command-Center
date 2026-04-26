@@ -162,6 +162,29 @@ export type RunSlackRoadmapSyncOptions = {
 };
 
 /**
+ * Diagnostic counters for a single per-company run. Used by the UI to explain
+ * a "0 new" outcome (e.g. transcript size vs model returning `[]`).
+ */
+export type SlackRoadmapSyncRunStats = {
+  /** Number of channels scanned (== channelIds.length). */
+  channelsScanned: number;
+  /** Channels that returned at least one message. */
+  channelsWithMessages: number;
+  /** Sum of messages aggregated into the transcript across all channels. */
+  totalMessages: number;
+  /** Length of the transcript (post-cap) sent to Claude. 0 when no channels had messages. */
+  transcriptChars: number;
+  /** Cap applied (so the UI can show "120k / 120k cap" when truncated). */
+  maxTranscriptChars: number;
+  /** Length of Claude's text response. ~2 chars usually means `[]` (nothing actionable). */
+  modelOutputChars: number;
+  /** Number of items in the parsed JSON array (before validation). */
+  parsedItemCount: number;
+  /** Items dropped by schema or per-company validation. */
+  schemaRejectedOrInvalidCount: number;
+};
+
+/**
  * Fetches Slack, runs Claude, validates + enriches. Does not write the suggestions queue.
  */
 export async function runSlackRoadmapSyncForCompany(
@@ -170,6 +193,7 @@ export async function runSlackRoadmapSyncForCompany(
   suggestions: SlackScrapeSuggestion[];
   rejected: number;
   channelNameById: Map<string, string>;
+  stats: SlackRoadmapSyncRunStats;
 }> {
   const {
     companyId,
@@ -208,7 +232,21 @@ export async function runSlackRoadmapSyncForCompany(
       companyId,
       companyName,
     });
-    return { suggestions: [], rejected: 0, channelNameById: new Map() };
+    return {
+      suggestions: [],
+      rejected: 0,
+      channelNameById: new Map(),
+      stats: {
+        channelsScanned: 0,
+        channelsWithMessages: 0,
+        totalMessages: 0,
+        transcriptChars: 0,
+        maxTranscriptChars: MAX_TRANSCRIPT_CHARS,
+        modelOutputChars: 0,
+        parsedItemCount: 0,
+        schemaRejectedOrInvalidCount: 0,
+      },
+    };
   }
 
   const oldestTs = slackOldestTsFromDaysAgo(
@@ -251,6 +289,8 @@ export async function runSlackRoadmapSyncForCompany(
 
   const transcriptParts: string[] = [];
   const messageAuthors = new Map<string, string>();
+  let channelsWithMessages = 0;
+  let totalMessages = 0;
 
   for (const channelId of channelIds) {
     if (signal?.aborted) throw new Error("Aborted");
@@ -297,6 +337,8 @@ export async function runSlackRoadmapSyncForCompany(
       block += th.extraLines;
     }
     transcriptParts.push(block);
+    if (hist.messages.length > 0) channelsWithMessages += 1;
+    totalMessages += hist.messages.length;
     logSlackRoadmapSync("info", {
       event: "channel_history_ok",
       correlationId,
@@ -326,7 +368,21 @@ export async function runSlackRoadmapSyncForCompany(
       companyId,
       companyName,
     });
-    return { suggestions: [], rejected: 0, channelNameById };
+    return {
+      suggestions: [],
+      rejected: 0,
+      channelNameById,
+      stats: {
+        channelsScanned: channelIds.length,
+        channelsWithMessages: 0,
+        totalMessages: 0,
+        transcriptChars: 0,
+        maxTranscriptChars: MAX_TRANSCRIPT_CHARS,
+        modelOutputChars: 0,
+        parsedItemCount: 0,
+        schemaRejectedOrInvalidCount: 0,
+      },
+    };
   }
 
   let slackTranscript = transcriptParts.join("\n");
@@ -486,7 +542,21 @@ export async function runSlackRoadmapSyncForCompany(
     schemaRejectedOrInvalidCount: rejected,
   });
 
-  return { suggestions, rejected, channelNameById };
+  return {
+    suggestions,
+    rejected,
+    channelNameById,
+    stats: {
+      channelsScanned: channelIds.length,
+      channelsWithMessages,
+      totalMessages,
+      transcriptChars: slackTranscript.length,
+      maxTranscriptChars: MAX_TRANSCRIPT_CHARS,
+      modelOutputChars: textOut.length,
+      parsedItemCount: parsed.length,
+      schemaRejectedOrInvalidCount: rejected,
+    },
+  };
 }
 
 /**

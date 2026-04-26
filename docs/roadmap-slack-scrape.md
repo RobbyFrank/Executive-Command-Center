@@ -106,4 +106,4 @@ Same as milestone thread reads: a **user** token (`SLACK_BILLING_USER_TOKEN` or 
 | Thread merge | `src/lib/slack/threadHistory.ts` |
 | Reconcile / validate | `src/server/actions/slackRoadmapSync/reconcile.ts`, `validate.ts` |
 | UI row | `src/components/tracker/SlackSuggestionRow.tsx` |
-| Global sheet | `src/components/tracker/RoadmapReviewSheet.tsx`, `RoadmapReviewContext.tsx` |
+| Sync page | `src/components/sync/SlackSyncPage.tsx`, route at `src/app/(dashboard)/sync/page.tsx` |

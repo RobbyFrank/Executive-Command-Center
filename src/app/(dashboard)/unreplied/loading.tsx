@@ -3,7 +3,7 @@
  *
  * Mirrors the rendered layout of `UnrepliedAsksView` so the transition to the
  * real UI is seamless. Shape:
- *   - Sticky top bar (56px, horizontal): title + tagline + last-scanned + sort + refresh.
+ *   - Sticky top bar (56px, horizontal): title + tagline + sort + refresh+scan-age compound control.
  *   - Collapsed group cards (not expanded rows) since the wall defaults to all-collapsed.
  *
  * Placeholders are zinc-800 with a subtle shimmer. Sized / spaced to match
@@ -29,12 +29,13 @@ export default function UnrepliedLoading() {
           <div className="hidden min-w-0 flex-1 lg:block">
             <div className="h-3 w-72 max-w-full rounded bg-zinc-800/60" />
           </div>
-          {/* "Last scanned" — hidden below md, fades out early on narrow screens. */}
-          <div className="hidden h-3 w-28 shrink-0 rounded bg-zinc-800/55 md:block" />
-          {/* Sort + Refresh action cluster on the right. */}
+          {/* Sort + Refresh control with embedded scan age (mirrors `UnrepliedAsksView`). */}
           <div className="ml-auto flex h-8 shrink-0 items-center gap-2 sm:ml-2">
             <div className="h-8 w-32 rounded-md bg-zinc-800/80" />
-            <div className="h-8 w-28 rounded-md bg-zinc-800/80" />
+            <div className="flex h-8 overflow-hidden rounded-md border border-zinc-700/80">
+              <div className="h-full w-24 bg-zinc-800/80" />
+              <div className="hidden h-full w-12 border-l border-zinc-700/60 bg-zinc-800/50 md:block" />
+            </div>
           </div>
         </div>
       </div>

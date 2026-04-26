@@ -48,7 +48,6 @@ import { cn } from "@/lib/utils";
 import { FollowupThreadPopover } from "./FollowupThreadPopover";
 import { SlackReactionsRow } from "./SlackReactionsRow";
 import { UnrepliedScanProgressPanel } from "./UnrepliedScanProgressPanel";
-import { BulkReplyAllLauncher } from "./BulkReplyAllDialog";
 
 type Props = {
   snapshot: UnrepliedAsksSnapshot;
@@ -236,6 +235,24 @@ function formatScanRelative(iso: string | null): string {
   const day = Math.floor(hr / 24);
   if (day < 14) return `Last scanned ${day}d ago`;
   return `Last scanned ${Math.floor(day / 7)}w ago`;
+}
+
+/** Compact age only (e.g. `50m ago`) — for UI next to "Refresh" where full "Last scanned …" is redundant. */
+function formatScanAgeShort(iso: string | null): string {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return "just now";
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 45) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 48) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 14) return `${day}d ago`;
+  return `${Math.floor(day / 7)}w ago`;
 }
 
 /** Relative post age for message rows (matches scan header: m → h → d → w; no fractional hours). */
@@ -885,27 +902,34 @@ export function UnrepliedAsksView({ snapshot, people }: Props) {
             <span className="mr-1.5 text-zinc-600">·</span>
             Open asks waiting on a teammate for 2+ business days.
           </p>
-          <span
-            className="hidden shrink-0 text-[11px] tabular-nums text-zinc-500 md:inline lg:ml-0"
-            title={`Last scan: ${formatScanTime(snapshot.lastScanAt)}`}
-          >
-            {formatScanRelative(snapshot.lastScanAt)}
-          </span>
           <div className="ml-auto flex h-8 shrink-0 items-center gap-2 sm:ml-2">
             <FollowupsSortSelect value={sortMode} onChange={setSortMode} />
             <button
               type="button"
               onClick={() => void onRefresh()}
               disabled={refreshing}
-              title="Fetch new Slack messages since the last scan"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-600 bg-zinc-900 px-2.5 text-[11px] font-medium text-zinc-200 transition-[transform,background-color,opacity] duration-200 hover:bg-zinc-800 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50"
+              title={`Fetch new Slack messages since the last scan. Last scan: ${formatScanTime(snapshot.lastScanAt)}`}
+              aria-label={
+                refreshing
+                  ? "Refreshing Slack messages"
+                  : `Refresh now. ${formatScanRelative(snapshot.lastScanAt)}`
+              }
+              className="inline-flex h-8 items-stretch overflow-hidden rounded-md border border-zinc-600 bg-zinc-900 text-[11px] font-medium text-zinc-200 transition-[transform,background-color,opacity] duration-200 hover:bg-zinc-800 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50"
             >
-              {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              )}
-              Refresh now
+              <span className="inline-flex items-center gap-1.5 px-2.5">
+                {refreshing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                )}
+                Refresh now
+              </span>
+              <span
+                className="hidden items-center border-l border-zinc-700/60 bg-zinc-950/45 px-2 text-[10px] font-normal tabular-nums text-zinc-500 md:inline-flex"
+                aria-hidden="true"
+              >
+                {formatScanAgeShort(snapshot.lastScanAt)}
+              </span>
             </button>
           </div>
         </div>
@@ -1002,20 +1026,6 @@ export function UnrepliedAsksView({ snapshot, people }: Props) {
                             </span>
                           </span>
                         </button>
-                        {g.rows.length >= 2 ? (
-                          <BulkReplyAllLauncher
-                            groupLabel={g.label}
-                            rows={g.rows}
-                            rosterHints={snapshot.rosterHints}
-                            people={people}
-                            trailingMarginClass=""
-                            onAnyPosted={() => {
-                              startTransition(() => {
-                                router.refresh();
-                              });
-                            }}
-                          />
-                        ) : null}
                         {offRoster.length > 0 ? (
                           <button
                             type="button"

@@ -8,17 +8,13 @@ import { AssistantProvider } from "@/contexts/AssistantContext";
 import { DashboardAmbientBackground } from "@/components/brand/DashboardAmbientBackground";
 import { getSidebarCollapsedFromCookie } from "@/lib/sidebar-prefs";
 import {
-  getCachedCompanies,
   getCachedPeople,
   getCachedProjects,
 } from "@/server/tracker-page-data";
 import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import { countUnattendedNewHires } from "@/lib/onboarding";
 import { getUnrepliedAsksOpenCount } from "@/server/actions/unrepliedAsks";
-import { RoadmapReviewProvider } from "@/components/tracker/RoadmapReviewContext";
-import { RoadmapReviewSheet } from "@/components/tracker/RoadmapReviewSheet";
 import { getCachedSlackPendingStats } from "@/server/slack-suggestions-stats";
-import { sortCompaniesByRevenueDesc } from "@/lib/companySort";
 
 export default async function DashboardLayout({
   children,
@@ -37,11 +33,10 @@ export default async function DashboardLayout({
   const cookieStore = await cookies();
   const initialSidebarCollapsed = getSidebarCollapsedFromCookie(cookieStore);
 
-  const [people, projects, slackPending, companies] = await Promise.all([
+  const [people, projects, slackPending] = await Promise.all([
     getCachedPeople(),
     getCachedProjects(),
     getCachedSlackPendingStats(),
-    getCachedCompanies(),
   ]);
   const todayYmd = calendarDateTodayLocal();
   const unattendedNewHireCount = countUnattendedNewHires(
@@ -62,33 +57,21 @@ export default async function DashboardLayout({
       */}
       <DashboardAmbientBackground />
 
-      <RoadmapReviewProvider>
-        <div className="relative z-10 flex h-full min-h-0 overflow-hidden">
-          <Sidebar
-            displayName={sidebarDisplayName}
-            profilePicturePath={sidebarProfilePicturePath}
-            initialCollapsed={initialSidebarCollapsed}
-            unattendedNewHireCount={unattendedNewHireCount}
-            unrepliedAsksCount={unrepliedAsksCount}
-            pendingSlackSuggestionsCount={slackPending.total}
-            slackLastSyncedAt={slackPending.lastSyncedAt}
-          />
-          <main className="relative min-h-0 min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
-            <div className="relative z-10 min-h-0">{children}</div>
-          </main>
-          <AiAssistantButton />
-          <RoadmapReviewSheet
-            people={people}
-            companies={sortCompaniesByRevenueDesc(companies).map((c) => ({
-              id: c.id,
-              name: c.name,
-              logoPath: c.logoPath ?? "",
-              pinned: c.pinned ?? false,
-            }))}
-            slackPendingByCompany={slackPending.byCompany}
-          />
-        </div>
-      </RoadmapReviewProvider>
+      <div className="relative z-10 flex h-full min-h-0 overflow-hidden">
+        <Sidebar
+          displayName={sidebarDisplayName}
+          profilePicturePath={sidebarProfilePicturePath}
+          initialCollapsed={initialSidebarCollapsed}
+          unattendedNewHireCount={unattendedNewHireCount}
+          unrepliedAsksCount={unrepliedAsksCount}
+          pendingSlackSuggestionsCount={slackPending.total}
+          slackLastSyncedAt={slackPending.lastSyncedAt}
+        />
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
+          <div className="relative z-10 min-h-0">{children}</div>
+        </main>
+        <AiAssistantButton />
+      </div>
     </AssistantProvider>
   );
 }
