@@ -225,6 +225,8 @@ export type SlackChannelHistoryMessage = {
   subtype?: string;
   /** Present on thread replies; parent has `thread_ts === ts`. */
   thread_ts?: string;
+  /** Number of replies in the thread; present on the root message. */
+  reply_count?: number;
 };
 
 type ConversationsHistoryResponse = {

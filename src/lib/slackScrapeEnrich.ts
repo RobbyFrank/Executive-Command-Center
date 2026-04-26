@@ -177,13 +177,40 @@ export function enrichSlackScrapeSuggestions(
         p.assigneePersonId =
           validPersonId(p.assigneePersonId, options.people) ||
           mentionPerson ||
-          authorPerson;
+        authorPerson;
       }
-    } else {
+    } else if (s.kind === "newProjectOnExistingGoal") {
       s.project.assigneePersonId =
         validPersonId(s.project.assigneePersonId, options.people) ||
         mentionPerson ||
         authorPerson;
+    } else if (s.kind === "editGoal") {
+      const pid = s.patch.ownerPersonId;
+      if (pid !== undefined) {
+        s.patch = {
+          ...s.patch,
+          ownerPersonId: validPersonId(pid, options.people) || mentionPerson || authorPerson || "",
+        };
+        if (s.patch.ownerPersonId === "") {
+          const { ownerPersonId: _o, ...rest } = s.patch;
+          s.patch = rest as typeof s.patch;
+        }
+      }
+    } else if (s.kind === "editProject") {
+      const aid = s.patch.assigneePersonId;
+      if (aid !== undefined) {
+        const v =
+          validPersonId(aid, options.people) || mentionPerson || authorPerson;
+        s.patch = {
+          ...s.patch,
+          assigneePersonId: v || undefined,
+        };
+        if (s.patch.assigneePersonId === undefined) {
+          const { assigneePersonId: _a, ...rest } = s.patch;
+          s.patch = rest as typeof s.patch;
+        }
+      }
     }
+    // addMilestone / editMilestone: evidence authors only, no person fields
   }
 }

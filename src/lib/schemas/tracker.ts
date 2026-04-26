@@ -346,22 +346,128 @@ export const SlackScrapeProjectDraftSchema = z.object({
   assigneePersonId: z.string().default(""),
 });
 
+/** Proposed field updates for an existing goal (ids map to `Goal` fields; description is the goal title on Roadmap). */
+export const SlackScrapeEditGoalPatchSchema = z
+  .object({
+    description: z.string().min(1).optional(),
+    measurableTarget: z.string().optional(),
+    whyItMatters: z.string().optional(),
+    currentValue: z.string().optional(),
+    ownerPersonId: z.string().optional(),
+    slackChannelId: z.string().optional(),
+  })
+  .refine(
+    (p) => Object.values(p).some((v) => v !== undefined),
+    { message: "At least one patch field must be set" }
+  );
+
+export const SlackScrapeEditProjectPatchSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    assigneePersonId: z.string().optional(),
+    status: ProjectStatusEnum.optional(),
+    priority: PriorityEnum.optional(),
+  })
+  .refine(
+    (p) => Object.values(p).some((v) => v !== undefined),
+    { message: "At least one patch field must be set" }
+  );
+
+export const SlackScrapeEditMilestonePatchSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    targetDate: z.string().min(1).optional(),
+  })
+  .refine(
+    (p) => p.name !== undefined || p.targetDate !== undefined,
+    { message: "At least one of name or targetDate must be set" }
+  );
+
 export const SlackScrapeSuggestionSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("newGoalWithProjects"),
     goal: SlackScrapeGoalDraftSchema,
     projects: z.array(SlackScrapeProjectDraftSchema).default([]),
     evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().default(""),
   }),
   z.object({
     kind: z.literal("newProjectOnExistingGoal"),
     existingGoalId: z.string().min(1),
     project: SlackScrapeProjectDraftSchema,
     evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().default(""),
+  }),
+  z.object({
+    kind: z.literal("editGoal"),
+    existingGoalId: z.string().min(1),
+    patch: SlackScrapeEditGoalPatchSchema,
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("editProject"),
+    existingProjectId: z.string().min(1),
+    patch: SlackScrapeEditProjectPatchSchema,
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("addMilestoneToExistingProject"),
+    existingProjectId: z.string().min(1),
+    milestone: SlackScrapeMilestoneDraftSchema,
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("editMilestone"),
+    existingMilestoneId: z.string().min(1),
+    patch: SlackScrapeEditMilestonePatchSchema,
+    evidence: z.array(SlackScrapeEvidenceSchema).min(1),
+    rationale: z.string().min(1),
   }),
 ]);
 
 export type SlackScrapeSuggestion = z.infer<typeof SlackScrapeSuggestionSchema>;
+
+// --- Pending Slack sync queue (Upstash) ---
+
+export const SlackSuggestionStatusEnum = z.enum([
+  "pending",
+  "approved",
+  "rejected",
+]);
+
+export const SlackSuggestionRecordSchema = z.object({
+  id: z.string(),
+  companyId: z.string().min(1),
+  firstSeenAt: z.string().min(1),
+  lastSeenAt: z.string().min(1),
+  status: SlackSuggestionStatusEnum.default("pending"),
+  dedupeKey: z.string().min(1),
+  rationale: z.string().default(""),
+  payload: SlackScrapeSuggestionSchema,
+});
+
+export type SlackSuggestionRecord = z.infer<typeof SlackSuggestionRecordSchema>;
+
+export const SlackSuggestionsDataSchema = z.object({
+  revision: z.preprocess(
+    (v) => {
+      if (v === undefined || v === null) return 0;
+      if (typeof v === "number" && Number.isFinite(v)) return Math.floor(v);
+      return 0;
+    },
+    z.number().int().min(0)
+  ),
+  items: z.array(SlackSuggestionRecordSchema).default([]),
+  rejectedKeysByCompany: z
+    .record(z.string(), z.array(z.string()))
+    .default({}),
+});
+
+export type SlackSuggestionsData = z.infer<typeof SlackSuggestionsDataSchema>;
 
 const scrapedBundleSchema = z.object({
   goal: SlackScrapeGoalDraftSchema,

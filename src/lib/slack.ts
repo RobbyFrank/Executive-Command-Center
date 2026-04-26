@@ -1095,6 +1095,8 @@ export type SlackChannelHistoryMessage = {
   subtype?: string;
   /** Present on thread replies; parent has `thread_ts === ts`. */
   thread_ts?: string;
+  /** Number of replies in the thread; present on the root message. */
+  reply_count?: number;
 };
 
 type ConversationsHistoryResponse = {
@@ -1275,6 +1277,75 @@ export async function postSlackChannelMessage(
         ok: false,
         error:
           "Cannot post — you’re not in this channel. Join it in Slack or pick another channel.",
+      };
+    }
+    return { ok: false, error: `Slack API error: ${err}` };
+  }
+
+  const ts = (data.ts ?? "").trim();
+  const ch = (data.channel ?? channelId).trim();
+  if (!ts) {
+    return { ok: false, error: "Slack did not return a message timestamp." };
+  }
+
+  return { ok: true, ts, channel: ch };
+}
+
+/**
+ * Same as `postSlackChannelMessage` but posts as the Slack **app/bot** using
+ * `SLACK_BOT_USER_OAUTH_TOKEN` (xoxb-) so the message is authored by the
+ * installed Slack app, not the OAuth user. The bot must already be a member of
+ * the target channel — invite the app from Slack first.
+ */
+export async function postSlackChannelMessageAsBot(
+  channelId: string,
+  text: string
+): Promise<
+  | { ok: true; ts: string; channel: string }
+  | { ok: false; error: string }
+> {
+  const token = slackToken();
+  if (!token) {
+    return {
+      ok: false,
+      error:
+        "Slack bot token is not configured. Set SLACK_BOT_USER_OAUTH_TOKEN (xoxb-) with Bot scope chat:write and reinstall the app.",
+    };
+  }
+
+  const body = new URLSearchParams();
+  body.set("channel", channelId.trim());
+  body.set("text", text);
+
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    return { ok: false, error: `Slack API request failed (${res.status}).` };
+  }
+
+  const data = (await res.json()) as ChatPostMessageResponse;
+  if (!data.ok) {
+    const err = data.error ?? "unknown_error";
+    if (err === "missing_scope") {
+      return {
+        ok: false,
+        error:
+          "Slack bot token is missing chat:write (Bot Token Scope). Add it and reinstall the app.",
+      };
+    }
+    if (err === "not_in_channel") {
+      return {
+        ok: false,
+        error:
+          "Slack app is not a member of this channel. Invite the app: in the channel run /invite @YourAppName, then retry.",
       };
     }
     return { ok: false, error: `Slack API error: ${err}` };

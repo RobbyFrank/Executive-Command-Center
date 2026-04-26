@@ -11,3 +11,6 @@ export const ECC_TRACKER_DATA_TAG = "ecc-tracker-data";
  * (see `revalidateAiCreateIdeasCache` in `server/actions/tracker.ts`).
  */
 export const ECC_AI_CREATE_IDEAS_TAG = "ecc-ai-create-ideas";
+
+/** Pending Slack → roadmap review queue in Redis (`ecc:slackSuggestions:data`). */
+export const ECC_SLACK_SUGGESTIONS_TAG = "ecc-slack-suggestions";

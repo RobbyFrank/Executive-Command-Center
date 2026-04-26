@@ -13,9 +13,11 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquareWarning,
+  Inbox,
   Orbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRoadmapReview } from "./RoadmapReviewContext";
 import {
   SIDEBAR_COLLAPSED_PREF_KEY,
   readSidebarCollapsedLocalStorage,
@@ -61,6 +63,7 @@ export function Sidebar({
   initialCollapsed = false,
   unattendedNewHireCount = 0,
   unrepliedAsksCount = 0,
+  pendingSlackSuggestionsCount = 0,
 }: {
   displayName: string;
   /** Same source as Team roster (`/uploads/…` or remote blob URL). */
@@ -71,8 +74,11 @@ export function Sidebar({
   unattendedNewHireCount?: number;
   /** Open items on Followups (48+ business hours, no teammate reply). */
   unrepliedAsksCount?: number;
+  /** Pending Slack → roadmap items awaiting your approval. */
+  pendingSlackSuggestionsCount?: number;
 }) {
   const pathname = usePathname();
+  const { openSheet } = useRoadmapReview();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [profilePhotoBroken, setProfilePhotoBroken] = useState(false);
 
@@ -224,8 +230,13 @@ export function Sidebar({
                     : pathname.startsWith(item.href);
                 const collapsedHint = item.label;
                 return (
-                  <Link
+                  <div
                     key={item.href}
+                    className={cn(
+                      item.href === "/" && collapsed && "relative"
+                    )}
+                  >
+                  <Link
                     href={item.href}
                     title={collapsed ? collapsedHint : undefined}
                     aria-label={collapsed ? collapsedHint : undefined}
@@ -246,6 +257,21 @@ export function Sidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {item.label}
                         </span>
+                        {item.href === "/" ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openSheet();
+                            }}
+                            className="shrink-0 rounded p-0.5 text-cyan-400/90 hover:bg-cyan-500/15 hover:text-cyan-200"
+                            title="Open Slack review queue"
+                            aria-label="Open Slack review queue"
+                          >
+                            <Inbox className="h-3.5 w-3.5" aria-hidden />
+                          </button>
+                        ) : null}
                         {item.href === "/team" && unattendedNewHireCount > 0 ? (
                           <span
                             className="shrink-0 tabular-nums rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/35"
@@ -267,6 +293,23 @@ export function Sidebar({
                           >
                             {unrepliedAsksCount > 9 ? "9+" : unrepliedAsksCount}
                           </span>
+                        ) : null}
+                        {item.href === "/" && pendingSlackSuggestionsCount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openSheet();
+                            }}
+                            className="shrink-0 tabular-nums rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/35 hover:bg-cyan-500/30"
+                            title="Open Slack review queue"
+                            aria-label={`${pendingSlackSuggestionsCount} pending Slack suggestions — open review queue`}
+                          >
+                            {pendingSlackSuggestionsCount > 9
+                              ? "9+"
+                              : pendingSlackSuggestionsCount}
+                          </button>
                         ) : null}
                       </>
                     )}
@@ -290,7 +333,31 @@ export function Sidebar({
                         }`}
                       />
                     ) : null}
+                    {collapsed &&
+                    item.href === "/" &&
+                    pendingSlackSuggestionsCount > 0 ? (
+                      <span
+                        className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-cyan-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                        title="Pending Slack review"
+                      />
+                    ) : null}
                   </Link>
+                    {item.href === "/" && collapsed ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openSheet();
+                        }}
+                        className="absolute bottom-0.5 right-0.5 z-10 rounded p-0.5 text-cyan-400/90 shadow-[0_0_0_2px_rgba(9,9,11,1)] hover:bg-cyan-500/20 hover:text-cyan-100"
+                        title="Open Slack review queue"
+                        aria-label="Open Slack review queue"
+                      >
+                        <Inbox className="h-3 w-3" aria-hidden />
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

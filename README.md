@@ -9,7 +9,7 @@ Next.js app for the **MLabs portfolio**: companies, goals, projects, milestones,
 - **[docs/data-storage.md](docs/data-storage.md)** — Redis key, seed/import, backups, images
 - **[docs/operations.md](docs/operations.md)** — CI, health check, caching, AI rate limits, PII in prompts
 - **[docs/onboarding.md](docs/onboarding.md)** — New hire Slack detection, pilot recommender, Team onboarding, digest lines
-- **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Scan Slack for suggested goals/projects (owner/assignee hints, goal Slack channel from evidence)
+- **[docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md)** — Slack Roadmap scan: threads, two-pass AI (suggest + reconcile), Redis pending queue, approve/reject, daily Vercel cron
 - **[docs/unreplied-asks.md](docs/unreplied-asks.md)** — **Followups**: founder Slack asks in Slack (channels + group DMs, AI classify-once, nudge via thread reply or hover-revealed **Bulk reply** when someone has multiple open asks)
 - **[docs/design-system.md](docs/design-system.md)** — Brand primitives (glass surfaces, spotlight, buttons) and CSS tokens
 
@@ -72,6 +72,7 @@ Redis key **`ecc:tracker:data`**; schema in `src/lib/schemas/tracker.ts`. Seed w
 - **Daily executive digest** — Vercel Cron posts an AI summary to `#executive-priorities` every morning at **12:00 UTC (≈ 8:00 AM ET)** from `GET /api/cron/executive-digest`. It reads the last 7 days of channel messages, cross-references the tracker, and only surfaces **new / interesting / problematic** items since the previous digest (deduped in Redis). Configure `SLACK_EXECUTIVE_PRIORITIES_CHANNEL_ID`, `ECC_PUBLIC_BASE_URL` (default `https://admin.mlabs.vc`), and `CRON_SECRET` — see [docs/environment.md](docs/environment.md) and [docs/operations.md](docs/operations.md#daily-executive-digest).
 - **Onboarding detector** — Vercel Cron calls `GET /api/cron/onboarding-detector` three times daily to scan Slack for new-hire welcome threads and update the roster. Same `CRON_SECRET` auth. See [docs/onboarding.md](docs/onboarding.md) and [docs/operations.md](docs/operations.md#onboarding-detector-cron).
 - **Followups scan** — Vercel Cron calls `GET /api/cron/unreplied-asks-scan` hourly to classify new founder Slack messages and refresh thread reply state (Redis key `ecc:unrepliedAsks:data`). Same `CRON_SECRET` auth. **Refresh now** on Followups uses `POST /api/unreplied-asks/scan` and streams **NDJSON** progress to the UI. See [docs/unreplied-asks.md](docs/unreplied-asks.md) and [docs/operations.md](docs/operations.md#followups-unreplied-asks-cron).
+- **Roadmap Slack sync** — Vercel Cron calls `GET /api/cron/slack-roadmap-sync` once daily (UTC midnight, see `vercel.json`) to scan each company’s Slack (threaded history, 2-day window) and refresh the **pending review** queue in Redis (`ecc:slackSuggestions:data`). Same **`CRON_SECRET`** auth and Slack user token as other Slack features. The Roadmap **scan** button and nav badge surface items for **approve/reject** in-app. See [docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md).
 
 ## Troubleshooting
 
@@ -91,7 +92,7 @@ Stale Next.js cache: see [docs/development.md](docs/development.md).
 | [docs/operations.md](docs/operations.md) | CI, health, cache tags, AI rate limits, PII redaction |
 | [docs/onboarding.md](docs/onboarding.md) | New hire detection, pilot recommender, Team onboarding |
 | [docs/unreplied-asks.md](docs/unreplied-asks.md) | Followups: founder Slack asks with no teammate reply (wall + nudge) |
-| [docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md) | Slack scan API and batch import |
+| [docs/roadmap-slack-scrape.md](docs/roadmap-slack-scrape.md) | Slack Roadmap scan, pending queue, cron, approvals |
 | [docs/development.md](docs/development.md) | Local dev troubleshooting |
 | [docs/design-system.md](docs/design-system.md) | Brand components, spotlight intensities, tokens |
 

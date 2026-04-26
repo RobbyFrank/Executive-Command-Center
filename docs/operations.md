@@ -12,7 +12,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `npm ci`, then `npm run lint`, 
 
 ## Dashboard caching
 
-Roadmap (`/`), Companies (`/companies`), and Team (`/team`) load tracker data via `unstable_cache` in `src/server/tracker-page-data.ts` with tag `ecc-tracker-data`. Mutations in `src/server/actions/tracker.ts` and `uploads.ts` call `updateTag("ecc-tracker-data")` so cached reads refresh after writes.
+Roadmap (`/`), Companies (`/companies`), and Team (`/team`) load tracker data via `unstable_cache` in `src/server/tracker-page-data.ts` with tag `ecc-tracker-data`. Mutations in `src/server/actions/tracker.ts` and `uploads.ts` call `updateTag("ecc-tracker-data")` so cached reads refresh after writes. Pending **Slack Roadmap** suggestion counts and lists use tag **`ecc-slack-suggestions`** (`ECC_SLACK_SUGGESTIONS_TAG`); the scrape pipeline and suggestion actions call `updateTag` on that tag when the queue changes.
 
 ## Dashboard UI preferences
 
@@ -50,10 +50,11 @@ A Vercel Cron posts an AI-generated executive digest to `#executive-priorities` 
 
 1. Loads the last posted digest's metadata from Redis (`ecc:digest:exec:last`): posted-at timestamp, Slack `ts`, and SHA-1 fingerprints of yesterday's bullets.
 2. In parallel, reads the last **7 days** of top-level messages in `#executive-priorities` (`fetchSlackChannelHistory`), the full tracker hierarchy, and the team roster.
-3. Reduces the tracker to high-signal lines: **at-risk** / **spotlight** flags, **P0 / P1** goals and projects, `Stuck` or `Blocked` projects, and anything with recent review-log notes. Each line ships an absolute Roadmap deep link using `ECC_PUBLIC_BASE_URL` (default `https://admin.mlabs.vc`) + `buildRoadmapHref` (e.g. `https://admin.mlabs.vc/?focusGoal=…&focusProject=…`).
-4. Calls Claude (`claudePlainText`, model from `getAnthropicModel()`) with a strict prompt: Slack-mrkdwn only, four fixed sections (`*New risks*`, `*Decisions needed*`, `*Notable progress*`, `*Owner asks*`), every bullet ending in `<url|Open roadmap>`, and an explicit "do not repeat these fingerprints" list.
-5. Hash-dedupes each returned bullet against yesterday's fingerprints (post-filter belt-and-suspenders). If nothing survives, posts a one-liner `Nothing new worth paging on since yesterday` so the channel can confirm the job ran.
-6. Posts via `postSlackChannelMessage` (user token, same as milestone threads) and writes the new `{ postedAt, slackTs, lastAnalyzedSlackTs, bulletHashes }` back to Redis.
+3. Reduces the tracker to high-signal lines: **at-risk** / **spotlight** flags, **P0 / P1** goals and projects, `Stuck` or `Blocked` projects, and anything with recent review-log notes. Each line still carries an absolute Roadmap deep link using `ECC_PUBLIC_BASE_URL` (default `https://admin.mlabs.vc`) + `buildRoadmapHref` so Claude has context about which item it's reasoning over, but **bullets in the posted message do not contain per-line links** — the channel message has a single `<…|Portfolio OS>` hyperlink in the header.
+4. Calls Claude (`claudePlainText`, model from `getAnthropicModel()`) with a strict prompt: Slack-mrkdwn only, four fixed sections (`*New risks*`, `*Decisions needed*`, `*Notable progress*`, `*Owner asks*`), 0–3 bullets per section, ≤22 words per bullet, no URLs in bullets, ≤1200 chars total, plus an explicit "do not repeat these fingerprints" list.
+5. Hash-dedupes each returned bullet against yesterday's fingerprints (post-filter belt-and-suspenders). A separate `stripBulletLinks` pass removes any stray `<URL|label>` tokens Claude leaves behind. If nothing survives, posts a one-liner `Nothing new worth paging on since yesterday` so the channel can confirm the job ran.
+6. Builds a **founder mention prefix** by filtering the Team roster with `isFounderPerson` and collecting each founder's `slackHandle` (Slack user ID); the message starts with `<@U…> <@U…>` so every founder is paged.
+7. Posts via `postSlackChannelMessageAsBot` so the message is **authored by the installed Slack app** (uses `SLACK_BOT_USER_OAUTH_TOKEN`, xoxb-), not by an OAuth user. Invite the app to `#executive-priorities` first (`/invite @YourAppName`); the bot needs Bot Token Scope `chat:write`. Then writes the new `{ postedAt, slackTs, lastAnalyzedSlackTs, bulletHashes }` back to Redis.
 
 **Auth.** The route requires `Authorization: Bearer ${CRON_SECRET}`. Vercel Cron injects this automatically when `CRON_SECRET` is set at build time; manual invocations must send the same header.
 
@@ -69,9 +70,11 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 **Troubleshooting.**
 
 - `stage: "config"` — `SLACK_EXECUTIVE_PRIORITIES_CHANNEL_ID` or `ANTHROPIC_API_KEY` is missing.
-- `stage: "slack_history"` `not_in_channel` — the user token is not a member of `#executive-priorities`. Invite them and retry.
-- `stage: "slack_history"` `missing_scope` — add User Token Scopes `channels:history`, `groups:history` (and `chat:write` for posting), reinstall, re-run OAuth.
-- `stage: "slack_post"` — the same user lacks `chat:write` or was removed from the channel.
+- `stage: "slack_history"` `not_in_channel` — the **user token** used for reading history is not a member of `#executive-priorities`. Invite the OAuth user and retry.
+- `stage: "slack_history"` `missing_scope` — add User Token Scopes `channels:history`, `groups:history`, reinstall, re-run OAuth.
+- `stage: "slack_post"` `not_in_channel` — the **Slack app/bot** is not in the channel. Open the channel and run `/invite @YourAppName`, then retry.
+- `stage: "slack_post"` `missing_scope` — the bot token is missing Bot Token Scope `chat:write`. Add it in [api.slack.com/apps](https://api.slack.com/apps) → OAuth & Permissions → Bot Token Scopes, reinstall, paste the new `xoxb-` value into `SLACK_BOT_USER_OAUTH_TOKEN`.
+- Founders not @-tagged in the post — at least one founder is missing a Slack user ID on their Team record. Open `/team`, edit each founder, and set `slackHandle` to their `U…` user ID. Anyone marked `isFounder: true` (or the legacy ids `robby` / `nadav`) with a non-empty `slackHandle` is included automatically.
 - Set `DIGEST_POST_FAILURES=1` to have the route post a short `Daily executive digest failed: …` line into the channel on errors (off by default to avoid noisy failures).
 - To reset dedupe (force the next run to behave like a first run), delete the Redis key `ecc:digest:exec:last`.
 
@@ -82,3 +85,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 ## Followups (unreplied-asks cron)
 
 `GET /api/cron/unreplied-asks-scan` runs hourly (`0 * * * *` in `vercel.json`). Same **`Authorization: Bearer ${CRON_SECRET}`** header. It pulls each founder’s recent Slack messages via `search.messages`, classifies **new** message ids once with Anthropic, and refreshes `conversations.replies` for open asks. State is stored under Redis key **`ecc:unrepliedAsks:data`**. Manual **Refresh now** on **Followups** (`/unreplied`) calls **`POST /api/unreplied-asks/scan`** (session auth) and streams **NDJSON** progress while the same pipeline runs (AI rate limiting applies). Full runbook: [unreplied-asks.md](unreplied-asks.md).
+
+## Roadmap Slack scan (cron)
+
+`GET /api/cron/slack-roadmap-sync` runs daily at **`0 0 * * *` (UTC midnight)** in `vercel.json`. Same **`Authorization: Bearer ${CRON_SECRET}`** pattern. The job iterates **companies** and runs the shared Slack Roadmap pipeline: recent **2-day** history with **thread replies**, two Anthropic passes (suggest + reconcile), dedupe/supersession, and writes the per-company **pending** queue to Redis key **`ecc:slackSuggestions:data`**. The UI (Roadmap scan dialog + nav sheet) is for **human approve/reject**; rejects store dedupe keys so they do not re-queue trivially. Full runbook: [roadmap-slack-scrape.md](roadmap-slack-scrape.md).

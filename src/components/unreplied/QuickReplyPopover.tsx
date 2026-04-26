@@ -337,6 +337,15 @@ export function QuickReplyPopover({
             ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              // Unfocusing the textarea — by clicking anywhere outside it
+              // (Revise input, Cancel/Post buttons, or completely outside the
+              // popover) — collapses it back into the rendered Slack preview
+              // so `<@U…>` tokens render as mention chips again instead of
+              // raw IDs. Skip during a send so the in-flight UI is stable.
+              if (phase === "sending") return;
+              setEditing(false);
+            }}
             disabled={phase === "sending"}
             rows={5}
             placeholder="Reply in thread…"

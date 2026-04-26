@@ -1,65 +1,26 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import {
   aiRateLimitExceededResponse,
   checkAiRateLimit,
 } from "@/lib/ai-rate-limit";
-import { getAnthropicModel } from "@/lib/anthropicModel";
 import type { SlackScanStreamPayload } from "@/lib/slack-scrape-stream-types";
+import { runSlackRoadmapSyncForCompany } from "@/server/actions/slackRoadmapSync/run";
 import {
-  SlackScrapeSuggestionSchema,
-  type SlackScrapeSuggestion,
-} from "@/lib/schemas/tracker";
-import {
-  fetchSlackChannelHistory,
-  fetchSlackChannels,
-  type SlackChannel,
-  type SlackChannelHistoryMessage,
-} from "@/lib/slack";
-import { enrichSlackScrapeSuggestions, mergeMessageAuthorsForChannel } from "@/lib/slackScrapeEnrich";
-import {
-  buildExistingRoadmapBlock,
-  buildPeopleRosterBlock,
-  buildSlackScrapeSystemPrompt,
-  capTranscript,
-} from "@/lib/slackScrapePrompt";
+  buildPendingRecordsFromFreshOnly,
+  reconcileAndReplaceFromFresh,
+} from "@/server/actions/slackRoadmapSync/pipeline";
+import { mutateSlackSuggestions } from "@/server/repository/slack-suggestions-storage";
+import type { SlackSuggestionRecord, SlackSuggestionsData } from "@/lib/schemas/tracker";
 import { getRepository } from "@/server/repository";
+import { updateTag } from "next/cache";
+import { ECC_SLACK_SUGGESTIONS_TAG } from "@/lib/cache-tags";
+import { fetchSlackChannels } from "@/lib/slack";
 import type { TrackerData } from "@/lib/types/tracker";
-
-const MAX_TRANSCRIPT_CHARS = 120_000;
-
-function slackOldestTsFromDaysAgo(days: number): string {
-  const sec = Math.floor(Date.now() / 1000 - days * 86400);
-  return `${sec}.000000`;
-}
-
-function formatMessagesForChannel(
-  channelName: string,
-  messages: SlackChannelHistoryMessage[]
-): string {
-  const lines: string[] = [];
-  lines.push(`=== #${channelName} ===`);
-  for (const m of messages) {
-    const text = (m.text ?? "").replace(/\s+/g, " ").trim();
-    if (!text) continue;
-    const who = m.user ?? m.bot_id ?? "?";
-    lines.push(`[${m.ts}] user_or_bot=${who} ${text}`);
-  }
-  lines.push("");
-  return lines.join("\n");
-}
-
-function extractJsonArray(raw: string): unknown {
-  const t = raw.trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = fence ? fence[1]!.trim() : t;
-  return JSON.parse(jsonStr) as unknown;
-}
 
 function buildChannelNameById(
   data: TrackerData,
   companyId: string,
-  listChannels: SlackChannel[]
+  listChannels: { id: string; name: string }[]
 ): Map<string, string> {
   const map = new Map<string, string>();
   for (const ch of listChannels) {
@@ -73,6 +34,38 @@ function buildChannelNameById(
     }
   }
   return map;
+}
+
+function replacePending(
+  companyId: string,
+  nextPending: SlackSuggestionRecord[]
+) {
+  return (d: SlackSuggestionsData) => {
+    d.items = d.items.filter(
+      (x) => !(x.companyId === companyId && x.status === "pending")
+    );
+    d.items.push(...nextPending);
+  };
+}
+
+type Row = {
+  id: string;
+  name: string;
+  status: "queued" | "running" | "done" | "failed";
+  detail?: string;
+  messageCount?: number;
+};
+
+function snapshotRows(rows: Row[]) {
+  return rows.map((e) => ({
+    id: e.id,
+    name: e.name,
+    status: e.status,
+    ...(e.detail !== undefined ? { detail: e.detail } : {}),
+    ...(e.messageCount !== undefined
+      ? { messageCount: e.messageCount }
+      : {}),
+  }));
 }
 
 export async function POST(req: Request) {
@@ -100,6 +93,7 @@ export async function POST(req: Request) {
     companyId?: unknown;
     channelIds?: unknown;
     days?: unknown;
+    includeThreads?: unknown;
   };
   const companyId = typeof b.companyId === "string" ? b.companyId.trim() : "";
   const channelIds = [
@@ -116,6 +110,7 @@ export async function POST(req: Request) {
   const days = Number.isFinite(daysRaw)
     ? Math.min(90, Math.max(1, Math.floor(daysRaw)))
     : 14;
+  const includeThreads = b.includeThreads === false ? false : true;
 
   if (!companyId || channelIds.length === 0) {
     return NextResponse.json(
@@ -130,8 +125,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Company not found" }, { status: 404 });
   }
 
-  const oldestTs = slackOldestTsFromDaysAgo(days);
-
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -139,191 +132,120 @@ export async function POST(req: Request) {
         controller.enqueue(encoder.encode(`${JSON.stringify(p)}\n`));
       };
 
+      let completed = 0;
+
       try {
         const list = await fetchSlackChannels();
         if (!list.ok) {
           write({ type: "error", message: list.error });
           return;
         }
-
         const channelNameById = buildChannelNameById(
           data,
           companyId,
           list.channels
         );
-
-        type Row = {
-          id: string;
-          name: string;
-          status: "queued" | "running" | "done" | "failed";
-          detail?: string;
-          messageCount?: number;
-        };
-
         const rows: Row[] = channelIds.map((id) => ({
           id,
           name: channelNameById.get(id) ?? id,
-          status: "queued",
+          status: "queued" as const,
         }));
-
-        const snapshot = () =>
-          rows.map((e) => ({
-            id: e.id,
-            name: e.name,
-            status: e.status,
-            ...(e.detail !== undefined ? { detail: e.detail } : {}),
-            ...(e.messageCount !== undefined
-              ? { messageCount: e.messageCount }
-              : {}),
-          }));
 
         write({
           type: "progress",
           phase: "history",
-          entries: snapshot(),
+          entries: snapshotRows(rows),
           completed: 0,
           total: channelIds.length,
         });
 
-        const transcriptParts: string[] = [];
-        const messageAuthors = new Map<string, string>();
-
-        for (let i = 0; i < channelIds.length; i++) {
-          const channelId = channelIds[i]!;
-          rows[i]!.status = "running";
-          write({
-            type: "progress",
-            phase: "history",
-            entries: snapshot(),
-            completed: i,
-            total: channelIds.length,
-          });
-
-          const hist = await fetchSlackChannelHistory(channelId, {
-            oldestTs,
-            limitPerPage: 200,
-            maxMessages: 500,
-          });
-
-          if (!hist.ok) {
-            rows[i]!.status = "failed";
-            rows[i]!.detail = hist.error;
+        const result = await runSlackRoadmapSyncForCompany({
+          companyId,
+          channelIds,
+          days,
+          includeThreads,
+          onModelTextChunk: (d) => {
+            if (d) write({ type: "progress", phase: "model", chunk: d });
+          },
+          onChannelStart: (info) => {
+            const idx = rows.findIndex((r) => r.id === info.channelId);
+            if (idx < 0) return;
+            rows[idx]!.name = info.name;
+            rows[idx]!.status = "running";
             write({
               type: "progress",
               phase: "history",
-              entries: snapshot(),
-              completed: i + 1,
+              entries: snapshotRows(rows),
+              completed,
               total: channelIds.length,
             });
-            continue;
-          }
+          },
+          onChannelDone: (info) => {
+            const idx = rows.findIndex((r) => r.id === info.channelId);
+            if (idx < 0) return;
+            if (info.ok) {
+              rows[idx]!.status = "done";
+              rows[idx]!.messageCount = info.messageCount;
+            } else {
+              rows[idx]!.status = "failed";
+              rows[idx]!.detail = info.error;
+            }
+            completed += 1;
+            write({
+              type: "progress",
+              phase: "history",
+              entries: snapshotRows(rows),
+              completed,
+              total: channelIds.length,
+            });
+          },
+          trackerData: data,
+        });
 
-          rows[i]!.status = "done";
-          rows[i]!.messageCount = hist.messages.length;
-          const name = channelNameById.get(channelId) ?? channelId;
-          mergeMessageAuthorsForChannel(messageAuthors, name, hist.messages);
-          transcriptParts.push(formatMessagesForChannel(name, hist.messages));
+        for (const r of rows) {
+          if (r.status === "running") r.status = "done";
+        }
+        if (rows.length > 0) {
           write({
             type: "progress",
             phase: "history",
-            entries: snapshot(),
-            completed: i + 1,
+            entries: snapshotRows(rows),
+            completed: channelIds.length,
             total: channelIds.length,
           });
         }
-
-        if (transcriptParts.length === 0) {
-          write({
-            type: "error",
-            message:
-              "Could not load message history from any channel. Check Slack token scopes and channel access.",
-          });
-          return;
-        }
-
-        let slackTranscript = transcriptParts.join("\n");
-        slackTranscript = capTranscript(slackTranscript, MAX_TRANSCRIPT_CHARS);
 
         write({
           type: "progress",
           phase: "model",
-          message: "Analyzing conversations…",
+          message: "Merging with your review queue…",
         });
 
-        const existingBlock = buildExistingRoadmapBlock(data, companyId);
-        const peopleBlock = buildPeopleRosterBlock(data.people);
-        const systemPrompt = buildSlackScrapeSystemPrompt(
-          existingBlock,
-          slackTranscript,
-          peopleBlock
-        );
-
-        const anthropic = new Anthropic({ apiKey });
-        const modelStream = anthropic.messages.stream({
-          model: getAnthropicModel(),
-          max_tokens: 8192,
-          system: systemPrompt,
-          messages: [
-            {
-              role: "user",
-              content:
-                "Analyze the Slack transcript and return ONLY the JSON array of suggestions as specified.",
-            },
-          ],
-        });
-
-        modelStream.on("text", (textDelta: string) => {
-          if (!textDelta) return;
-          write({ type: "progress", phase: "model", chunk: textDelta });
-        });
-
-        const finalMessage = await modelStream.finalMessage();
-        const block = finalMessage.content[0];
-        const textOut = block?.type === "text" ? block.text : "";
-
-        let parsed: unknown;
-        try {
-          parsed = extractJsonArray(textOut);
-        } catch {
-          write({ type: "error", message: "Model did not return valid JSON" });
-          return;
-        }
-
-        if (!Array.isArray(parsed)) {
-          write({ type: "error", message: "Model JSON must be an array" });
-          return;
-        }
-
-        const suggestions: SlackScrapeSuggestion[] = [];
-        let rejected = 0;
-
-        const goalIdsForCompany = new Set(
-          data.goals.filter((g) => g.companyId === companyId).map((g) => g.id)
-        );
-
-        for (const item of parsed) {
-          const r = SlackScrapeSuggestionSchema.safeParse(item);
-          if (!r.success) {
-            rejected += 1;
-            continue;
+        const { suggestions, rejected } = result;
+        let pendingForCompany: SlackSuggestionRecord[] | undefined;
+        let reconcileFailed = false;
+        const recRes = await reconcileAndReplaceFromFresh(companyId, suggestions);
+        if (recRes.ok) {
+          pendingForCompany = recRes.pending;
+        } else {
+          reconcileFailed = true;
+          const fallback = buildPendingRecordsFromFreshOnly(companyId, suggestions);
+          try {
+            await mutateSlackSuggestions(replacePending(companyId, fallback));
+            pendingForCompany = fallback;
+            updateTag(ECC_SLACK_SUGGESTIONS_TAG);
+          } catch {
+            /* ignore */
           }
-          const s = r.data;
-          if (s.kind === "newProjectOnExistingGoal") {
-            if (!goalIdsForCompany.has(s.existingGoalId)) {
-              rejected += 1;
-              continue;
-            }
-          }
-          suggestions.push(s);
         }
 
-        enrichSlackScrapeSuggestions(suggestions, {
-          people: data.people,
-          channelNameById,
-          messageAuthors,
+        write({
+          type: "done",
+          suggestions,
+          rejected,
+          pendingForCompany,
+          reconcileFailed,
         });
-
-        write({ type: "done", suggestions, rejected });
       } catch (e) {
         write({
           type: "error",

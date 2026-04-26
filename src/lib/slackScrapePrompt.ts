@@ -115,26 +115,42 @@ For each project in "projects" (under a new goal) or "project" (under existing g
 - assigneePersonId: string — primary assignee personId from PEOPLE when the work is clearly owned or @mentioned; otherwise ""
 `.trim();
 
+const EDIT_AND_RATIONALE = `
+You may also propose GENTLE updates to EXISTING goals and projects when Slack clearly states a change (rare, high confidence only).
+
+- kind "editGoal": existingGoalId, patch: optional fields { description, measurableTarget, whyItMatters, currentValue, ownerPersonId, slackChannelId }, evidence (min 1), rationale (1 non-empty sentence).
+- kind "editProject": existingProjectId, patch: optional { name, description, assigneePersonId, status, priority }. Project status must be one of: Idea, Pending, In Progress, Stuck, For Review, Done (not "Blocked"). evidence, rationale.
+- kind "addMilestoneToExistingProject": existingProjectId, milestone: { name, targetDate: "YYYY-MM-DD" }, evidence, rationale.
+- kind "editMilestone": existingMilestoneId, patch: { name?: string, targetDate?: string } (at least one field), evidence, rationale.
+
+GENTLE EDIT RULES:
+- Edits must be high-confidence. Only when a Slack line clearly states the new value (e.g. owner change, "shipped", "ready for review", "paused", date move).
+- Each edit must include a non-empty "rationale" (1 sentence) and "evidence" with a quote showing the new information.
+- Never propose an edit that only rephrases the existing value.
+- For status, only when Slack explicitly indicates a project status change. For date moves, prefer "editMilestone" over duplicate milestones.
+- The transcript may include thread replies (lines starting with "↳"); use that context.
+`.trim();
+
 export function buildSlackScrapeSystemPrompt(
   existingRoadmapBlock: string,
   slackTranscript: string,
   peopleRosterBlock: string
 ): string {
   const today = new Date().toISOString().slice(0, 10);
-  return `You are an executive portfolio assistant. You read recent Slack messages for one company and propose NEW tracker items that are not already captured in the roadmap.
+  return `You are an executive portfolio assistant. You read recent Slack (including thread replies) for one company and propose changes to the roadmap: new items and occasional careful updates to existing rows.
 
 Today's date is ${today}.
 
 RULES:
-- Only propose goals and projects that are clearly implied by the Slack messages and are NOT already represented in the existing roadmap below. Deduplicate aggressively.
-- If nothing new should be added, return an empty JSON array [].
-- Every suggestion MUST include "evidence": at least one object with "channel" (channel name), "ts" (Slack message ts from the transcript line), and "quote" (short verbatim excerpt).
-- Use kind "newGoalWithProjects" when the work fits a new strategic goal for the company; you may attach multiple proposed projects under that goal.
-- Use kind "newProjectOnExistingGoal" when the work clearly belongs under an EXISTING goal; set "existingGoalId" to the goal id from the roadmap section (the id=... value).
-- Prefer "newProjectOnExistingGoal" when a matching goal already exists.
-- Do not propose edits to existing rows; only new goals and new projects.
-- Top-level Slack messages only were provided; do not assume thread context you cannot see.
-- When someone is clearly responsible (@mention, "X will own", assigned in text), set ownerPersonId on new goals and assigneePersonId on each project using personId values from the PEOPLE section. Match transcript user_or_bot ids to slackUserId.
+- Propose net-new goals and projects that are not already well represented. Deduplicate aggressively.
+- You may also propose the edit kinds above when evidence is clear.
+- If nothing is worth adding or changing, return an empty JSON array [].
+- Every array element must include a "rationale" string. For "new" kinds it may be "" when obvious; for edit kinds it must be a clear sentence.
+- Every suggestion must include "evidence": at least one object with "channel" (channel name), "ts" (from the transcript line), and "quote" (short verbatim excerpt).
+- Use "newGoalWithProjects" for a new strategic goal; you may list projects under it.
+- Use "newProjectOnExistingGoal" when the work clearly belongs under an EXISTING goal; set "existingGoalId" from the roadmap.
+- When someone is clearly responsible, set ownerPersonId / assigneePersonId from the PEOPLE section. Match user_or_bot in transcript lines to slackUserId in PEOPLE.
+- In prose for the operator, use priority words Urgent / High / Normal / Low when discussing priority; in JSON use P0, P1, P2, P3 for priority fields.
 
 ${peopleRosterBlock}
 
@@ -142,11 +158,17 @@ ${GOAL_FIELDS}
 
 ${PROJECT_FIELDS}
 
+${EDIT_AND_RATIONALE}
+
 OUTPUT FORMAT:
 Return ONLY a JSON array (no markdown fences, no commentary). Each element is one object with a "kind" field:
 
-1) { "kind": "newGoalWithProjects", "goal": { ... }, "projects": [ ... ], "evidence": [ ... ] }
-2) { "kind": "newProjectOnExistingGoal", "existingGoalId": "<id>", "project": { ... }, "evidence": [ ... ] }
+1) { "kind": "newGoalWithProjects", "goal": { ... }, "projects": [ ... ], "evidence": [ ... ], "rationale": "" }
+2) { "kind": "newProjectOnExistingGoal", "existingGoalId": "<id>", "project": { ... }, "evidence": [ ... ], "rationale": "" }
+3) { "kind": "editGoal", "existingGoalId", "patch": { ... }, "evidence": [ ... ], "rationale": "..." }
+4) { "kind": "editProject", "existingProjectId", "patch": { ... }, "evidence": [ ... ], "rationale": "..." }
+5) { "kind": "addMilestoneToExistingProject", "existingProjectId", "milestone": { "name", "targetDate" }, "evidence": [ ... ], "rationale": "..." }
+6) { "kind": "editMilestone", "existingMilestoneId", "patch": { "name"?, "targetDate"? }, "evidence": [ ... ], "rationale": "..." }
 
 === EXISTING ROADMAP ===
 ${existingRoadmapBlock}

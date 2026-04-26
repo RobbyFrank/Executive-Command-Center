@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import {
   fetchSlackChannelHistory,
-  postSlackChannelMessage,
+  postSlackChannelMessageAsBot,
   type SlackChannelHistoryMessage,
 } from "@/lib/slack";
 import { getRepository } from "@/server/repository";
+import { isFounderPerson } from "@/lib/autonomyRoster";
 import { claudePlainText } from "@/server/actions/slack/thread-ai-shared";
 import {
   EXECUTIVE_DIGEST_SYSTEM_PROMPT,
@@ -20,6 +21,7 @@ import {
   writeExecutiveDigestState,
   type ExecutiveDigestState,
 } from "./state";
+import type { Person } from "@/lib/types/tracker";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const SENTINEL_NOTHING = "NOTHING";
@@ -155,14 +157,52 @@ function filterRepeatedBullets(
   };
 }
 
-function buildCalmDayMessage(nowIso: string): string {
-  const day = nowIso.slice(0, 10);
-  return `*Daily executive digest · ${day}*\nNothing new worth paging on since yesterday. <${getPublicBaseUrl()}/|Open roadmap>`;
+/**
+ * Build the `<@USERID> <@USERID>` mention prefix for every founder with a
+ * Slack user ID configured in the Team roster. Returns "" when no founders
+ * have a `slackHandle`, so the digest never starts with a stray space.
+ */
+function buildFounderMentionPrefix(people: Person[]): string {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const p of people) {
+    if (!isFounderPerson(p)) continue;
+    const id = p.slackHandle?.trim();
+    if (!id) continue;
+    const key = id.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ids.push(key);
+  }
+  return ids.map((id) => `<@${id}>`).join(" ");
 }
 
-function buildDigestHeader(nowIso: string): string {
+/** Single Portfolio OS hyperlink reused in the header (no per-bullet links). */
+function buildPortfolioOsLink(): string {
+  return `<${getPublicBaseUrl()}/|Portfolio OS>`;
+}
+
+function buildDigestHeader(nowIso: string, mentionPrefix: string): string {
   const day = nowIso.slice(0, 10);
-  return `*Daily executive digest · ${day}*`;
+  const ping = mentionPrefix ? `${mentionPrefix} ` : "";
+  return `${ping}*Daily executive digest · ${day}* · ${buildPortfolioOsLink()}`;
+}
+
+function buildCalmDayMessage(nowIso: string, mentionPrefix: string): string {
+  return `${buildDigestHeader(nowIso, mentionPrefix)}\nNothing new worth paging on since yesterday.`;
+}
+
+/**
+ * Strip any `<URL|label>` link decoration left in a bullet by Claude. We now
+ * link once in the header (Portfolio OS), so per-line links are noise. We keep
+ * this safety net so an in-flight prompt change can't double-link the channel.
+ */
+function stripBulletLinks(line: string): string {
+  return line
+    .replace(/\s*<https?:\/\/[^|>]+\|[^>]+>\s*$/i, "")
+    .replace(/<https?:\/\/[^|>]+\|([^>]+)>/g, "$1")
+    .replace(/[ \t]+$/g, "")
+    .trim();
 }
 
 /**
@@ -259,6 +299,7 @@ export async function buildAndSendExecutiveDigest(
   const trimmed = rawAiText.trim();
 
   const priorHashes = new Set(previousState?.bulletHashes ?? []);
+  const mentionPrefix = buildFounderMentionPrefix(people);
 
   let finalText: string;
   let finalBullets: string[];
@@ -268,17 +309,23 @@ export async function buildAndSendExecutiveDigest(
     trimmed.length === 0 ||
     trimmed.toUpperCase() === SENTINEL_NOTHING
   ) {
-    finalText = buildCalmDayMessage(nowIso);
+    finalText = buildCalmDayMessage(nowIso, mentionPrefix);
     finalBullets = [];
   } else {
     const filtered = filterRepeatedBullets(trimmed, priorHashes);
     dropped = filtered.droppedDuplicateBulletCount;
     if (filtered.bulletLines.length === 0) {
-      finalText = buildCalmDayMessage(nowIso);
+      finalText = buildCalmDayMessage(nowIso, mentionPrefix);
       finalBullets = [];
     } else {
-      finalText = `${buildDigestHeader(nowIso)}\n${filtered.text}`;
-      finalBullets = filtered.bulletLines;
+      const cleanedBody = filtered.text
+        .split(/\r?\n/)
+        .map((l) =>
+          l.startsWith("• ") ? `• ${stripBulletLinks(l.slice(2))}` : l
+        )
+        .join("\n");
+      finalText = `${buildDigestHeader(nowIso, mentionPrefix)}\n${cleanedBody}`;
+      finalBullets = filtered.bulletLines.map((b) => stripBulletLinks(b));
     }
   }
 
@@ -297,7 +344,7 @@ export async function buildAndSendExecutiveDigest(
     };
   }
 
-  const posted = await postSlackChannelMessage(channelId, finalText);
+  const posted = await postSlackChannelMessageAsBot(channelId, finalText);
   if (!posted.ok) {
     return {
       ok: false,
@@ -343,7 +390,7 @@ export async function maybePostDigestFailureNotice(
   if (!channelId) return;
   try {
     const truncated = reason.replace(/\s+/g, " ").slice(0, 400);
-    await postSlackChannelMessage(
+    await postSlackChannelMessageAsBot(
       channelId,
       `_Daily executive digest failed:_ ${truncated}`
     );

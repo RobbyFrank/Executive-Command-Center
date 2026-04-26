@@ -1170,34 +1170,49 @@ export function UnrepliedAsksView({ snapshot, people }: Props) {
                                               <span>group DM</span>
                                             </span>
                                           ) : (
-                                            <a
-                                              href={channelHref}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="inline-flex min-w-0 max-w-full items-center gap-0.5 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
-                                              title={`Open ${channelLabel} in Slack`}
-                                            >
-                                              <Hash
-                                                className="h-3 w-3 shrink-0"
+                                            <span className="inline-flex min-w-0 max-w-full -translate-y-1 items-baseline gap-x-2">
+                                              <a
+                                                href={channelHref}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex min-w-0 max-w-full items-baseline gap-0.5 text-[11px] text-zinc-400 transition-colors hover:text-zinc-200"
+                                                title={`Open ${channelLabel} in Slack`}
+                                              >
+                                                <Hash
+                                                  className="h-3 w-3 shrink-0"
+                                                  aria-hidden
+                                                />
+                                                <span className="truncate">
+                                                  {(
+                                                    row.entry.channelName?.trim() ||
+                                                    "channel"
+                                                  ).replace(/^#+/, "")}
+                                                </span>
+                                              </a>
+                                              <span
+                                                className="text-[11px] text-zinc-500"
                                                 aria-hidden
-                                              />
-                                              <span className="truncate">
-                                                {(
-                                                  row.entry.channelName?.trim() ||
-                                                  "channel"
-                                                ).replace(/^#+/, "")}
+                                              >
+                                                ·
                                               </span>
-                                            </a>
+                                              <span className="text-[11px] tabular-nums text-zinc-500">
+                                                {ageLabel}
+                                              </span>
+                                            </span>
                                           )}
-                                          <span
-                                            className="text-[11px] text-zinc-500"
-                                            aria-hidden
-                                          >
-                                            ·
-                                          </span>
-                                          <span className="text-[11px] tabular-nums text-zinc-500">
-                                            {ageLabel}
-                                          </span>
+                                          {row.entry.channelKind === "mpim" ? (
+                                            <>
+                                              <span
+                                                className="text-[11px] text-zinc-500"
+                                                aria-hidden
+                                              >
+                                                ·
+                                              </span>
+                                              <span className="text-[11px] tabular-nums text-zinc-500">
+                                                {ageLabel}
+                                              </span>
+                                            </>
+                                          ) : null}
                                         </div>
                                       </div>
                                       <div

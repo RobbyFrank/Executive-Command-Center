@@ -33,7 +33,6 @@ import {
 import { ROADMAP_COMPANY_STICKY_HEADER_CLASS } from "@/lib/tracker-roadmap-columns";
 import { CompanyEmptyGoalRowPlaceholder } from "./CompanyEmptyGoalRowPlaceholder";
 import { AddEntityMenuButton } from "./AddEntityMenuButton";
-import { CompanyScrapeButton } from "./CompanyScrapeButton";
 import { ContextMenu, type ContextMenuEntry } from "./ContextMenu";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { CompanySectionOverlayProvider } from "./company-section-overlay-context";
@@ -323,9 +322,6 @@ export function CompanySection({
           </div>
         </div>
         </button>
-        <div className="flex shrink-0 items-center pb-2 pl-2">
-          <CompanyScrapeButton company={company} people={people} />
-        </div>
         </div>
         <ContextMenu
           open={companyContext.open}

@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/unreplied-asks-scan",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/slack-roadmap-sync",
+      "schedule": "0 0 * * *"
     }
   ]
 }
