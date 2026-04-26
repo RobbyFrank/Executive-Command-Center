@@ -1,17 +1,19 @@
+"use client";
+
+import { useState } from "react";
 import {
   formatRelativeCalendarDate,
   getMilestoneDueHorizon,
   type MilestoneDueHorizon,
 } from "@/lib/relativeCalendarDate";
+import { AtlasCalendarGlyph } from "./AtlasCalendarGlyph";
 import type { LaidMilestone } from "./atlas-types";
 
 interface AtlasMilestoneProps {
   milestone: LaidMilestone;
   /**
-   * 1-based chronological index used for the sequence badge above the
-   * bubble. Computed by the parent (`PortfolioAtlas`) from the
-   * `positionMilestones` order so it stays consistent with the wandering
-   * path layout.
+   * 1-based index — shown at the start of the milestone name (`1. Name`).
+   * Computed by the parent from the path order.
    */
   sequence: number;
   /** Show the milestone's name + status (at level 3, or when focused at level 4). */
@@ -25,12 +27,7 @@ interface AtlasMilestoneProps {
    * so their on-screen size stays constant regardless of zoom depth.
    */
   scale: number;
-  /**
-   * Which side of the bubble gets the milestone NAME. The status line goes
-   * on the opposite side. Alternating by index parity prevents adjacent
-   * milestones' name blocks from stacking name-over-name.
-   */
-  labelSide: "above" | "below";
+  asOf: Date;
   onClick: () => void;
 }
 
@@ -66,13 +63,19 @@ function wrapLabel(
   return lines;
 }
 
-/** Short month+day — e.g. "Apr 28". Falls back to the raw ymd if unparseable. */
+const SHORT_MO = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/** Short month+day — e.g. "Apr 28". Fixed English labels so SSR matches the client. */
 function formatShortMonthDay(ymd: string): string {
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return ymd;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  if (Number.isNaN(d.getTime())) return ymd;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const mon = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  if (mon < 0 || mon > 11) return ymd;
+  return `${SHORT_MO[mon]} ${d}`;
 }
 
 /** SVG fill for the bottom status line based on due horizon. */
@@ -155,14 +158,14 @@ export function AtlasMilestone({
   isFocused,
   isDimmed,
   scale,
-  labelSide,
+  asOf,
   onClick,
 }: AtlasMilestoneProps) {
   const m = milestone.milestone;
   const isDone = m.status === "Done";
   const hasDate = m.targetDate.trim().length > 0;
   const horizon: MilestoneDueHorizon = hasDate
-    ? getMilestoneDueHorizon(m.targetDate)
+    ? getMilestoneDueHorizon(m.targetDate, asOf)
     : "none";
   const isOverdue = !isDone && horizon === "overdue";
   const arcLen = (isDone ? 1 : 0) * (2 * Math.PI * milestone.r * 0.78);
@@ -171,7 +174,7 @@ export function AtlasMilestone({
   if (isDone) {
     statusLabel = "Done";
   } else if (hasDate) {
-    statusLabel = formatRelativeCalendarDate(m.targetDate, new Date(), {
+    statusLabel = formatRelativeCalendarDate(m.targetDate, asOf, {
       omitFuturePreposition: false,
     });
   } else {
@@ -185,24 +188,14 @@ export function AtlasMilestone({
   const nameFont = 11;
   const statusFont = 8;
   const lineGap = 2;
-  const labelLines = wrapLabel(m.name, 18, 2);
+  const titleWithIndex = `${sequence}. ${m.name}`;
+  const labelLines = wrapLabel(titleWithIndex, 20, 2);
 
-  const nameSide = labelSide;
+  /** Name always above the bubble; due/status always below (see PortfolioAtlas hints). */
   const nameBlockHeight = labelLines.length * nameFont + (labelLines.length - 1) * lineGap;
   const nameTopY =
-    nameSide === "above"
-      ? milestone.cy - onScreenR - 8 - (nameBlockHeight - nameFont)
-      : milestone.cy + onScreenR + nameFont + 6;
-  const statusY =
-    nameSide === "above"
-      ? milestone.cy + onScreenR + statusFont + 6
-      : milestone.cy - onScreenR - 6;
-
-  // Sequence badge — small numbered chip above the bubble (regardless of
-  // which side the name label sits on, the sequence stays at the top so it
-  // reads naturally left-to-right along the path).
-  const badgeR = 8;
-  const badgeOffsetY = -onScreenR - badgeR - 2;
+    milestone.cy - onScreenR - 8 - (nameBlockHeight - nameFont);
+  const statusRowY = milestone.cy + onScreenR + 12;
 
   // Center status glyph size — sized in viewBox units so it scales with
   // the bubble (intentional: we want it to feel like part of the bubble).
@@ -214,14 +207,29 @@ export function AtlasMilestone({
       : "default";
   const glyphColor = isDone ? "#7ba68a" : isOverdue ? "#f87171" : "#a1a1aa";
 
+  const [hover, setHover] = useState(false);
+  const isClickable = !isFocused;
+  const isHovering = isClickable && hover;
+  const dimOpacity = isDimmed ? (isHovering ? 0.32 : 0.2) : 1;
+  const hoverFilter =
+    isClickable && isHovering
+      ? `drop-shadow(0 0 7px rgba(${hexToRgb(milestone.color)}, 0.32)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.1))`
+      : undefined;
+
   return (
     <g
       className="atlas-fade"
       data-atlas-interactive={isFocused ? undefined : "true"}
       style={{
-        opacity: isDimmed ? 0.2 : 1,
-        cursor: isFocused ? "default" : "pointer",
+        opacity: dimOpacity,
+        cursor: isClickable ? "pointer" : "default",
+        filter: hoverFilter,
+        transition: "opacity 200ms ease, filter 200ms ease",
       }}
+      onPointerEnter={() => {
+        if (isClickable) setHover(true);
+      }}
+      onPointerLeave={() => setHover(false)}
       onClick={(e) => {
         e.stopPropagation();
         if (!isFocused) onClick();
@@ -237,10 +245,13 @@ export function AtlasMilestone({
         cy={milestone.cy}
         r={milestone.r}
         fill={milestone.color}
-        fillOpacity={isDone ? 0.3 : 0.1}
+        fillOpacity={isDone ? 0.3 : isHovering ? 0.15 : 0.1}
         stroke={milestone.color}
-        strokeWidth={isFocused ? 2 : 1.2}
+        strokeWidth={isFocused ? 2 : isHovering ? 1.5 : 1.2}
         vectorEffect="non-scaling-stroke"
+        style={{
+          transition: "stroke-width 200ms ease, fill-opacity 200ms ease",
+        }}
       />
       {isDone ? (
         <circle
@@ -269,37 +280,6 @@ export function AtlasMilestone({
         />
       </g>
 
-      {/* Sequence badge — sits above the bubble, counter-scaled. */}
-      <g
-        pointerEvents="none"
-        transform={`translate(${milestone.cx} ${milestone.cy}) scale(${inv}) translate(${-milestone.cx} ${-milestone.cy})`}
-      >
-        <g transform={`translate(${milestone.cx} ${milestone.cy + badgeOffsetY})`}>
-          <circle
-            cx={0}
-            cy={0}
-            r={badgeR}
-            fill="#09090b"
-            stroke={milestone.color}
-            strokeOpacity={0.9}
-            strokeWidth={1.3}
-            vectorEffect="non-scaling-stroke"
-          />
-          <text
-            x={0}
-            y={0}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fontSize={9.5}
-            fontWeight={700}
-            fill="#f4f4f5"
-            className="tabular-nums"
-          >
-            {sequence}
-          </text>
-        </g>
-      </g>
-
       <g
         className="atlas-fade"
         style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
@@ -318,18 +298,42 @@ export function AtlasMilestone({
             {line}
           </text>
         ))}
-        <text
-          x={milestone.cx}
-          y={statusY}
-          textAnchor="middle"
-          fontSize={statusFont}
-          fill={statusColor}
-          letterSpacing={0.4}
-          fontWeight={500}
-        >
-          {statusLabel}
-        </text>
+        <g transform={`translate(${milestone.cx} ${statusRowY})`} pointerEvents="none">
+          {(() => {
+            const calSize = 9;
+            const iconGap = 4;
+            const charW = statusFont * 0.6;
+            const textW = statusLabel.length * charW;
+            const groupW = calSize + iconGap + textW;
+            return (
+              <g transform={`translate(${-groupW / 2} 0)`}>
+                <g transform="translate(0 1)">
+                  <AtlasCalendarGlyph x={0} y={0} size={calSize} stroke={statusColor} />
+                </g>
+                <text
+                  x={calSize + iconGap}
+                  y={calSize * 0.5 + 0.5}
+                  textAnchor="start"
+                  fontSize={statusFont}
+                  fill={statusColor}
+                  letterSpacing={0.4}
+                  fontWeight={500}
+                  dominantBaseline="middle"
+                >
+                  {statusLabel}
+                </text>
+              </g>
+            );
+          })()}
+        </g>
       </g>
     </g>
   );
+}
+
+function hexToRgb(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "113, 113, 122";
+  const n = parseInt(m[1]!, 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
 }

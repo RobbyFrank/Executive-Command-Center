@@ -1,3 +1,4 @@
+import { calendarDateTodayLocal } from "@/lib/relativeCalendarDate";
 import {
   getCachedHierarchy,
   getCachedPeople,
@@ -13,10 +14,16 @@ export default async function AtlasPage() {
     getCachedHierarchy(),
     getCachedPeople(),
   ]);
+  /** Single "today" for all client calendar math so SSR and hydration match. */
+  const asOfYmd = calendarDateTodayLocal();
 
   return (
     <div className="-mx-6 -mb-6 h-[100dvh] min-h-0 min-w-0 overflow-hidden">
-      <PortfolioAtlas hierarchy={hierarchy} people={people} />
+      <PortfolioAtlas
+        hierarchy={hierarchy}
+        people={people}
+        asOfYmd={asOfYmd}
+      />
     </div>
   );
 }

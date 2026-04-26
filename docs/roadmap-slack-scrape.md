@@ -9,13 +9,13 @@ There is **one place** to scan Slack and **one place** to review/approve suggest
 - Workspace channels whose **name, topic, or purpose** contain the company **name** or **shortName**.
 - Channels already linked on this company’s **goals** via `slackChannelId`.
 
-**Transcript and threads** — The engine loads channel history, then (when `includeThreads: true`, which the daily cron and on-demand sync both use) fetches **thread replies** for messages with `reply_count > 0`, merged into the transcript with bounded concurrency and caps (see `src/lib/slack/threadHistory.ts`).
+**Transcript and threads** — The engine loads channel history, then (when `includeThreads: true`, which the daily cron and on-demand sync both use) fetches **thread replies** for messages with `reply_count > 0`, merged into the transcript with bounded concurrency and caps (see `src/lib/slack/threadHistory.ts`). **Human-only:** messages without a real Slack `user` (bot-only webhooks) and `subtype: bot_message` are **excluded** from the transcript and thread lines (`isHumanTeamSlackMessage` in `src/lib/slack/humanMessages.ts`, applied in `runSlackRoadmapSyncForCompany` and thread assembly) so automated notification feeds don’t drive new roadmap items.
 
 **Pass 1 (model suggestions)** — Claude returns a **JSON array** of suggestions. The Team roster (person id, name, Slack user id) is in the system prompt. After parsing, the server **enriches** suggestions: channel resolution, owners/assignees from evidence and `@mentions`, and extra handling for **edit** kinds (see `src/lib/slackScrapeEnrich.ts`).
 
 **Pass 2 (reconciliation)** — A second pass turns fresh suggestions + existing tracker into **pending records** (stable ids, `rationale`, patches). Results are **merged** with the per-company pending queue, with **supersession** and **dedupe** (see below).
 
-**Global review** — A slide-over lists pending suggestions **across companies** (filters, bulk approve for one company at a time). It is animated (slide + fade) and is reachable from the **inbox** icon next to **Roadmap** in the sidebar (always visible) or the **cyan count pill** that appears when there are pending items.
+**Global review (`/sync`)** — Full-page queue: **company** multi-select (same control as Roadmap) plus **suggestion-type** filter; counts respect the company filter. Companies render in Roadmap order with **logos**, **expand/collapse** per company, and **Approve all here** (confirmation modal). Each card has **Reject**, **Revise with AI** (streaming `POST /api/slack-suggestions/revise`, then optional **Apply & approve** which updates the pending payload and approves), and **Approve**. The slide-over inbox next to Roadmap still links into this flow where applicable.
 
 The header has a **Sync all** split-button:
 
@@ -68,6 +68,7 @@ The pipeline streams over **NDJSON** with `currentStage`, `channels.{total,done,
 | `POST` | `/api/companies/scrape-slack/run` | `companyId`, `channelIds`, `days`, optional `includeThreads` (default true in UI) | **Streaming NDJSON** (`Content-Type: application/x-ndjson`): per-channel history progress, then model phase, then `done` or `error`. |
 | `POST` | `/api/companies/scrape-slack/run-all` | optional `{ companyIds?: string[] }` | **Streaming NDJSON**: emits per-company progress (`completed/total`, `okCount`, `failCount`, `currentCompanyName`) while running `runSlackSyncPipelineForCompany` for every company (`days: 2`, `includeThreads: true`). Pass `companyIds` to scope the run to a subset (the **Sync all → Pick a company** picker uses this to run for one company). Same pipeline as the cron, session-authed + rate-limited. |
 | `GET` | `/api/cron/slack-roadmap-sync` | (none; uses `CRON_SECRET`) | Triggers a **per-company** scan loop (see **Daily automation**). |
+| `POST` | `/api/slack-suggestions/revise` | `{ suggestionId, message, history? }` (session cookie) | **Streaming** `text/plain`: AI revises a **pending** suggestion’s JSON payload (same `kind`); client then calls `updateSlackSuggestionPayload` + `approveSlackSuggestion` when the operator applies. Rate-limited like other AI routes. |
 
 - Candidate channels for the UI are computed on the client with `resolveCompanyScrapeChannels` (see Overview). Rows include `id`, `name`, optional `isPrivate` (from Slack when known), `linkedToGoalIds`, `matchedByName`.
 - The configure dialog consumes the stream and shows **per-channel** status (same idea as **Companies → Generate from website…**). Payload shapes are in `src/lib/slack-scrape-stream-types.ts`.
@@ -86,7 +87,7 @@ The pipeline streams over **NDJSON** with `currentStage`, `channels.{total,done,
 ## Server actions and storage (tracker + queue)
 
 - **`createScrapedItems`** (`src/server/actions/tracker.ts`) — used for “import many at once” style flows; batch write via repository.
-- **`approveSlackSuggestion` / `rejectSlackSuggestion` / `bulkApproveForCompany`** — `src/server/actions/slackSuggestions.ts`; rejection stores dedupe key under `rejectedKeysByCompany`.
+- **`approveSlackSuggestion` / `rejectSlackSuggestion` / `bulkApproveForCompany` / `bulkApproveSlackSuggestionIds`** — `src/server/actions/slackSuggestions.ts`; rejection stores dedupe key under `rejectedKeysByCompany`. The `/sync` **Approve all here** action calls **`bulkApproveSlackSuggestionIds`** with the **visible row ids** (respects company + type filters), not every pending row in Redis for the company.
 
 ## Slack requirements
 

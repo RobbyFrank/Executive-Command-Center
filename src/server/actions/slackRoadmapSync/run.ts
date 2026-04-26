@@ -13,6 +13,7 @@ import {
   type SlackChannel,
   type SlackChannelHistoryMessage,
 } from "@/lib/slack";
+import { isHumanTeamSlackMessage } from "@/lib/slack/humanMessages";
 import { buildTranscriptWithThreads } from "@/lib/slack/threadHistory";
 import { enrichSlackScrapeSuggestions, mergeMessageAuthorsForChannel } from "@/lib/slackScrapeEnrich";
 import {
@@ -322,13 +323,14 @@ export async function runSlackRoadmapSyncForCompany(
       continue;
     }
     const name = name0;
-    mergeMessageAuthorsForChannel(messageAuthors, name, hist.messages);
-    let block = formatMessagesForChannel(name, hist.messages);
+    const humanMessages = hist.messages.filter(isHumanTeamSlackMessage);
+    mergeMessageAuthorsForChannel(messageAuthors, name, humanMessages);
+    let block = formatMessagesForChannel(name, humanMessages);
     if (includeThreads) {
       const th = await buildTranscriptWithThreads(
         name,
         channelId,
-        hist.messages,
+        humanMessages,
         { maxThreads: 200, concurrency: 4 }
       );
       for (const [k, v] of th.messageAuthors) {
@@ -337,8 +339,8 @@ export async function runSlackRoadmapSyncForCompany(
       block += th.extraLines;
     }
     transcriptParts.push(block);
-    if (hist.messages.length > 0) channelsWithMessages += 1;
-    totalMessages += hist.messages.length;
+    if (humanMessages.length > 0) channelsWithMessages += 1;
+    totalMessages += humanMessages.length;
     logSlackRoadmapSync("info", {
       event: "channel_history_ok",
       correlationId,
@@ -348,13 +350,14 @@ export async function runSlackRoadmapSyncForCompany(
       companyName,
       channelId,
       channelName: name,
-      messageCount: hist.messages.length,
+      messageCount: humanMessages.length,
+      rawMessageCount: hist.messages.length,
     });
     onChannelDone?.({
       channelId,
       name,
       ok: true,
-      messageCount: hist.messages.length,
+      messageCount: humanMessages.length,
     });
   }
 

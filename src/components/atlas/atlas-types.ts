@@ -7,16 +7,18 @@ import type {
 } from "@/lib/types/tracker";
 
 /**
- * How goals are color-coded (and, for "priority", softly clustered) inside a
- * focused company at level 1. Each option resolves to a category color/label
- * via `goalCategoryFor` in `atlas-activity.ts`. Replaces the old "type"
- * (project type) bucket — project type is now conveyed by an icon inside
- * each project bubble at level 2 instead.
+ * How items are color-coded in the atlas. The `"goal"` key means **no
+ * grouping** (a single free pack at goals L1 and projects L2). For
+ * "priority" at L1, goals are softly sectioned. Department / owner /
+ * priority apply to goals at L1 and to projects at L2.
+ * `goalCategoryFor` / `projectCategoryFor` in `atlas-activity.ts` supply
+ * labels and colors. Project type is always shown on each project bubble
+ * (Engineering, Product, …), not as a group axis.
  */
 export type GroupingKey = "goal" | "department" | "owner" | "priority";
 
 export const GROUPING_OPTIONS: { key: GroupingKey; label: string }[] = [
-  { key: "goal", label: "Goal" },
+  { key: "goal", label: "Ungrouped" },
   { key: "department", label: "Department" },
   { key: "owner", label: "Owner" },
   { key: "priority", label: "Priority" },
@@ -134,6 +136,28 @@ export interface CameraTarget {
   cx: number;
   cy: number;
   r: number;
+}
+
+/**
+ * One visual section at goals L1 or projects L2 when grouping is not
+ * "Ungrouped" (`"goal"`). Renders as a large soft-tinted rounded
+ * rectangle with a header (category + count). Bubbles in this category
+ * are placed inside and never overlap.
+ */
+export interface AtlasSection {
+  /** Stable category key (priority code, dept name, owner id). */
+  key: string;
+  /** Display label in the section header (e.g. "URGENT", "ENGINEERING"). */
+  label: string;
+  /** Section tint color (typically the category color). */
+  color: string;
+  /** Rectangle in canvas viewBox coordinates. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Number of goals (L1) or projects (L2) in this section. */
+  goalCount: number;
 }
 
 export type { CompanyWithGoals, GoalWithProjects, ProjectWithMilestones, Milestone, Person };

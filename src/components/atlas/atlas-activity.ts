@@ -10,7 +10,34 @@ import {
   isActiveStatus,
 } from "@/lib/companyMomentum";
 import { PRIORITY_MENU_LABEL } from "@/lib/prioritySort";
-import { ATLAS_PALETTE, colorForKey, type GroupingKey } from "./atlas-types";
+import {
+  ATLAS_PALETTE,
+  colorForKey,
+  type GroupingKey,
+  type LaidGoal,
+} from "./atlas-types";
+
+/**
+ * Distinct people assigned to non-mirrored projects on this goal (order =
+ * first seen). Assignees drive execution; used on goal bubbles in the Atlas.
+ */
+export function projectAssigneesForGoal(
+  goal: LaidGoal,
+  peopleById: ReadonlyMap<string, Person>
+): Person[] {
+  const seen = new Set<string>();
+  const out: Person[] = [];
+  for (const p of goal.projects) {
+    if (p.isMirror) continue;
+    for (const id of p.assigneeIds) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const person = peopleById.get(id);
+      if (person) out.push(person);
+    }
+  }
+  return out;
+}
 
 /**
  * Activity score for a company (0–100). Reuses `computeMomentumScore` so the
@@ -102,15 +129,15 @@ export const PRIORITY_COLOR: Record<Priority, string> = {
 };
 
 /**
- * Outer-glow opacity per priority. Used as the alpha on a `drop-shadow`
- * around bubble circles so urgent items quietly draw the eye even when the
- * grouping is not "priority". P3 returns 0 = no glow.
+ * Soft halo alpha per priority (`drop-shadow` on goal/project bubbles) —
+ * visible but not loud; P3 is near-zero; hover adds a second layer in the
+ * component.
  */
 export const PRIORITY_GLOW_ALPHA: Record<Priority, number> = {
-  P0: 0.42,
-  P1: 0.28,
-  P2: 0.12,
-  P3: 0,
+  P0: 0.28,
+  P1: 0.18,
+  P2: 0.09,
+  P3: 0.02,
 };
 
 /**
@@ -125,24 +152,62 @@ export const PRIORITY_RADIUS_KICKER: Record<Priority, number> = {
   P3: 0.9,
 };
 
+/**
+ * Label + color for a goal or a project under a grouping key (atlas
+ * section layout + tints).
+ */
+export interface GoalCategory {
+  key: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * Category for section layout + tint when grouping projects (Owner /
+ * Department / Priority). The `"goal"` (ungrouped) key is not used for
+ * per-bubble color — `projectColor` still uses `goalId` for that case.
+ */
+export function projectCategoryFor(
+  project: ProjectWithMilestones,
+  grouping: GroupingKey,
+  peopleById: Map<string, Person>
+): GoalCategory {
+  if (grouping === "department") {
+    const owner = peopleById.get(project.ownerId);
+    const dept = owner?.department?.trim() || "Unassigned";
+    return { key: dept, label: dept, color: departmentColor(dept) };
+  }
+  if (grouping === "owner") {
+    const owner = peopleById.get(project.ownerId);
+    const key = project.ownerId || "unassigned";
+    return {
+      key,
+      label: owner?.name ?? "Unassigned",
+      color: colorForKey(key),
+    };
+  }
+  if (grouping === "priority") {
+    const code = project.priority;
+    return {
+      key: code,
+      label: PRIORITY_MENU_LABEL[code] ?? code,
+      color: PRIORITY_COLOR[code] ?? PRIORITY_COLOR.P2,
+    };
+  }
+  // Ungrouped: one section, neutral chrome (distinct from `projectColor`)
+  return { key: "all", label: "", color: "#3f3f46" };
+}
+
 /** Color assigned to a project circle based on the active grouping key. */
 export function projectColor(
   project: ProjectWithMilestones,
   grouping: GroupingKey,
   peopleById: Map<string, Person>
 ): string {
-  if (grouping === "department") {
-    const owner = peopleById.get(project.ownerId);
-    return departmentColor(owner?.department ?? "");
+  if (grouping === "goal") {
+    return colorForKey(project.goalId);
   }
-  if (grouping === "priority") {
-    return PRIORITY_COLOR[project.priority] ?? PRIORITY_COLOR.P2;
-  }
-  if (grouping === "owner") {
-    return colorForKey(project.ownerId || "unassigned");
-  }
-  // "goal" — color by goal id so projects in the same goal share a color
-  return colorForKey(project.goalId);
+  return projectCategoryFor(project, grouping, peopleById).color;
 }
 
 /**
@@ -150,14 +215,6 @@ export function projectColor(
  * Used by the level-1 layout / `AtlasGoal` to color a goal's bubble and
  * decide its priority quadrant when grouping by priority.
  */
-export interface GoalCategory {
-  /** Stable key for clustering (goalId, ownerId, dept name, priority code). */
-  key: string;
-  /** Human-readable label for the category (Owner name, Department, Priority label). */
-  label: string;
-  color: string;
-}
-
 export function goalCategoryFor(
   goal: GoalWithProjects,
   grouping: GroupingKey,
@@ -243,11 +300,14 @@ export function milestoneProgress(status: string): number {
 /**
  * Color for a milestone circle based on status and (if not done) its target date.
  */
-export function milestoneColor(status: string, targetDate: string): string {
+export function milestoneColor(
+  status: string,
+  targetDate: string,
+  now: Date = new Date()
+): string {
   if (status === "Done") return "#7ba68a"; // emerald-muted
   if (targetDate) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const [y, m, d] = targetDate.split("-").map((x) => Number(x));
     if (y && m && d) {
       const target = new Date(y, m - 1, d);

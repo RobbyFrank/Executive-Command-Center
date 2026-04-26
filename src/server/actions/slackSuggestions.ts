@@ -6,7 +6,12 @@ import {
   ECC_SLACK_SUGGESTIONS_TAG,
   ECC_TRACKER_DATA_TAG,
 } from "@/lib/cache-tags";
-import type { SlackScrapeSuggestion, SlackSuggestionRecord } from "@/lib/schemas/tracker";
+import type { CreateScrapedItemsPayload } from "@/lib/schemas/tracker";
+import {
+  SlackScrapeSuggestionSchema,
+  type SlackScrapeSuggestion,
+  type SlackSuggestionRecord,
+} from "@/lib/schemas/tracker";
 import type { Goal, Milestone, Project } from "@/lib/types/tracker";
 import { getRepository } from "@/server/repository";
 import { mutateSlackSuggestions, readSlackSuggestions } from "@/server/repository/slack-suggestions-storage";
@@ -17,7 +22,8 @@ import {
   updateMilestone,
   updateProject,
 } from "@/server/actions/tracker";
-import type { CreateScrapedItemsPayload } from "@/lib/schemas/tracker";
+import { computeSlackSuggestionDedupeKey } from "@/lib/slackSuggestionDedupe";
+import { isScrapeSuggestionValidForCompany } from "@/server/actions/slackRoadmapSync/validate";
 
 export type PendingWithCompanyName = SlackSuggestionRecord & {
   companyName: string;
@@ -174,6 +180,67 @@ export async function approveSlackSuggestion(
   return { ok: true };
 }
 
+export async function updateSlackSuggestionPayload(
+  id: string,
+  payload: SlackScrapeSuggestion
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = SlackScrapeSuggestionSchema.safeParse(payload);
+  if (!parsed.success) {
+    return { ok: false, error: "Invalid suggestion payload" };
+  }
+  const nextPayload = parsed.data;
+
+  const data = await getRepository().load();
+  const doc = await readSlackSuggestions();
+  const rec = doc.items.find((i) => i.id === id);
+  if (!rec) {
+    return { ok: false, error: "Suggestion not found" };
+  }
+  if (rec.status !== "pending") {
+    return { ok: false, error: "Not pending" };
+  }
+  if (rec.payload.kind !== nextPayload.kind) {
+    return { ok: false, error: "Cannot change suggestion kind" };
+  }
+  if (!isScrapeSuggestionValidForCompany(data, rec.companyId, nextPayload)) {
+    return {
+      ok: false,
+      error: "Payload no longer matches tracker (orphaned ids)",
+    };
+  }
+
+  const newKey = computeSlackSuggestionDedupeKey(rec.companyId, nextPayload);
+  const dup = doc.items.some(
+    (i) =>
+      i.id !== id &&
+      i.companyId === rec.companyId &&
+      i.status === "pending" &&
+      i.dedupeKey === newKey
+  );
+  if (dup) {
+    return {
+      ok: false,
+      error: "Another pending suggestion already matches this revision",
+    };
+  }
+
+  const now = new Date().toISOString();
+  await mutateSlackSuggestions((d) => {
+    const idx = d.items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const cur = d.items[idx]!;
+    if (cur.status !== "pending") return;
+    d.items[idx] = {
+      ...cur,
+      payload: nextPayload,
+      dedupeKey: newKey,
+      lastSeenAt: now,
+    };
+  });
+  revalidateSlackSuggestions();
+  return { ok: true };
+}
+
 export async function rejectSlackSuggestion(
   id: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -216,6 +283,24 @@ export async function bulkApproveForCompany(companyId: string): Promise<{
       count += 1;
     } else {
       errors.push(`${p.id}: ${r.error}`);
+    }
+  }
+  return { count, errors };
+}
+
+/** Approve only the given ids (e.g. current filter view). Order preserved; skips missing/non-pending. */
+export async function bulkApproveSlackSuggestionIds(ids: string[]): Promise<{
+  count: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let count = 0;
+  for (const id of ids) {
+    const r = await approveSlackSuggestion(id);
+    if (r.ok) {
+      count += 1;
+    } else {
+      errors.push(`${id}: ${r.error}`);
     }
   }
   return { count, errors };

@@ -22,7 +22,7 @@ export function AtlasGroupingToggle({
         disabled && "opacity-40"
       )}
       role="tablist"
-      aria-label="Group projects by"
+      aria-label="Group atlas by"
     >
       <span className="px-2 font-mono text-[9px] uppercase tracking-[0.2em] text-zinc-500">
         Group by

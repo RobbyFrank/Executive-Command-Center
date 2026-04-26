@@ -14,10 +14,12 @@ import type { CompanyWithGoals, Person } from "@/lib/types/tracker";
 import { AtlasBreadcrumbs, type AtlasCrumb } from "./AtlasBreadcrumbs";
 import { AtlasCompany } from "./AtlasCompany";
 import { AtlasGoal } from "./AtlasGoal";
+import { AtlasGoalStatusPopoverHost } from "./AtlasGoalStatusPopoverHost";
 import { AtlasGroupingToggle } from "./AtlasGroupingToggle";
 import { AtlasMilestone } from "./AtlasMilestone";
 import { AtlasMilestonePanel } from "./AtlasMilestonePanel";
 import { AtlasProject } from "./AtlasProject";
+import { AtlasProjectStatusPopoverHost } from "./AtlasProjectStatusPopoverHost";
 import { AtlasStarfield } from "./AtlasStarfield";
 import {
   CANVAS_H,
@@ -25,12 +27,18 @@ import {
   getMilestonePathGeometry,
   layoutCompanies,
   layoutCompanyInner,
+  layoutProjectsInEther,
   positionMilestones,
 } from "./atlas-layout";
-import { calendarDaysFromTodayYmd } from "@/lib/relativeCalendarDate";
+import { projectAssigneesForGoal } from "./atlas-activity";
+import {
+  calendarDaysFromTodayYmd,
+  parseCalendarDateString,
+} from "@/lib/relativeCalendarDate";
+import { ATLAS_RESET_TO_COMPANIES_EVENT } from "@/lib/atlasNav";
 import { cn } from "@/lib/utils";
 import type {
-  CameraTarget,
+  AtlasSection,
   GroupingKey,
   LaidCompany,
   LaidGoal,
@@ -41,11 +49,17 @@ import type {
 interface PortfolioAtlasProps {
   hierarchy: CompanyWithGoals[];
   people: Person[];
+  /**
+   * Server-provided "today" as YYYY-MM-DD. Keeps date-dependent SVG text
+   * (tooltips, relative due labels) identical between SSR and the client
+   * so React hydration does not fail on timezone or clock skew.
+   */
+  asOfYmd: string;
 }
 
 /**
  * Focus path: [companyId, goalId, projectId, milestoneId]. Length = current
- * zoom level (0 = overview, 4 = milestone panel open).
+ * zoom level (0 = portfolio overview, 4 = milestone panel open).
  */
 type FocusPath = string[];
 
@@ -76,11 +90,7 @@ function seededRandom(seed: string, salt: number): number {
  * axis. Each entity gets unique offsets, duration (8–14s), and a negative
  * begin time so its phase is out of sync with its siblings. SMIL is used
  * (rather than CSS keyframes) because animating `transform` on SVG `<g>`
- * elements via CSS has historically been unreliable across engines —
- * `<animateTransform>` is purpose-built for SVG and works everywhere.
- *
- * `amplitudeScale` cascades: companies use 1.0, goals 0.5, projects 0.25 —
- * so the deeper you drill, the more delicately the bubbles drift.
+ * elements via CSS has historically been unreliable across engines.
  */
 interface DriftDescriptor {
   /** Space-separated translation values for SMIL (5 stops: 0, A, B, A', 0). */
@@ -108,7 +118,8 @@ function driftDescriptorFor(seed: string, amplitudeScale = 1): DriftDescriptor {
 
 /**
  * Read the *live* translate applied to a drift `<g>` (SMIL `animateTransform`
- * updates `transform.animVal` in supporting browsers).
+ * updates `transform.animVal` in supporting browsers). Used for the
+ * hover-freeze pattern at level 0.
  */
 function readDriftTranslate(g: SVGGElement): { tx: number; ty: number } {
   const t = g.transform;
@@ -121,7 +132,7 @@ function readDriftTranslate(g: SVGGElement): { tx: number; ty: number } {
 }
 
 const HINTS = [
-  "Click a company to zoom in",
+  "Click a company to see its goals",
   "Click a goal to see its projects",
   "Click a project to reveal milestones",
   "Click a milestone to open its Slack thread",
@@ -129,9 +140,9 @@ const HINTS = [
 ];
 
 /**
- * User-driven camera — overrides the focus-driven camera when the user
- * actively wheel-zooms or drags the canvas. Cleared when a new focus is
- * committed (click or auto-descend) so the camera snaps to the new target.
+ * User-driven camera — overrides the default canvas-fit camera when the
+ * user actively wheel-zooms or drags the canvas. Cleared when the level
+ * changes so each level starts at the canvas-fit view.
  */
 interface UserCamera {
   cx: number;
@@ -139,30 +150,75 @@ interface UserCamera {
   scale: number;
 }
 
-const MIN_CAMERA_SCALE = 0.7;
-const MAX_CAMERA_SCALE = 16;
-/**
- * At company-only focus, wheel zoom-out pops to the portfolio when scale
- * falls below this fraction of the focus "natural" scale. Lower = user must
- * zoom out further before leaving the company view.
- */
-const ZOOM_OUT_TO_PORTFOLIO_FRAC = 0.68;
+/** Tight range around the default (scale 1) “fit” view. */
+const MIN_CAMERA_SCALE = 0.9;
+const MAX_CAMERA_SCALE = 1.1;
 /**
  * Wheel zoom uses `exp(-deltaY / WHEEL_ZOOM_SENSITIVITY)`. Larger values
  * make each scroll step change scale more gently.
  */
-const WHEEL_ZOOM_SENSITIVITY = 800;
+const WHEEL_ZOOM_SENSITIVITY = 1500;
+/**
+ * Nudge the floating zoom +/- buttons; kept close to 1.0 to match
+ * `MIN/MAX_CAMERA_SCALE` (see `ZOOM_BUTTON_FACTOR`).
+ */
+const ZOOM_BUTTON_FACTOR = 1.05;
 /** Distance (px) of pointer movement required to treat pointerdown/up as a drag (not a click). */
 const DRAG_THRESHOLD_PX = 4;
 
-export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
+/**
+ * Keep the “camera” center so the 1200×800 atlas art stays near the
+ * default fit: zoomed in → cannot pan the canvas out of the frame; zoomed
+ * out (scale below 1) → cannot lose the full canvas from view.
+ */
+function clampUserCamera(camera: UserCamera): UserCamera {
+  const s = Math.max(
+    MIN_CAMERA_SCALE,
+    Math.min(MAX_CAMERA_SCALE, camera.scale)
+  );
+  let { cx, cy } = camera;
+
+  const visW = CANVAS_W / s;
+  if (visW <= CANVAS_W) {
+    const hx = visW / 2;
+    cx = Math.max(hx, Math.min(CANVAS_W - hx, cx));
+  } else {
+    const hx = visW / 2;
+    cx = Math.max(CANVAS_W - hx, Math.min(hx, cx));
+  }
+
+  const visH = CANVAS_H / s;
+  if (visH <= CANVAS_H) {
+    const hy = visH / 2;
+    cy = Math.max(hy, Math.min(CANVAS_H - hy, cy));
+  } else {
+    const hy = visH / 2;
+    cy = Math.max(CANVAS_H - hy, Math.min(hy, cy));
+  }
+
+  return { scale: s, cx, cy };
+}
+
+export function PortfolioAtlas({
+  hierarchy,
+  people,
+  asOfYmd,
+}: PortfolioAtlasProps) {
+  const asOf = useMemo(
+    () => parseCalendarDateString(asOfYmd) ?? new Date(),
+    [asOfYmd]
+  );
   const [focusPath, setFocusPath] = useState<FocusPath>([]);
   const [grouping, setGroupingState] = useState<GroupingKey>("goal");
   const [userCamera, setUserCamera] = useState<UserCamera | null>(null);
+  const setClampedUserCamera = useCallback((next: UserCamera) => {
+    setUserCamera(clampUserCamera(next));
+  }, []);
   const [isWheelZooming, setIsWheelZooming] = useState(false);
   /**
-   * Overview only: freeze SMIL drift at the current translate + timeline
-   * position so hover pauses without snapping to the origin.
+   * Drift hover-freeze (level 0): freeze SMIL drift at the current
+   * translate + timeline position so hover pauses without snapping to the
+   * origin.
    */
   const [driftHoverFreeze, setDriftHoverFreeze] = useState<{
     id: string;
@@ -173,13 +229,41 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   const driftBeginOverrideSecRef = useRef<Record<string, number>>({});
 
   /**
-   * Switching grouping invalidates layout positions (goals are placed by a
-   * grouping-aware seed). Drop back to the company level so the user can
-   * pick a new goal in the new layout.
+   * Active status popover (clicking a goal's status pip at L1 or a project's
+   * status pip / at-risk pulse at L2). Mirrors the Roadmap goal+project
+   * popovers via host components anchored to a fixed-position proxy at the
+   * pip's screen rect. Cleared when the focus level changes so the popover
+   * never lingers across navigation.
+   */
+  const [statusPopover, setStatusPopover] = useState<
+    | {
+        kind: "goal";
+        bucketKey: string;
+        anchorRect: { left: number; top: number; width: number; height: number };
+      }
+    | {
+        kind: "project";
+        projectId: string;
+        /** Milestone the user clicked on the project bubble (L2). */
+        milestoneId: string;
+        anchorRect: { left: number; top: number; width: number; height: number };
+      }
+    | null
+  >(null);
+
+  /**
+   * Re-layout with the new grouping. Stays on the current company; keeps a
+   * selected goal if the path had one, and drops only project/milestone
+   * segments so L2 projects re-flow without leaving the goal.
    */
   const setGrouping = useCallback((next: GroupingKey) => {
     setGroupingState(next);
-    setFocusPath((prev) => (prev.length > 1 ? prev.slice(0, 1) : prev));
+    // Keep the company, and a selected goal if any, so projects (L2) re-layout
+    // in place. Pop only the project / milestone if we're deeper than a goal.
+    setFocusPath((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.slice(0, 2);
+    });
     setUserCamera(null);
   }, []);
 
@@ -199,6 +283,10 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     [focusPath, companies]
   );
 
+  /**
+   * Goals of the focused company, laid out across the canvas. Computed only
+   * when there's a focused company (level ≥ 1).
+   */
   const inner = useMemo(() => {
     if (!focusedCompany) return null;
     return layoutCompanyInner(focusedCompany, grouping, peopleById);
@@ -209,15 +297,35 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     return inner.goals.find((g) => g.bucketKey === focusPath[1]);
   }, [inner, focusPath]);
 
+  /**
+   * Projects of the focused goal, laid out across the canvas. Computed only
+   * when there's a focused goal (level ≥ 2). Avoids laying out projects
+   * for goals the user isn't currently inside.
+   */
+  const { focusedGoalProjects, projectLayoutSections } = useMemo<{
+    focusedGoalProjects: LaidProject[];
+    projectLayoutSections: AtlasSection[];
+  }>(() => {
+    if (!focusedGoal) {
+      return { focusedGoalProjects: [], projectLayoutSections: [] };
+    }
+    const { projects, sections } = layoutProjectsInEther(
+      focusedGoal,
+      grouping,
+      peopleById
+    );
+    return { focusedGoalProjects: projects, projectLayoutSections: sections };
+  }, [focusedGoal, grouping, peopleById]);
+
   const focusedProject = useMemo<LaidProject | undefined>(() => {
-    if (!inner || !focusPath[2]) return undefined;
-    return inner.projects.find((p) => p.id === focusPath[2]);
-  }, [inner, focusPath]);
+    if (!focusPath[2]) return undefined;
+    return focusedGoalProjects.find((p) => p.id === focusPath[2]);
+  }, [focusedGoalProjects, focusPath]);
 
   const focusedMilestones = useMemo(() => {
     if (!focusedProject) return [];
-    return positionMilestones(focusedProject);
-  }, [focusedProject]);
+    return positionMilestones(focusedProject, asOf);
+  }, [asOf, focusedProject]);
 
   const focusedMilestoneLaid = useMemo(() => {
     if (!focusPath[3]) return undefined;
@@ -226,13 +334,12 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
 
   const level = focusPath.length;
 
-  const cameraTarget = useMemo<CameraTarget | null>(() => {
-    if (focusedProject) return focusedProject;
-    if (focusedGoal) return focusedGoal;
-    if (focusedCompany) return focusedCompany;
-    return null;
-  }, [focusedCompany, focusedGoal, focusedProject]);
-
+  /**
+   * Camera — always defaults to canvas-fit (scale=1). User wheel/drag may
+   * override for free exploration. Each level starts at default; popping
+   * back also resets to default. There is no "zoom into the bubble"
+   * camera target anymore — every level just uses the full canvas.
+   */
   const { scale, tx, ty, isUserDriven } = useMemo(() => {
     if (userCamera) {
       return {
@@ -242,27 +349,44 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         isUserDriven: true,
       };
     }
-    if (!cameraTarget) {
-      return { scale: 1, tx: 0, ty: 0, isUserDriven: false };
-    }
-    const s = Math.min(CANVAS_W, CANVAS_H) / (cameraTarget.r * 2.9);
-    return {
-      scale: s,
-      tx: CANVAS_W / 2 - cameraTarget.cx * s,
-      ty: CANVAS_H / 2 - cameraTarget.cy * s,
-      isUserDriven: false,
-    };
-  }, [cameraTarget, userCamera]);
+    return { scale: 1, tx: 0, ty: 0, isUserDriven: false };
+  }, [userCamera]);
 
   const popLevel = useCallback(() => {
     setUserCamera(null);
     setFocusPath((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
   }, []);
 
+  const navigateMilestone = useCallback(
+    (milestoneId: string) => {
+      if (!focusedCompany || !focusedGoal || !focusedProject) return;
+      setUserCamera(null);
+      setFocusPath([
+        focusedCompany.id,
+        focusedGoal.bucketKey,
+        focusedProject.id,
+        milestoneId,
+      ]);
+    },
+    [focusedCompany, focusedGoal, focusedProject]
+  );
+
   const fitToAll = useCallback(() => {
     setUserCamera(null);
     setFocusPath([]);
   }, []);
+
+  // Sidebar: clicking "Atlas" while already on `/atlas` should return to the
+  // L0 companies view (Link alone does not remount, so client state would stick).
+  useEffect(() => {
+    const onReset = () => {
+      fitToAll();
+    };
+    window.addEventListener(ATLAS_RESET_TO_COMPANIES_EVENT, onReset);
+    return () => {
+      window.removeEventListener(ATLAS_RESET_TO_COMPANIES_EVENT, onReset);
+    };
+  }, [fitToAll]);
 
   const crumbs: AtlasCrumb[] = [
     {
@@ -306,7 +430,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   }
 
   // ---------------------------------------------------------------------
-  // Wheel-zoom + pointer-drag + auto-descend.
+  // Wheel-zoom + pointer-drag.
   // ---------------------------------------------------------------------
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pointerRef = useRef<{
@@ -316,7 +440,6 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     moved: boolean;
     originCam: { cx: number; cy: number; scale: number };
   } | null>(null);
-  const autoDescendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCursorSvg = useRef<{ x: number; y: number } | null>(null);
   const wheelTargetRef = useRef<UserCamera | null>(null);
   const wheelIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -361,86 +484,6 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     []
   );
 
-  const runAutoDescend = useCallback(() => {
-    const cursor = lastCursorSvg.current;
-    if (!cursor) return;
-    const focusScale = cameraTarget
-      ? Math.min(CANVAS_W, CANVAS_H) / (cameraTarget.r * 2.9)
-      : 1;
-    if (scale < focusScale * 1.6) return;
-
-    const currentLevel = focusPath.length;
-
-    if (currentLevel === 0) {
-      const hit = companies.find(
-        (c) => dist(c.cx, c.cy, cursor.x, cursor.y) <= c.r
-      );
-      if (hit) {
-        setFocusPath([hit.id]);
-        setUserCamera(null);
-      }
-      return;
-    }
-
-    if (currentLevel === 1 && inner && focusedCompany) {
-      const hitGoal = inner.goals.find(
-        (g) => dist(g.cx, g.cy, cursor.x, cursor.y) <= g.r
-      );
-      if (hitGoal) {
-        setFocusPath([focusedCompany.id, hitGoal.bucketKey]);
-        setUserCamera(null);
-      }
-      return;
-    }
-
-    if (currentLevel === 2 && inner && focusedCompany && focusedGoal) {
-      const hitProject = inner.projects
-        .filter((p) => p.bucketKey === focusedGoal.bucketKey)
-        .find((p) => dist(p.cx, p.cy, cursor.x, cursor.y) <= p.r);
-      if (hitProject) {
-        setFocusPath([
-          focusedCompany.id,
-          focusedGoal.bucketKey,
-          hitProject.id,
-        ]);
-        setUserCamera(null);
-      }
-      return;
-    }
-
-    if (currentLevel === 3 && focusedProject && focusedCompany && focusedGoal) {
-      const laid = positionMilestones(focusedProject);
-      const hitMilestone = laid.find(
-        (m) => dist(m.cx, m.cy, cursor.x, cursor.y) <= m.r
-      );
-      if (hitMilestone) {
-        setFocusPath([
-          focusedCompany.id,
-          focusedGoal.bucketKey,
-          focusedProject.id,
-          hitMilestone.id,
-        ]);
-        setUserCamera(null);
-      }
-    }
-  }, [
-    cameraTarget,
-    companies,
-    focusedCompany,
-    focusedGoal,
-    focusedProject,
-    focusPath,
-    inner,
-    scale,
-  ]);
-
-  const scheduleAutoDescend = useCallback(() => {
-    if (autoDescendTimer.current) clearTimeout(autoDescendTimer.current);
-    autoDescendTimer.current = setTimeout(() => {
-      runAutoDescend();
-    }, 220);
-  }, [runAutoDescend]);
-
   const handleWheel = useCallback(
     (e: ReactWheelEvent<SVGSVGElement>) => {
       e.stopPropagation();
@@ -472,28 +515,6 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       );
       if (nextScale === baseScale) return;
 
-      // Company (goals) view only: scroll-zoom out past the "natural" framing
-      // for this company returns to the full portfolio.
-      if (
-        focusPath.length === 1 &&
-        e.deltaY > 0 &&
-        focusedCompany
-      ) {
-        const naturalScale =
-          Math.min(CANVAS_W, CANVAS_H) / (focusedCompany.r * 2.9);
-        if (nextScale < naturalScale * ZOOM_OUT_TO_PORTFOLIO_FRAC) {
-          if (wheelIdleTimer.current) {
-            clearTimeout(wheelIdleTimer.current);
-            wheelIdleTimer.current = null;
-          }
-          wheelTargetRef.current = null;
-          setIsWheelZooming(false);
-          setUserCamera(null);
-          setFocusPath([]);
-          return;
-        }
-      }
-
       const newTx = baseTx + (baseScale - nextScale) * cursor.x;
       const newTy = baseTy + (baseScale - nextScale) * cursor.y;
       const nextTarget: UserCamera = {
@@ -510,18 +531,8 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         wheelTargetRef.current = null;
         setIsWheelZooming(false);
       }, 220);
-
-      scheduleAutoDescend();
     },
-    [
-      clientToSvgWithCamera,
-      focusPath,
-      focusedCompany,
-      scale,
-      scheduleAutoDescend,
-      tx,
-      ty,
-    ]
+    [clientToSvgWithCamera, scale, tx, ty]
   );
 
   const handlePointerDown = useCallback(
@@ -577,13 +588,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       const vbDy = (dy / visH) * CANVAS_H;
       const nextCx = state.originCam.cx - vbDx / state.originCam.scale;
       const nextCy = state.originCam.cy - vbDy / state.originCam.scale;
-      setUserCamera({
+      setClampedUserCamera({
         cx: nextCx,
         cy: nextCy,
         scale: state.originCam.scale,
       });
     },
-    []
+    [setClampedUserCamera]
   );
 
   const handlePointerUp = useCallback(
@@ -598,6 +609,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         /* releasePointerCapture can throw if the capture was lost */
       }
       if (!wasMoved) {
+        // Empty-canvas click pops one level (intuitive "back" gesture).
         popLevel();
       }
     },
@@ -606,11 +618,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
 
   useEffect(() => {
     return () => {
-      if (autoDescendTimer.current) clearTimeout(autoDescendTimer.current);
       if (wheelIdleTimer.current) clearTimeout(wheelIdleTimer.current);
     };
   }, []);
 
+  // When the focus path changes (any drill or pop), drop any in-flight
+  // wheel-zoom smoothing AND clear hover-freeze so the new level starts
+  // fresh at the canvas-fit camera.
   useEffect(() => {
     if (wheelIdleTimer.current) {
       clearTimeout(wheelIdleTimer.current);
@@ -627,6 +641,38 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     }
   }, [focusPath]);
 
+  /** Clear the status popover whenever focus depth changes — drilling in/out
+   *  past a goal or project would otherwise leave a popover anchored to a
+   *  bubble that no longer matches the visible level. */
+  useEffect(() => {
+    setStatusPopover(null);
+  }, [focusPath]);
+
+  const handleGoalStatusClick = useCallback(
+    (bucketKey: string, rect: { left: number; top: number; width: number; height: number }) => {
+      setStatusPopover({ kind: "goal", bucketKey, anchorRect: rect });
+    },
+    []
+  );
+
+  const handleProjectStatusClick = useCallback(
+    (
+      projectId: string,
+      milestoneId: string,
+      rect: { left: number; top: number; width: number; height: number }
+    ) => {
+      setStatusPopover({ kind: "project", projectId, milestoneId, anchorRect: rect });
+    },
+    []
+  );
+
+  const closeStatusPopover = useCallback(() => {
+    setStatusPopover(null);
+  }, []);
+
+  // React attaches wheel handlers as passive by default. Attach a native
+  // non-passive wheel handler so wheel-zooming over the Atlas never scrolls
+  // the page/ancestor container while still letting our camera update.
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -637,7 +683,14 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     return () => svg.removeEventListener("wheel", onNativeWheel);
   }, []);
 
+  // ---------------------------------------------------------------------
   // Keyboard navigation.
+  //   Esc              → fully reset to the portfolio overview.
+  //   ArrowUp          → pop one level.
+  //   ArrowLeft/Right  → cycle siblings (wraps) except on milestones: first
+  //                      to last in path order, no wrap.
+  //   ArrowDown        → descend into the first sibling one level below.
+  // ---------------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -699,7 +752,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           focusedGoal &&
           focusedProject
         ) {
-          const siblings = focusedGoal.projects.filter((p) => !p.isMirror);
+          const siblings = focusedGoalProjects;
           const idx = siblings.findIndex((p) => p.id === focusedProject.id);
           if (idx < 0 || siblings.length === 0) return;
           const nextIdx = (idx + dir + siblings.length) % siblings.length;
@@ -720,10 +773,14 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           focusedProject &&
           focusedMilestoneLaid
         ) {
-          const laid = positionMilestones(focusedProject);
+          const laid = positionMilestones(focusedProject, asOf);
           const idx = laid.findIndex((m) => m.id === focusedMilestoneLaid.id);
           if (idx < 0 || laid.length === 0) return;
-          const nextIdx = (idx + dir + laid.length) % laid.length;
+          const nextIdx = idx + dir;
+          if (nextIdx < 0 || nextIdx >= laid.length) {
+            e.preventDefault();
+            return;
+          }
           const next = laid[nextIdx]!;
           e.preventDefault();
           setUserCamera(null);
@@ -754,10 +811,8 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           setFocusPath([focusedCompany.id, first.bucketKey]);
           return;
         }
-        if (focusPath.length === 2 && focusedCompany && focusedGoal && inner) {
-          const first = inner.projects.find(
-            (p) => p.bucketKey === focusedGoal.bucketKey
-          );
+        if (focusPath.length === 2 && focusedCompany && focusedGoal) {
+          const first = focusedGoalProjects[0];
           if (!first) return;
           e.preventDefault();
           setUserCamera(null);
@@ -770,7 +825,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           focusedGoal &&
           focusedProject
         ) {
-          const laid = positionMilestones(focusedProject);
+          const laid = positionMilestones(focusedProject, asOf);
           const first = laid[0];
           if (!first) return;
           e.preventDefault();
@@ -788,12 +843,14 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    asOf,
     companies,
     focusPath,
     focusedCompany,
     focusedGoal,
     focusedProject,
     focusedMilestoneLaid,
+    focusedGoalProjects,
     inner,
     popLevel,
   ]);
@@ -804,7 +861,11 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       (g) => g.id === focusedProject.project.goalId
     );
     const owner = peopleById.get(focusedProject.project.ownerId);
+    const milestonePathOrder = positionMilestones(focusedProject, asOf).map(
+      (m) => m.milestone
+    );
     return {
+      asOf,
       milestone: focusedMilestoneLaid.milestone,
       project: focusedProject.project,
       owner,
@@ -816,13 +877,17 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       companyLogoPath: focusedCompany.company.logoPath ?? "",
       people,
       siblingMilestones: focusedProject.project.milestones,
+      milestonePathOrder,
+      onNavigateMilestone: navigateMilestone,
     };
   }, [
+    asOf,
     focusedMilestoneLaid,
     focusedProject,
     focusedCompany,
     peopleById,
     people,
+    navigateMilestone,
   ]);
 
   return (
@@ -854,6 +919,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           transform-box: fill-box;
           transform-origin: center;
         }
+        @keyframes atlas-level-in {
+          0%   { opacity: 0; }
+          100% { opacity: 1; }
+        }
+        .atlas-level-in {
+          animation: atlas-level-in 600ms ease both;
+        }
       `}</style>
 
       <div className="atlas-surface pointer-events-none absolute inset-0" />
@@ -869,14 +941,16 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         </h1>
       </div>
 
-      {/* Grouping toggle (top, centered) */}
-      <div className="pointer-events-auto absolute left-1/2 top-6 z-10 -translate-x-1/2">
-        <AtlasGroupingToggle
-          value={grouping}
-          onChange={setGrouping}
-          disabled={!focusedCompany}
-        />
-      </div>
+      {/* Grouping toggle — goals (L1) and projects (L2) */}
+      {level === 1 || level === 2 ? (
+        <div className="pointer-events-auto absolute left-1/2 top-6 z-10 -translate-x-1/2">
+          <AtlasGroupingToggle
+            value={grouping}
+            onChange={setGrouping}
+            disabled={!focusedCompany}
+          />
+        </div>
+      ) : null}
 
       {/* Breadcrumbs (top-right) */}
       <div className="pointer-events-auto absolute right-6 top-6 z-10 max-w-[40vw] overflow-hidden">
@@ -916,97 +990,222 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
             transformOrigin: "0 0",
           }}
         >
-          {companies.map((company) => {
-            const isFocused = focusedCompany?.id === company.id;
-            const isDimmed = Boolean(focusedCompany) && !isFocused;
-            const drift = driftDescriptorFor(company.id, 1);
-            const beginOverride = driftBeginOverrideSecRef.current[company.id];
-            const beginForAnim =
-              beginOverride != null
-                ? `-${beginOverride.toFixed(4)}s`
-                : drift.begin;
-            const hoverThis =
-              level === 0 && driftHoverFreeze?.id === company.id;
-            const showDriftAnim = level === 0 && !hoverThis;
-            const driftTransform = hoverThis
-              ? `translate(${driftHoverFreeze!.tx} ${driftHoverFreeze!.ty})`
-              : undefined;
+          {/* Level 0 — Companies in the ether. */}
+          {level === 0
+            ? companies.map((company) => {
+                const drift = driftDescriptorFor(company.id, 1);
+                const beginOverride =
+                  driftBeginOverrideSecRef.current[company.id];
+                const beginForAnim =
+                  beginOverride != null
+                    ? `-${beginOverride.toFixed(4)}s`
+                    : drift.begin;
+                const hoverThis = driftHoverFreeze?.id === company.id;
+                const showDriftAnim = !hoverThis;
+                const driftTransform = hoverThis
+                  ? `translate(${driftHoverFreeze!.tx} ${driftHoverFreeze!.ty})`
+                  : undefined;
 
-            return (
-              <g key={company.id}>
-                <g
-                  transform={driftTransform}
-                  onPointerEnter={(e) => {
-                    if (level !== 0) return;
-                    if (isDimmed) return;
-                    const g = e.currentTarget as SVGGElement;
-                    const anim = g.querySelector("animateTransform");
-                    if (!anim) return;
-                    const resumeT = (anim as SVGAnimationElement).getCurrentTime();
-                    if (!Number.isFinite(resumeT)) return;
-                    const { tx, ty } = readDriftTranslate(g);
-                    setDriftHoverFreeze({ id: company.id, tx, ty, resumeT });
-                  }}
-                  onPointerLeave={() => {
-                    setDriftHoverFreeze((prev) => {
-                      if (prev?.id === company.id) {
-                        driftBeginOverrideSecRef.current[company.id] =
-                          prev.resumeT;
-                        return null;
-                      }
-                      return prev;
-                    });
-                  }}
-                >
-                  {showDriftAnim ? (
-                    <animateTransform
-                      key={`${company.id}-drift-${beginForAnim}`}
-                      attributeName="transform"
-                      attributeType="XML"
-                      type="translate"
-                      values={drift.values}
-                      keyTimes="0;0.25;0.5;0.75;1"
-                      calcMode="spline"
-                      keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
-                      dur={drift.dur}
-                      begin={beginForAnim}
-                      repeatCount="indefinite"
-                      additive="sum"
-                    />
-                  ) : null}
-                  <AtlasCompany
-                    company={company}
-                    isFocused={isFocused}
-                    isDimmed={isDimmed}
-                    showLabel={level === 0}
-                    scale={scale}
-                    onClick={() => {
-                      setUserCamera(null);
-                      setFocusPath([company.id]);
-                    }}
-                  />
-                </g>
+                return (
+                  <g key={company.id} className="atlas-level-in">
+                    <g
+                      transform={driftTransform}
+                      onPointerEnter={(e) => {
+                        const g = e.currentTarget as SVGGElement;
+                        const anim = g.querySelector("animateTransform");
+                        if (!anim) return;
+                        const resumeT = (
+                          anim as SVGAnimationElement
+                        ).getCurrentTime();
+                        if (!Number.isFinite(resumeT)) return;
+                        const { tx, ty } = readDriftTranslate(g);
+                        setDriftHoverFreeze({
+                          id: company.id,
+                          tx,
+                          ty,
+                          resumeT,
+                        });
+                      }}
+                      onPointerLeave={() => {
+                        setDriftHoverFreeze((prev) => {
+                          if (prev?.id === company.id) {
+                            driftBeginOverrideSecRef.current[company.id] =
+                              prev.resumeT;
+                            return null;
+                          }
+                          return prev;
+                        });
+                      }}
+                    >
+                      {showDriftAnim ? (
+                        <animateTransform
+                          key={`${company.id}-drift-${beginForAnim}`}
+                          attributeName="transform"
+                          attributeType="XML"
+                          type="translate"
+                          values={drift.values}
+                          keyTimes="0;0.25;0.5;0.75;1"
+                          calcMode="spline"
+                          keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
+                          dur={drift.dur}
+                          begin={beginForAnim}
+                          repeatCount="indefinite"
+                          additive="sum"
+                        />
+                      ) : null}
+                      <AtlasCompany
+                        company={company}
+                        isFocused={false}
+                        isDimmed={false}
+                        showLabel
+                        scale={scale}
+                        asOfYmd={asOfYmd}
+                        onClick={() => {
+                          setUserCamera(null);
+                          setFocusPath([company.id]);
+                        }}
+                      />
+                    </g>
+                  </g>
+                );
+              })
+            : null}
 
-                {isFocused && inner
-                  ? renderCompanyInner({
-                      company,
-                      inner,
-                      peopleById,
-                      focusedGoal,
-                      focusedProject,
-                      focusedMilestoneLaid,
-                      level,
-                      focusPath,
-                      setFocusPath: (next) => {
-                        setUserCamera(null);
-                        setFocusPath(next);
-                      },
-                      scale,
-                    })
-                  : null}
-              </g>
-            );
-          })}
+          {/* Level 1 — Section backgrounds (only when grouped). Drawn
+              under the goals so the bubbles + their priority glows render
+              on top. Single "all" section is skipped (no chrome needed
+              when grouping is "goal"). */}
+          {level === 1 && inner && grouping !== "goal"
+            ? inner.sections.map((section) => (
+                <AtlasSectionChrome key={section.key} section={section} />
+              ))
+            : null}
+
+          {level === 2 && focusedGoal && grouping !== "goal"
+            ? projectLayoutSections.map((section) => (
+                <AtlasSectionChrome key={`p-${section.key}`} section={section} />
+              ))
+            : null}
+
+          {/* Level 1 — Goals of the focused company in the ether. */}
+          {level === 1 && inner
+            ? inner.goals.map((goal) => {
+                const owner = peopleById.get(goal.goal.ownerId);
+                const projectAssignees = projectAssigneesForGoal(goal, peopleById);
+                // Gentle drift — the placement pad keeps neighbors a hair
+                // apart, and 0.5 amplitude (≈ 5 px max) stays inside that
+                // gap so drifting bubbles never collide.
+                const drift = driftDescriptorFor(
+                  `${goal.id}:goal`,
+                  0.5
+                );
+                return (
+                  <g key={goal.id} className="atlas-level-in">
+                    <g>
+                      <animateTransform
+                        attributeName="transform"
+                        attributeType="XML"
+                        type="translate"
+                        values={drift.values}
+                        keyTimes="0;0.25;0.5;0.75;1"
+                        calcMode="spline"
+                        keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
+                        dur={drift.dur}
+                        begin={drift.begin}
+                        repeatCount="indefinite"
+                        additive="sum"
+                      />
+                      <AtlasGoal
+                        goal={goal}
+                        projectAssignees={projectAssignees}
+                        owner={owner}
+                        grouping={grouping}
+                        isFocused={false}
+                        isDimmed={false}
+                        showLabel
+                        scale={scale}
+                        asOf={asOf}
+                        onClick={() => {
+                          setUserCamera(null);
+                          setFocusPath([
+                            focusedCompany!.id,
+                            goal.bucketKey,
+                          ]);
+                        }}
+                        onStatusClick={handleGoalStatusClick}
+                      />
+                    </g>
+                  </g>
+                );
+              })
+            : null}
+
+          {/* Level 2 — Projects of the focused goal in the ether. */}
+          {level === 2 && focusedGoal
+            ? focusedGoalProjects.map((project) => {
+                const owner = peopleById.get(project.project.ownerId);
+                const drift = driftDescriptorFor(
+                  `${project.id}:project`,
+                  0.5
+                );
+                return (
+                  <g key={project.id} className="atlas-level-in">
+                    <g>
+                      <animateTransform
+                        attributeName="transform"
+                        attributeType="XML"
+                        type="translate"
+                        values={drift.values}
+                        keyTimes="0;0.25;0.5;0.75;1"
+                        calcMode="spline"
+                        keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
+                        dur={drift.dur}
+                        begin={drift.begin}
+                        repeatCount="indefinite"
+                        additive="sum"
+                      />
+                      <AtlasProject
+                        project={project}
+                        owner={owner}
+                        showLabel
+                        isFocused={false}
+                        isDimmed={false}
+                        scale={scale}
+                        asOfYmd={asOfYmd}
+                        asOf={asOf}
+                        onClick={() => {
+                          setUserCamera(null);
+                          setFocusPath([
+                            focusedCompany!.id,
+                            focusedGoal.bucketKey,
+                            project.id,
+                          ]);
+                        }}
+                        onMilestoneStatusClick={handleProjectStatusClick}
+                      />
+                    </g>
+                  </g>
+                );
+              })
+            : null}
+
+          {/* Level 3+ — Milestones of the focused project along a wandering path. */}
+          {level >= 3 && focusedProject
+            ? renderMilestonePath({
+                asOf,
+                project: focusedProject,
+                focusedMilestoneLaid,
+                level,
+                scale,
+                onSelect: (milestoneId) =>
+                  setFocusPath([
+                    focusedCompany!.id,
+                    focusedGoal!.bucketKey,
+                    focusedProject.id,
+                    milestoneId,
+                  ]),
+              })
+            : null}
         </g>
       </svg>
 
@@ -1014,7 +1213,9 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       <div className="pointer-events-auto absolute right-6 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1">
         <button
           type="button"
-          onClick={() => zoomAroundCenter(1.3, { scale, tx, ty }, setUserCamera)}
+          onClick={() =>
+            zoomAroundCenter(ZOOM_BUTTON_FACTOR, { scale, tx, ty }, setClampedUserCamera)
+          }
           aria-label="Zoom in"
           title="Zoom in"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
@@ -1023,7 +1224,9 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         </button>
         <button
           type="button"
-          onClick={() => zoomAroundCenter(1 / 1.3, { scale, tx, ty }, setUserCamera)}
+          onClick={() =>
+            zoomAroundCenter(1 / ZOOM_BUTTON_FACTOR, { scale, tx, ty }, setClampedUserCamera)
+          }
           aria-label="Zoom out"
           title="Zoom out"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
@@ -1047,6 +1250,61 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           onClose={popLevel}
         />
       ) : null}
+
+      {/* Goal status popover (L1): mirrors the Roadmap goal popover. */}
+      {statusPopover?.kind === "goal" && focusedCompany
+        ? (() => {
+            const goal = focusedCompany.company.goals.find(
+              (g) => g.id === statusPopover.bucketKey
+            );
+            if (!goal) return null;
+            return (
+              <AtlasGoalStatusPopoverHost
+                goal={goal}
+                people={people}
+                peopleById={peopleById}
+                anchorRect={statusPopover.anchorRect}
+                onClose={closeStatusPopover}
+                onOpenProjectInAtlas={(projectId) => {
+                  closeStatusPopover();
+                  setUserCamera(null);
+                  setFocusPath([
+                    focusedCompany.id,
+                    goal.id,
+                    projectId,
+                  ]);
+                }}
+              />
+            );
+          })()
+        : null}
+
+      {/* Project status popover (L2): mirrors the Roadmap project Slack
+          thread popover for the project's next pending milestone. Uses the
+          *focused* goal as the popover's parent context so mirrored projects
+          (whose `project.goalId` may live in another company) still pick up
+          the right Slack channel — matches the Roadmap, where the goal
+          section the row is rendered under supplies channel context. */}
+      {statusPopover?.kind === "project" && focusedCompany && focusedGoal
+        ? (() => {
+            const laidProject = focusedGoalProjects.find(
+              (p) => p.id === statusPopover.projectId
+            );
+            const project = laidProject?.project;
+            if (!project) return null;
+            const owner = peopleById.get(project.ownerId);
+            return (
+              <AtlasProjectStatusPopoverHost
+                project={project}
+                parentGoal={focusedGoal.goal}
+                people={people}
+                owner={owner}
+                anchorRect={statusPopover.anchorRect}
+                onClose={closeStatusPopover}
+              />
+            );
+          })()
+        : null}
     </div>
   );
 }
@@ -1058,7 +1316,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
 function zoomAroundCenter(
   factor: number,
   current: { scale: number; tx: number; ty: number },
-  setUserCamera: (next: UserCamera) => void
+  applyCamera: (next: UserCamera) => void
 ): void {
   const nextScale = Math.max(
     MIN_CAMERA_SCALE,
@@ -1067,186 +1325,7 @@ function zoomAroundCenter(
   if (nextScale === current.scale) return;
   const centerX = (CANVAS_W / 2 - current.tx) / current.scale;
   const centerY = (CANVAS_H / 2 - current.ty) / current.scale;
-  setUserCamera({ cx: centerX, cy: centerY, scale: nextScale });
-}
-
-/**
- * Render one focused company's inner scene: goal bubbles in the ether
- * (level 1+), projects of the focused goal in the ether (level 2+), and
- * the wandering milestone path on the focused project (level 3+).
- */
-function renderCompanyInner(args: {
-  company: LaidCompany;
-  inner: { goals: LaidGoal[]; projects: LaidProject[] };
-  peopleById: Map<string, Person>;
-  focusedGoal: LaidGoal | undefined;
-  focusedProject: LaidProject | undefined;
-  focusedMilestoneLaid: LaidMilestone | undefined;
-  level: number;
-  focusPath: FocusPath;
-  setFocusPath: (next: FocusPath) => void;
-  scale: number;
-}) {
-  const {
-    company,
-    inner,
-    peopleById,
-    focusedGoal,
-    focusedProject,
-    focusedMilestoneLaid,
-    level,
-    focusPath,
-    setFocusPath,
-    scale,
-  } = args;
-
-  const showGoalLabels = level === 1;
-
-  const focusLogoPath = company.company.logoPath?.trim() ?? "";
-  const focusCenterLogoR = company.r * 0.18;
-
-  return (
-    <g>
-      {/* Soft watermark of the company logo at the center, only at level 1
-          (less obtrusive than the previous layout's behind-the-ring hero). */}
-      {level === 1 && focusLogoPath ? (
-        <g pointerEvents="none">
-          <defs>
-            <clipPath id={`atlas-focus-logo-${company.id}`}>
-              <circle cx={company.cx} cy={company.cy} r={focusCenterLogoR} />
-            </clipPath>
-          </defs>
-          <image
-            href={focusLogoPath}
-            x={company.cx - focusCenterLogoR}
-            y={company.cy - focusCenterLogoR}
-            width={focusCenterLogoR * 2}
-            height={focusCenterLogoR * 2}
-            clipPath={`url(#atlas-focus-logo-${company.id})`}
-            preserveAspectRatio="xMidYMid slice"
-            opacity={0.22}
-          />
-        </g>
-      ) : null}
-
-      {inner.goals.map((goal) => {
-        const isGoalFocused = focusedGoal?.bucketKey === goal.bucketKey;
-        const isGoalDimmed = Boolean(focusedGoal) && !isGoalFocused;
-        const owner = peopleById.get(goal.goal.ownerId);
-        const showThisLabel = showGoalLabels;
-
-        const drift = driftDescriptorFor(`${company.id}:${goal.id}`, 0.5);
-        const showDriftAnim = level === 1;
-
-        const goalNode = (
-          <AtlasGoal
-            goal={goal}
-            owner={owner}
-            isFocused={isGoalFocused}
-            isDimmed={isGoalDimmed}
-            showLabel={showThisLabel}
-            scale={scale}
-            onClick={() => setFocusPath([company.id, goal.bucketKey])}
-          />
-        );
-
-        return (
-          <g key={goal.id}>
-            <g>
-              {showDriftAnim ? (
-                <animateTransform
-                  key={`${goal.id}-drift`}
-                  attributeName="transform"
-                  attributeType="XML"
-                  type="translate"
-                  values={drift.values}
-                  keyTimes="0;0.25;0.5;0.75;1"
-                  calcMode="spline"
-                  keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
-                  dur={drift.dur}
-                  begin={drift.begin}
-                  repeatCount="indefinite"
-                  additive="sum"
-                />
-              ) : null}
-              {goalNode}
-            </g>
-          </g>
-        );
-      })}
-
-      {/* Projects (level 2+). Only the focused goal's projects render. */}
-      {level >= 2 && focusedGoal
-        ? inner.projects
-            .filter((p) => p.bucketKey === focusedGoal.bucketKey)
-            .map((project) => {
-              const owner = peopleById.get(project.project.ownerId);
-              const isProjectFocused = focusedProject?.id === project.id;
-              const isProjectDimmed = level >= 3 && !isProjectFocused;
-              const showProjectLabel = level === 2;
-              const drift = driftDescriptorFor(
-                `${focusedGoal.id}:${project.id}`,
-                0.25
-              );
-              const showProjectDrift = level === 2;
-
-              return (
-                <g key={project.id}>
-                  <g>
-                    {showProjectDrift ? (
-                      <animateTransform
-                        key={`${project.id}-drift`}
-                        attributeName="transform"
-                        attributeType="XML"
-                        type="translate"
-                        values={drift.values}
-                        keyTimes="0;0.25;0.5;0.75;1"
-                        calcMode="spline"
-                        keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
-                        dur={drift.dur}
-                        begin={drift.begin}
-                        repeatCount="indefinite"
-                        additive="sum"
-                      />
-                    ) : null}
-                    <AtlasProject
-                      project={project}
-                      owner={owner}
-                      showLabel={showProjectLabel}
-                      isFocused={isProjectFocused}
-                      isDimmed={isProjectDimmed}
-                      scale={scale}
-                      onClick={() => {
-                        setFocusPath([
-                          company.id,
-                          focusedGoal.bucketKey,
-                          project.id,
-                        ]);
-                      }}
-                    />
-                  </g>
-
-                  {isProjectFocused && level >= 3
-                    ? renderMilestonePath({
-                        project,
-                        focusedMilestoneLaid,
-                        level,
-                        scale,
-                        onSelect: (milestoneId) =>
-                          setFocusPath([
-                            company.id,
-                            focusPath[1]!,
-                            project.id,
-                            milestoneId,
-                          ]),
-                      })
-                    : null}
-                </g>
-              );
-            })
-        : null}
-    </g>
-  );
+  applyCamera({ cx: centerX, cy: centerY, scale: nextScale });
 }
 
 /**
@@ -1254,48 +1333,34 @@ function renderCompanyInner(args: {
  * project: a smooth Catmull-Rom-derived Bézier through the milestone
  * centers, plus a TODAY marker interpolated between the earliest and
  * latest dated milestones.
- *
- * Milestones themselves are positioned via `positionMilestones` (which sorts
- * chronologically) and rendered with `AtlasMilestone`. The path + today
- * tick live in this parent so the geometry helper is shared (no duplicated
- * constants) and so the decoration can be hidden with a single toggle if
- * we ever want to.
  */
 function renderMilestonePath(args: {
+  asOf: Date;
   project: LaidProject;
   focusedMilestoneLaid: LaidMilestone | undefined;
   level: number;
   scale: number;
   onSelect: (milestoneId: string) => void;
 }): React.ReactNode {
-  const { project, focusedMilestoneLaid, level, scale, onSelect } = args;
+  const { asOf, project, focusedMilestoneLaid, level, scale, onSelect } = args;
 
-  const laidMilestones = positionMilestones(project);
-  const geom = getMilestonePathGeometry(project);
+  const laidMilestones = positionMilestones(project, asOf);
+  const geom = getMilestonePathGeometry(project, asOf);
 
-  // Build a smooth path (Catmull-Rom → cubic Bézier) through the milestone
-  // centers. With ≤1 point there's nothing to connect.
   const pts = geom.points;
   const arcD = pts.length >= 2 ? buildCatmullRomPath(pts) : "";
 
-  // Today marker: linearly interpolate today between firstYmd and lastYmd
-  // (in days), then map that fraction onto the polyline through the
-  // milestone centers (since milestones sit at evenly-spaced t = i/(n-1)).
   const todayTick = (() => {
     if (geom.datedCount < 2 || !geom.firstYmd || !geom.lastYmd) return null;
-    const first = calendarDaysFromTodayYmd(geom.firstYmd);
-    const last = calendarDaysFromTodayYmd(geom.lastYmd);
+    const first = calendarDaysFromTodayYmd(geom.firstYmd, asOf);
+    const last = calendarDaysFromTodayYmd(geom.lastYmd, asOf);
     if (first == null || last == null) return null;
     const span = last - first;
     if (span <= 0) return null;
-    // tDate is the chronological fraction TODAY occupies between first and
-    // last dated milestones.
     const tDate = -first / span;
     if (tDate < -0.05 || tDate > 1.05) return null;
     const clamped = Math.max(0, Math.min(1, tDate));
 
-    // Map onto the polyline. Dated milestones live at indexes
-    // [0 ... datedCount - 1]; map the clamped fraction onto those slots.
     const tIdx = clamped * (geom.datedCount - 1);
     const iLow = Math.floor(tIdx);
     const iHigh = Math.min(geom.datedCount - 1, iLow + 1);
@@ -1304,7 +1369,6 @@ function renderMilestonePath(args: {
     const b = pts[iHigh]!;
     const x = a.x + (b.x - a.x) * frac;
     const y = a.y + (b.y - a.y) * frac;
-    // Tangent (for the tick orientation) — perpendicular to the segment.
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -1316,32 +1380,30 @@ function renderMilestonePath(args: {
   const inv = 1 / Math.max(scale, 0.0001);
 
   return (
-    <>
-      {/* Connector path — soft dashed guide line under the milestones. */}
+    <g className="atlas-level-in">
       {arcD ? (
         <path
           d={arcD}
           fill="none"
-          stroke="#3f3f46"
-          strokeOpacity={0.65}
-          strokeWidth={1.2}
-          strokeDasharray="4 5"
+          stroke="#52525b"
+          strokeOpacity={0.7}
+          strokeWidth={1.4}
+          strokeDasharray="5 6"
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
         />
       ) : null}
 
-      {/* TODAY tick + label. */}
       {todayTick ? (
         <g pointerEvents="none">
           <line
-            x1={todayTick.tx - todayTick.nx * project.r * 0.05}
-            y1={todayTick.ty - todayTick.ny * project.r * 0.05}
-            x2={todayTick.tx + todayTick.nx * project.r * 0.12}
-            y2={todayTick.ty + todayTick.ny * project.r * 0.12}
+            x1={todayTick.tx - todayTick.nx * 14}
+            y1={todayTick.ty - todayTick.ny * 14}
+            x2={todayTick.tx + todayTick.nx * 32}
+            y2={todayTick.ty + todayTick.ny * 32}
             stroke="#10b981"
-            strokeOpacity={0.9}
-            strokeWidth={2}
+            strokeOpacity={0.92}
+            strokeWidth={2.5}
             strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
           />
@@ -1349,20 +1411,24 @@ function renderMilestonePath(args: {
             transform={`translate(${todayTick.tx} ${todayTick.ty}) scale(${inv}) translate(${-todayTick.tx} ${-todayTick.ty})`}
           >
             <rect
-              x={todayTick.tx + todayTick.nx * 28 - 18}
-              y={todayTick.ty + todayTick.ny * 28 - 7}
-              width={36}
-              height={12}
-              rx={2}
+              x={todayTick.tx + todayTick.nx * 50 - 22}
+              y={todayTick.ty + todayTick.ny * 50 - 9}
+              width={44}
+              height={16}
+              rx={3}
               fill="#09090b"
-              fillOpacity={0.85}
+              fillOpacity={0.9}
+              stroke="#10b981"
+              strokeOpacity={0.6}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
             />
             <text
-              x={todayTick.tx + todayTick.nx * 28}
-              y={todayTick.ty + todayTick.ny * 28 + 2}
+              x={todayTick.tx + todayTick.nx * 50}
+              y={todayTick.ty + todayTick.ny * 50 + 3}
               textAnchor="middle"
-              fontSize={8}
-              fontWeight={600}
+              fontSize={9}
+              fontWeight={700}
               letterSpacing={1.4}
               fill="#10b981"
             >
@@ -1375,22 +1441,100 @@ function renderMilestonePath(args: {
       {laidMilestones.map((m, idx) => {
         const isMFocused = focusedMilestoneLaid?.id === m.id;
         const isMDimmed = level === 4 && !isMFocused;
-        const labelSide: "above" | "below" = idx % 2 === 0 ? "above" : "below";
         return (
           <AtlasMilestone
             key={m.id}
             milestone={m}
             sequence={idx + 1}
-            showLabel={level === 3 || (level === 4 && isMFocused)}
+            showLabel
             isFocused={isMFocused}
             isDimmed={isMDimmed}
             scale={scale}
-            labelSide={labelSide}
+            asOf={asOf}
             onClick={() => onSelect(m.id)}
           />
         );
       })}
-    </>
+    </g>
+  );
+}
+
+/**
+ * Render one grouping section (L1 goals or L2 projects) — soft tinted
+ * rounded rect + header pill. Layout is computed by `atlas-layout`.
+ */
+function AtlasSectionChrome({ section }: { section: AtlasSection }) {
+  const isEmpty = section.goalCount === 0;
+  const fillOpacity = isEmpty ? 0.025 : 0.05;
+  const strokeOpacity = isEmpty ? 0.18 : 0.32;
+
+  // Header pill — small chip top-center of the section.
+  const labelText = section.label;
+  const countText = section.goalCount > 0 ? ` · ${section.goalCount}` : "";
+  const fontSize = 10;
+  const charW = fontSize * 0.62;
+  const padX = 10;
+  const padY = 5;
+  const textW = (labelText.length + countText.length) * charW;
+  const pillW = textW + padX * 2;
+  const pillH = fontSize + padY * 2;
+  const pillX = section.x + section.width / 2 - pillW / 2;
+  const pillY = section.y + 8;
+
+  return (
+    <g pointerEvents="none">
+      <rect
+        x={section.x}
+        y={section.y}
+        width={section.width}
+        height={section.height}
+        rx={18}
+        fill={section.color}
+        fillOpacity={fillOpacity}
+        stroke={section.color}
+        strokeOpacity={strokeOpacity}
+        strokeWidth={1}
+        strokeDasharray="6 6"
+        vectorEffect="non-scaling-stroke"
+      />
+      {labelText ? (
+        <g>
+          <rect
+            x={pillX}
+            y={pillY}
+            width={pillW}
+            height={pillH}
+            rx={pillH / 2}
+            fill="#09090b"
+            fillOpacity={0.85}
+            stroke={section.color}
+            strokeOpacity={isEmpty ? 0.35 : 0.7}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text
+            x={section.x + section.width / 2}
+            y={pillY + pillH / 2 + 1}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={fontSize}
+            letterSpacing={1.5}
+            fontWeight={700}
+            fill={section.color}
+            opacity={isEmpty ? 0.55 : 1}
+          >
+            {labelText}
+            <tspan
+              fill="#a1a1aa"
+              fontWeight={500}
+              letterSpacing={0.5}
+            >
+              {countText}
+            </tspan>
+          </text>
+        </g>
+      ) : null}
+    </g>
   );
 }
 

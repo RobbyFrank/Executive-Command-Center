@@ -2,6 +2,7 @@ import {
   fetchSlackThreadReplies,
   type SlackChannelHistoryMessage,
 } from "@/lib/slack/threads";
+import { isHumanTeamSlackMessage } from "@/lib/slack/humanMessages";
 import { mergeMessageAuthorsForChannel } from "@/lib/slackScrapeEnrich";
 
 const DEFAULT_MAX_THREADS = 200;
@@ -77,18 +78,20 @@ export async function buildTranscriptWithThreads(
     const tr = threadResults[i]!;
     if (!tr || !tr.ok) continue;
     const forMerge: SlackChannelHistoryMessage[] = tr.messages
-      .filter((x) => x.ts)
+      .filter((x) => x.ts && isHumanTeamSlackMessage(x))
       .map((x) => ({
         ts: x.ts,
         user: x.user,
         text: x.text,
         bot_id: x.bot_id,
+        subtype: x.subtype,
         thread_ts: t.rootTs,
       }));
     mergeMessageAuthorsForChannel(messageAuthors, t.channelName, forMerge);
     for (const m of tr.messages) {
       if (!m.ts) continue;
       if (m.ts === t.rootTs) continue;
+      if (!isHumanTeamSlackMessage(m)) continue;
       const text = (m.text ?? "").replace(/\s+/g, " ").trim();
       if (!text) continue;
       const who = m.user ?? m.bot_id ?? "?";

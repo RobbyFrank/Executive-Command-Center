@@ -58,19 +58,9 @@ import { toast } from "sonner";
 import { useTrackerExpandBulk } from "./tracker-expand-context";
 import { WarningsBadge } from "./WarningsBadge";
 import { getGoalHeaderWarnings } from "@/lib/tracker-project-warnings";
-import type {
-  GoalChannelAiContext,
-  MilestoneLikelihoodRiskLevel,
-  SlackMemberRosterHint,
-} from "@/server/actions/slack";
 import { SlackChannelPicker } from "./SlackChannelPicker";
 import { GoalLikelihoodInline } from "./GoalLikelihoodInline";
-import type { GoalLikelihoodInlineOwner } from "./GoalLikelihoodInline";
-import {
-  GoalSlackPopover,
-  type GoalSlackPopoverProjectRow,
-  type GoalSlackPopoverUnscoredReason,
-} from "./GoalSlackPopover";
+import { GoalSlackPopover } from "./GoalSlackPopover";
 import { SlackChannelMessageDialog } from "./SlackChannelMessageDialog";
 import {
   requestOpenProjectSlackThread,
@@ -78,8 +68,11 @@ import {
 } from "@/lib/openProjectSlackThread";
 import { useGoalLikelihoodRollup } from "@/hooks/useGoalLikelihoodRollup";
 import { useGoalOneLiner } from "@/hooks/useGoalOneLiner";
-import { getNextPendingMilestone } from "@/lib/next-milestone";
-import { isValidHttpUrl } from "@/lib/httpUrl";
+import {
+  buildGoalPopoverProjectRows,
+  buildGoalPopoverProjectOwners,
+  buildGoalPopoverChannelAiContext,
+} from "@/lib/goalPopoverData";
 
 import { CollapsePanel } from "./CollapsePanel";
 import { ROADMAP_STICKY_GOAL_ROW_TOP_NUDGE_PX } from "@/lib/tracker-sticky-layout";
@@ -538,237 +531,54 @@ export function GoalSection({
   /**
    * Rows for the goal popover drill-down — **one per project**, including projects without
    * milestones, completed projects, blocked projects, and projects whose next milestone hasn't
-   * been scheduled / linked yet. Unscored rows carry a `reasonCode` + short label so the card
-   * explains why there's no on-time estimate instead of silently rendering 0%/0%.
+   * been scheduled / linked yet. Builder shared with the Atlas goal popover host so the same
+   * shape is produced wherever the popover is rendered.
    */
-  const goalPopoverProjectRows = useMemo((): GoalSlackPopoverProjectRow[] => {
-    const summariesByKey = new Map<
-      string,
-      (typeof goalLikelihoodRollup extends null ? never : NonNullable<typeof goalLikelihoodRollup>)["projectSummaries"][number]
-    >();
-    for (const s of goalLikelihoodRollup?.projectSummaries ?? []) {
-      summariesByKey.set(`${s.projectName}\u0000${s.milestoneName}`, s);
-    }
-    const rows: GoalSlackPopoverProjectRow[] = [];
-    for (const p of goal.projects) {
-      const owner = p.ownerId ? peopleById.get(p.ownerId) : undefined;
-      const ownerForRow = owner
-        ? {
-            name: owner.name,
-            profilePicturePath: owner.profilePicturePath ?? "",
-          }
-        : null;
-
-      const nextPending = getNextPendingMilestone(p.milestones);
-      const projectDone = p.status === "Done";
-      const projectBlocked = p.status === "Blocked" || p.isBlocked === true;
-
-      /** Blocked is orthogonal to assessment readiness — keep it as a note, not a reason pill. */
-      const blockerNote = projectBlocked
-        ? p.blockedByProjectName?.trim()
-          ? `Blocked by ${p.blockedByProjectName.trim()}`
-          : "Blocked"
-        : undefined;
-
-      /** Unscored explainer: what's stopping the AI from producing an estimate yet. */
-      let reasonCode: GoalSlackPopoverUnscoredReason | undefined;
-      let reasonLabel: string | undefined;
-      let milestoneName = nextPending?.name ?? "";
-
-      if (projectDone) {
-        reasonCode = "completed";
-        reasonLabel = "Completed";
-        milestoneName = "";
-      } else if (p.milestones.length === 0) {
-        reasonCode = "noMilestones";
-        reasonLabel = "No milestones";
-      } else if (!nextPending) {
-        reasonCode = "completed";
-        reasonLabel = "All milestones complete";
-        milestoneName = "";
-      } else {
-        const target = nextPending.targetDate?.trim() ?? "";
-        const hasDate = Boolean(target) && parseCalendarDateString(target) !== null;
-        const hasSlack = isValidHttpUrl((nextPending.slackUrl ?? "").trim());
-
-        if (p.status === "Idea") {
-          reasonCode = "notStarted";
-          reasonLabel = "Idea — not scheduled";
-        } else if (p.status === "Pending" && (!hasDate || !hasSlack)) {
-          reasonCode = "notStarted";
-          reasonLabel = "Not started";
-        } else if (!hasDate && !hasSlack) {
-          reasonCode = "notStarted";
-          reasonLabel = "No target date or thread";
-        } else if (!hasDate) {
-          reasonCode = "noTargetDate";
-          reasonLabel = "No target date";
-        } else if (!hasSlack) {
-          reasonCode = "noSlackThread";
-          reasonLabel = "No Slack thread";
-        }
-      }
-
-      /** Look up the cached AI assessment only when the milestone is actually assessable. */
-      const key =
-        reasonCode || !nextPending ? "" : `${p.name}\u0000${nextPending.name}`;
-      const summary = key ? summariesByKey.get(key) : undefined;
-
-      if (!reasonCode && !summary) {
-        reasonCode = "assessing";
-        reasonLabel = "Assessing…";
-      }
-
-      const scored = Boolean(summary);
-      rows.push({
-        projectId: p.id,
-        projectName: p.name,
-        milestoneName,
-        summaryLine: summary?.summaryLine ?? "",
-        likelihood: summary?.likelihood ?? 0,
-        riskLevel: summary?.riskLevel ?? "medium",
-        progressEstimate: summary?.progressEstimate ?? 0,
-        slackUrl: (nextPending?.slackUrl ?? "").trim(),
-        owner: ownerForRow,
-        scored,
-        reasonCode: scored ? undefined : reasonCode,
-        reasonLabel: scored ? undefined : reasonLabel,
-        blockerNote,
-      });
-    }
-    return rows;
-  }, [goal.projects, goalLikelihoodRollup, peopleById]);
+  const goalPopoverProjectRows = useMemo(
+    () =>
+      buildGoalPopoverProjectRows({
+        goal,
+        rollup: goalLikelihoodRollup,
+        peopleById,
+      }),
+    [goal, goalLikelihoodRollup, peopleById]
+  );
 
   /**
    * Distinct project owners under the goal, autonomy desc then name asc (header avatar stack).
-   * Enriched with each owner's worst project signal (risk desc, likelihood asc) for a colored ring.
-   * Worst signals are only present when `goalLikelihoodRollup.ready` — otherwise rings fall back to neutral.
+   * Builder shared with the Atlas goal popover host.
    */
-  const goalProjectOwners = useMemo((): GoalLikelihoodInlineOwner[] => {
-    const rollupReady = Boolean(goalLikelihoodRollup?.ready);
-    /** Map ownerId → per-project rows (only counts owners that own at least one project with a dated+linked next pending milestone and a cached summary). */
-    const projectsByOwnerId = new Map<
-      string,
-      Array<{ riskLevel: MilestoneLikelihoodRiskLevel; likelihood: number }>
-    >();
-    if (rollupReady) {
-      const projectById = new Map(goal.projects.map((p) => [p.id, p]));
-      for (const row of goalPopoverProjectRows) {
-        const p = projectById.get(row.projectId);
-        const ownerId = p?.ownerId?.trim();
-        if (!ownerId) continue;
-        /** Only count rows with a real cached assessment — unscored rows would misleadingly color the ring. */
-        if (!row.scored) continue;
-        const bucket = projectsByOwnerId.get(ownerId);
-        const entry = { riskLevel: row.riskLevel, likelihood: row.likelihood };
-        if (bucket) bucket.push(entry);
-        else projectsByOwnerId.set(ownerId, [entry]);
-      }
-    }
-
-    const RISK_ORDER: Record<MilestoneLikelihoodRiskLevel, number> = {
-      low: 0,
-      medium: 1,
-      high: 2,
-      critical: 3,
-    };
-
-    const seen = new Set<string>();
-    const owners: GoalLikelihoodInlineOwner[] = [];
-    for (const p of goal.projects) {
-      const id = p.ownerId?.trim();
-      if (!id || seen.has(id)) continue;
-      const person = peopleById.get(id);
-      if (!person) continue;
-      seen.add(id);
-
-      let worstRisk: MilestoneLikelihoodRiskLevel | undefined;
-      let worstLikelihood: number | undefined;
-      const entries = projectsByOwnerId.get(id);
-      if (entries && entries.length > 0) {
-        const best = entries.slice().sort((a, b) => {
-          const r = RISK_ORDER[b.riskLevel] - RISK_ORDER[a.riskLevel];
-          if (r !== 0) return r;
-          return a.likelihood - b.likelihood;
-        })[0]!;
-        worstRisk = best.riskLevel;
-        worstLikelihood = best.likelihood;
-      }
-
-      owners.push({
-        id: person.id,
-        name: person.name,
-        profilePicturePath: person.profilePicturePath ?? "",
-        autonomyScore: person.autonomyScore ?? 0,
-        riskLevel: worstRisk,
-        worstLikelihood,
-      });
-    }
-    owners.sort((a, b) => {
-      if (b.autonomyScore !== a.autonomyScore) {
-        return b.autonomyScore - a.autonomyScore;
-      }
-      return a.name.localeCompare(b.name);
-    });
-    return owners;
-  }, [goal.projects, goalLikelihoodRollup, goalPopoverProjectRows, peopleById]);
+  const goalProjectOwners = useMemo(
+    () =>
+      buildGoalPopoverProjectOwners({
+        goal,
+        rollup: goalLikelihoodRollup,
+        projectRows: goalPopoverProjectRows,
+        peopleById,
+      }),
+    [goal, goalLikelihoodRollup, goalPopoverProjectRows, peopleById]
+  );
 
   /** Goal-level AI context: rollup + per-project signals + roster for channel-message drafting. */
-  const goalChannelAiContext = useMemo((): GoalChannelAiContext => {
-    const rosterHints: SlackMemberRosterHint[] = [];
-    for (const o of goalProjectOwners) {
-      const person = peopleById.get(o.id);
-      const slackUserId = person?.slackHandle?.trim() ?? "";
-      if (!slackUserId) continue;
-      const avatar = o.profilePicturePath.trim();
-      rosterHints.push({
-        slackUserId,
-        name: o.name,
-        ...(avatar ? { profilePicturePath: avatar } : {}),
-      });
-    }
-
-    const projectIdToOwnerName = new Map<string, string>();
-    for (const p of goal.projects) {
-      if (!p.ownerId?.trim()) continue;
-      const person = peopleById.get(p.ownerId);
-      if (person) projectIdToOwnerName.set(p.id, person.name);
-    }
-
-    return {
-      goalDescription: goal.description,
-      oneLinerSummary: goalOneLinerSummary ?? "",
-      rollup: {
-        ready: Boolean(goalLikelihoodRollup?.ready),
-        onTimeLikelihood: goalLikelihoodRollup?.onTimeLikelihood ?? 0,
-        riskLevel: goalLikelihoodRollup?.riskLevel ?? "medium",
-        aiConfidence: goalLikelihoodRollup?.aiConfidence ?? 0,
-        coverageCached: goalLikelihoodRollup?.coverage.cached ?? 0,
-        coverageTotal: goalLikelihoodRollup?.coverage.total ?? 0,
-      },
-      projects: goalPopoverProjectRows.map((r) => ({
-        projectName: r.projectName,
-        milestoneName: r.milestoneName,
-        scored: r.scored,
-        likelihood: r.likelihood,
-        riskLevel: r.riskLevel,
-        progressEstimate: r.progressEstimate,
-        summaryLine: r.summaryLine,
-        blockerNote: r.blockerNote ?? "",
-        reasonLabel: r.reasonLabel ?? "",
-        ownerName: projectIdToOwnerName.get(r.projectId) ?? "",
-      })),
-      rosterHints,
-    };
-  }, [
-    goal.description,
-    goal.projects,
-    goalLikelihoodRollup,
-    goalOneLinerSummary,
-    goalPopoverProjectRows,
-    goalProjectOwners,
-    peopleById,
-  ]);
+  const goalChannelAiContext = useMemo(
+    () =>
+      buildGoalPopoverChannelAiContext({
+        goal,
+        rollup: goalLikelihoodRollup,
+        oneLinerSummary: goalOneLinerSummary,
+        projectRows: goalPopoverProjectRows,
+        projectOwners: goalProjectOwners,
+        peopleById,
+      }),
+    [
+      goal,
+      goalLikelihoodRollup,
+      goalOneLinerSummary,
+      goalPopoverProjectRows,
+      goalProjectOwners,
+      peopleById,
+    ]
+  );
 
   const goalInlineRef = useRef<HTMLButtonElement>(null);
   const goalInlineSpotlightRef = useRef<HTMLDivElement>(null);

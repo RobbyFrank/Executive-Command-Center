@@ -1,9 +1,17 @@
+"use client";
+
+import {
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   formatRelativeCalendarDate,
   getMilestoneDueHorizon,
   type MilestoneDueHorizon,
 } from "@/lib/relativeCalendarDate";
 import type {
+  Milestone,
   Person,
   Priority,
   ProjectType,
@@ -14,6 +22,8 @@ import {
   projectStatusStrokeColor,
 } from "./atlas-activity";
 import { AtlasAvatar } from "./AtlasAvatar";
+import { AtlasCalendarGlyph } from "./AtlasCalendarGlyph";
+import { AtlasMilestonePipTip } from "./AtlasMilestonePipTip";
 import type { LaidProject } from "./atlas-types";
 
 interface AtlasProjectProps {
@@ -33,7 +43,19 @@ interface AtlasProjectProps {
    * `<g>` so they stay at a fixed on-screen size regardless of zoom depth.
    */
   scale: number;
+  asOfYmd: string;
+  asOf: Date;
   onClick: () => void;
+  /**
+   * Click a milestone pip on the rim — opens that milestone’s Slack-thread
+   * popover (same as Roadmap). `milestoneId` identifies which pip was
+   * clicked; `rect` is the screen-space box for popover anchoring.
+   */
+  onMilestoneStatusClick?: (
+    projectId: string,
+    milestoneId: string,
+    rect: { left: number; top: number; width: number; height: number }
+  ) => void;
 }
 
 function truncate(s: string, max: number): string {
@@ -203,13 +225,14 @@ function ProjectTypeGlyph({
 function milestonePipColor(
   status: string,
   targetDate: string,
-  today: string
+  asOfYmd: string,
+  asOf: Date
 ): string {
   if (status === "Done") return "#7ba68a";
   const has = targetDate.trim().length > 0;
-  if (has && targetDate < today) return "#ef4444";
+  if (has && targetDate < asOfYmd) return "#ef4444";
   if (has) {
-    const horizon = getMilestoneDueHorizon(targetDate);
+    const horizon = getMilestoneDueHorizon(targetDate, asOf);
     return horizonChipFill(horizon);
   }
   return "#71717a";
@@ -234,13 +257,6 @@ function horizonChipFill(horizon: MilestoneDueHorizon): string {
   }
 }
 
-function todayYmd(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
 /** Convert `#rrggbb` to a `"r, g, b"` triple for use inside `rgba(...)`. */
 function hexToRgb(hex: string): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
@@ -262,7 +278,9 @@ function hexToRgb(hex: string): string {
  * - **Spotlight spark** (top-right) and **at-risk pulse** (bottom-left)
  *   reusing the existing keyframes (`atlas-spark-pulse` / `atlas-pulse-soft`).
  * - **Milestone status pips** along an inner arc at the bottom — capped at
- *   8, colored by status / due horizon.
+ *   8, colored by status / due horizon; each pip shows that milestone’s
+ *   health, is hoverable (name + due + status), and opens that milestone’s
+ *   Slack thread popover on click.
  * - **Owner avatar** at 7 o'clock (small).
  * - **Target-date chip** below the bubble, color-shifts when overdue.
  * - **Subtle priority glow** — outer drop-shadow whose color and intensity
@@ -275,7 +293,10 @@ export function AtlasProject({
   isFocused,
   isDimmed,
   scale,
+  asOfYmd,
+  asOf,
   onClick,
+  onMilestoneStatusClick,
 }: AtlasProjectProps) {
   const p = project.project;
   const priority = p.priority as Priority;
@@ -314,7 +335,6 @@ export function AtlasProject({
   const overdueR = Math.max(2, project.r * 0.085);
 
   // Milestone status pips along an inner arc near the bottom of the disc.
-  const today = todayYmd();
   const pipCap = 8;
   const pips = p.milestones.slice(0, pipCap);
   const pipR = project.r * 0.72;
@@ -333,19 +353,50 @@ export function AtlasProject({
   // Target-date chip text + color.
   const hasDate = p.targetDate.trim().length > 0;
   const dateLabel = hasDate
-    ? formatRelativeCalendarDate(p.targetDate, new Date(), {
+    ? formatRelativeCalendarDate(p.targetDate, asOf, {
         omitFuturePreposition: true,
       })
     : "";
   const dateChipColor = (() => {
     if (!hasDate) return "#71717a";
-    const horizon = getMilestoneDueHorizon(p.targetDate);
+    const horizon = getMilestoneDueHorizon(p.targetDate, asOf);
     return horizonChipFill(horizon);
   })();
 
   const nameLines = wrapLabel(p.name, 22, 2);
 
   const isClickable = !isFocused;
+  const [hover, setHover] = useState(false);
+  const isHovering = Boolean(hover && isClickable && !isDimmed);
+  const [milestoneHover, setMilestoneHover] = useState<null | {
+    milestone: Milestone;
+    rect: { left: number; top: number; width: number; height: number };
+  }>(null);
+
+  // Milestone pips: hover (tooltip) + click (thread popover) only while L2
+  // is interactive — not when this project is focused at L3+ or dimmed.
+  const milestonePipInteractive =
+    onMilestoneStatusClick != null && !isFocused && !isDimmed;
+
+  const baseStrokeW =
+    p.status === "Done" || p.status === "For Review"
+      ? 2
+      : project.isAtRisk
+        ? 1.4
+        : 1.3;
+  const outerDiscStrokeW = isClickable && isHovering ? baseStrokeW + 0.3 : baseStrokeW;
+
+  const priorityHalo =
+    glowAlpha > 0
+      ? `drop-shadow(0 0 ${isFocused ? 5 : 3}px rgba(${hexToRgb(priorityColor)}, ${glowAlpha}))`
+      : "";
+  const categoryHoverHalo =
+    isHovering && !isFocused
+      ? `drop-shadow(0 0 7px rgba(${hexToRgb(project.color)}, 0.28))`
+      : "";
+  const projectFilter = [priorityHalo, categoryHoverHalo]
+    .filter((s) => s.length > 0)
+    .join(" ") || undefined;
 
   return (
     <g
@@ -354,12 +405,13 @@ export function AtlasProject({
       style={{
         opacity: isDimmed ? 0.16 : 1,
         cursor: isClickable ? "pointer" : "default",
-        filter:
-          glowAlpha > 0
-            ? `drop-shadow(0 0 ${isFocused ? 9 : 5}px rgba(${hexToRgb(priorityColor)}, ${glowAlpha}))`
-            : undefined,
-        transition: "filter 600ms ease",
+        filter: projectFilter,
+        transition: "filter 200ms ease",
       }}
+      onPointerEnter={() => {
+        if (isClickable && !isDimmed) setHover(true);
+      }}
+      onPointerLeave={() => setHover(false)}
       onClick={(e) => {
         e.stopPropagation();
         if (isClickable) onClick();
@@ -375,16 +427,11 @@ export function AtlasProject({
         fill={project.color}
         fillOpacity={fillOpacity}
         stroke={ringColor}
-        strokeOpacity={project.isStale ? 0.55 : 0.92}
-        strokeWidth={
-          p.status === "Done" || p.status === "For Review"
-            ? 2
-            : project.isAtRisk
-              ? 1.4
-              : 1.3
-        }
+        strokeOpacity={project.isStale ? 0.55 : isHovering ? 0.98 : 0.92}
+        strokeWidth={outerDiscStrokeW}
         strokeDasharray={project.isStale ? "3 3" : "none"}
         vectorEffect="non-scaling-stroke"
+        style={{ transition: "stroke 200ms ease, stroke-width 200ms ease, stroke-opacity 200ms ease" }}
       />
 
       {/* Progress arc */}
@@ -413,24 +460,112 @@ export function AtlasProject({
         stroke={project.isStale ? "#71717a" : "#e4e4e7"}
       />
 
-      {/* Milestone status pips */}
+      {/* Milestone status pips — each dot is that milestone’s status; click
+          opens its thread; hover shows a quick summary. */}
       {pips.length > 0 ? (
-        <g pointerEvents="none">
+        <g>
           {pips.map((m, i) => {
             const t = pips.length === 1 ? 0.5 : i / (pips.length - 1);
             const deg = pipSpanStart + pipSpan * t;
             const rad = (deg * Math.PI) / 180;
             const x = project.cx + Math.cos(rad) * pipR;
             const y = project.cy + Math.sin(rad) * pipR;
+            const fill = milestonePipColor(
+              m.status,
+              m.targetDate,
+              asOfYmd,
+              asOf
+            );
+            const hot = milestoneHover?.milestone.id === m.id;
+            const interactive = milestonePipInteractive;
+            const hitR = Math.max(10, pipDotR * 2.4);
             return (
-              <circle
+              <g
                 key={m.id}
-                cx={x}
-                cy={y}
-                r={pipDotR}
-                fill={milestonePipColor(m.status, m.targetDate, today)}
-                fillOpacity={0.95}
-              />
+                data-atlas-interactive={interactive ? "true" : undefined}
+                style={{ cursor: interactive ? "pointer" : "default" }}
+                pointerEvents={interactive ? "auto" : "none"}
+                onPointerDown={
+                  interactive
+                    ? (e: ReactPointerEvent<SVGGElement>) => {
+                        e.stopPropagation();
+                      }
+                    : undefined
+                }
+                onPointerEnter={
+                  interactive
+                    ? (e: ReactPointerEvent<SVGGElement>) => {
+                        const el = e.currentTarget as unknown as SVGGraphicsElement;
+                        const r = el.getBoundingClientRect();
+                        setMilestoneHover({
+                          milestone: m,
+                          rect: {
+                            left: r.left,
+                            top: r.top,
+                            width: r.width,
+                            height: r.height,
+                          },
+                        });
+                      }
+                    : undefined
+                }
+                onPointerLeave={
+                  interactive
+                    ? () => {
+                        setMilestoneHover(null);
+                      }
+                    : undefined
+                }
+                onClick={
+                  interactive
+                    ? (e: ReactMouseEvent<SVGGElement>) => {
+                        e.stopPropagation();
+                        const el = e.currentTarget as unknown as SVGGraphicsElement;
+                        const r = el.getBoundingClientRect();
+                        onMilestoneStatusClick!(project.id, m.id, {
+                          left: r.left,
+                          top: r.top,
+                          width: r.width,
+                          height: r.height,
+                        });
+                      }
+                    : undefined
+                }
+              >
+                {interactive ? (
+                  <title>
+                    {m.name} — {m.status}
+                    {m.targetDate.trim() ? ` — ${m.targetDate}` : ""} — click
+                    for thread
+                  </title>
+                ) : null}
+                {interactive ? (
+                  <circle cx={x} cy={y} r={hitR} fill="transparent" />
+                ) : null}
+                {hot && interactive ? (
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r={pipDotR + 2.2}
+                    fill="none"
+                    stroke="rgba(16, 185, 129, 0.65)"
+                    strokeWidth={1.2}
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                ) : null}
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={pipDotR}
+                  fill={fill}
+                  fillOpacity={0.95}
+                  stroke={hot && interactive ? "#a7f3d0" : "#09090b"}
+                  strokeWidth={hot && interactive ? 1.35 : 1.05}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+              </g>
             );
           })}
         </g>
@@ -474,15 +609,16 @@ export function AtlasProject({
               fill="#fbbf24"
               stroke="#fde68a"
               strokeWidth={0.3}
-              style={{ filter: "drop-shadow(0 0 3px rgba(251, 191, 36, 0.7))" }}
+              style={{ filter: "drop-shadow(0 0 2px rgba(251, 191, 36, 0.45))" }}
             />
           </g>
         </g>
       ) : null}
 
-      {/* At-risk pulse */}
+      {/* At-risk pulse — visual cue only; use milestone pips for thread status. */}
       {project.isAtRisk ? (
         <g pointerEvents="none">
+          <title>At risk — check red / due milestone pips along the bottom arc</title>
           <circle
             cx={overdueX}
             cy={overdueY}
@@ -490,6 +626,7 @@ export function AtlasProject({
             fill="#c06a6a"
             fillOpacity={0.18}
             className="atlas-pulse-soft"
+            pointerEvents="none"
           />
           <circle
             cx={overdueX}
@@ -497,6 +634,7 @@ export function AtlasProject({
             r={overdueR}
             fill="#ef4444"
             fillOpacity={0.95}
+            pointerEvents="none"
           />
         </g>
       ) : null}
@@ -534,7 +672,9 @@ export function AtlasProject({
               const padY = 3;
               const charW = fontSize * 0.62;
               const textW = dateLabel.length * charW;
-              const w = textW + padX * 2;
+              const iconW = 10;
+              const iconGap = 4;
+              const w = textW + padX * 2 + iconW + iconGap;
               const h = fontSize + padY * 2;
               return (
                 <>
@@ -551,10 +691,18 @@ export function AtlasProject({
                     strokeWidth={1}
                     vectorEffect="non-scaling-stroke"
                   />
+                  <g transform={`translate(${-w / 2 + padX} ${-5})`}>
+                    <AtlasCalendarGlyph
+                      x={0}
+                      y={0}
+                      size={10}
+                      stroke={dateChipColor}
+                    />
+                  </g>
                   <text
-                    x={0}
+                    x={-w / 2 + padX + iconW + iconGap}
                     y={0}
-                    textAnchor="middle"
+                    textAnchor="start"
                     dominantBaseline="middle"
                     fontSize={fontSize}
                     fontWeight={600}
@@ -569,6 +717,14 @@ export function AtlasProject({
           </g>
         ) : null}
       </g>
+      {milestoneHover ? (
+        <AtlasMilestonePipTip
+          milestone={milestoneHover.milestone}
+          asOfYmd={asOfYmd}
+          asOf={asOf}
+          anchorRect={milestoneHover.rect}
+        />
+      ) : null}
     </g>
   );
 }

@@ -14,10 +14,10 @@ import {
   ChevronRight,
   MessageSquareWarning,
   Orbit,
+  RefreshCw,
 } from "lucide-react";
+import { ATLAS_RESET_TO_COMPANIES_EVENT } from "@/lib/atlasNav";
 import { cn } from "@/lib/utils";
-import { formatSlackSyncAge } from "@/lib/formatSlackSyncAge";
-import { SlackLogo } from "./SlackLogo";
 import {
   SIDEBAR_COLLAPSED_PREF_KEY,
   readSidebarCollapsedLocalStorage,
@@ -36,16 +36,6 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { href: "/", label: "Roadmap", icon: LayoutDashboard },
       { href: "/atlas", label: "Atlas", icon: Orbit },
-    ],
-  },
-  {
-    title: "Communication",
-    items: [
-      {
-        href: "/unreplied",
-        label: "Followups",
-        icon: MessageSquareWarning,
-      },
     ],
   },
   {
@@ -83,28 +73,17 @@ export function Sidebar({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [profilePhotoBroken, setProfilePhotoBroken] = useState(false);
-  /** Bumps every minute so the “2m ago” label stays fresh while the app is open. */
-  const [syncAgeTick, setSyncAgeTick] = useState(0);
   const syncActive = pathname === "/sync" || pathname.startsWith("/sync/");
 
-  useEffect(() => {
-    if (!slackLastSyncedAt) return;
-    const id = window.setInterval(
-      () => setSyncAgeTick((n) => n + 1),
-      60_000
-    );
-    return () => window.clearInterval(id);
+  const syncHoverTitle = useMemo(() => {
+    if (
+      !slackLastSyncedAt ||
+      Number.isNaN(new Date(slackLastSyncedAt).getTime())
+    ) {
+      return undefined;
+    }
+    return `Last synced ${new Date(slackLastSyncedAt).toLocaleString()}`;
   }, [slackLastSyncedAt]);
-
-  const syncAgeLabel = useMemo(() => {
-    void syncAgeTick;
-    return formatSlackSyncAge(slackLastSyncedAt);
-  }, [slackLastSyncedAt, syncAgeTick]);
-
-  const syncAgeTitle =
-    slackLastSyncedAt && !Number.isNaN(new Date(slackLastSyncedAt).getTime())
-      ? `Last sync ${new Date(slackLastSyncedAt).toLocaleString()}`
-      : undefined;
 
   // Apply browser preference before paint (localStorage wins; seed from server cookie if unset).
   // Keeps cookie aligned so the next full reload matches without a flash.
@@ -231,68 +210,100 @@ export function Sidebar({
       </div>
 
       <nav className="relative z-10 flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
-        <div className={cn("mb-3 border-b border-zinc-800/70 pb-3")}>
-          <Link
-            href="/sync"
-            title={collapsed ? "Slack — sync & review" : undefined}
-            aria-label="Open Slack sync and review"
-            aria-current={syncActive ? "page" : undefined}
+        <div>
+          <h2
             className={cn(
-              "group relative flex w-full items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
-              collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2",
-              syncActive
-                ? "bg-zinc-900/90 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
+              "px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500",
+              collapsed && "sr-only"
             )}
           >
-            <SlackLogo
-              className="h-4 w-4 opacity-80 grayscale group-hover:opacity-100"
-              alt=""
-            />
-            {!collapsed && (
-              <>
-                <span className="min-w-0 flex-1">
-                  <span className="flex w-full min-w-0 items-baseline justify-between gap-1.5">
-                    <span className="min-w-0 flex-1 truncate text-left text-zinc-200">
-                      Sync
+            Inbox
+          </h2>
+          <div className="space-y-1">
+            <Link
+              href="/sync"
+              title={
+                collapsed
+                  ? "Slack — sync & review"
+                  : syncHoverTitle ?? "Slack sync and review"
+              }
+              aria-label="Open Slack sync and review"
+              aria-current={syncActive ? "page" : undefined}
+              className={cn(
+                "group relative flex w-full items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
+                collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2",
+                syncActive
+                  ? "bg-zinc-900/90 text-zinc-100"
+                  : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
+              )}
+            >
+              <RefreshCw className="h-4 w-4 shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate">Sync</span>
+                  {pendingSlackSuggestionsCount > 0 ? (
+                    <span
+                      className="shrink-0 tabular-nums rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-200 ring-1 ring-violet-500/35"
+                      title={`${pendingSlackSuggestionsCount} pending Slack suggestions`}
+                    >
+                      {pendingSlackSuggestionsCount > 9
+                        ? "9+"
+                        : pendingSlackSuggestionsCount}
                     </span>
-                    {syncAgeLabel ? (
-                      <span
-                        className="shrink-0 text-[9px] tabular-nums leading-none text-zinc-500/90"
-                        title={syncAgeTitle}
-                      >
-                        {syncAgeLabel}
-                      </span>
-                    ) : null}
-                  </span>
-                </span>
-                {pendingSlackSuggestionsCount > 0 ? (
-                  <span
-                    className="shrink-0 tabular-nums rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/35"
-                    title={`${pendingSlackSuggestionsCount} pending Slack suggestions`}
-                  >
-                    {pendingSlackSuggestionsCount > 9
-                      ? "9+"
-                      : pendingSlackSuggestionsCount}
-                  </span>
-                ) : null}
-              </>
-            )}
-            {collapsed && pendingSlackSuggestionsCount > 0 ? (
-              <span
-                className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-cyan-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
-                title="Pending Slack suggestions"
-              />
-            ) : null}
-          </Link>
+                  ) : null}
+                </>
+              )}
+              {collapsed && pendingSlackSuggestionsCount > 0 ? (
+                <span
+                  className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-violet-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                  title="Pending Slack suggestions"
+                />
+              ) : null}
+            </Link>
+            <Link
+              href="/unreplied"
+              title={collapsed ? "Followups" : undefined}
+              aria-label={collapsed ? "Followups" : undefined}
+              aria-current={
+                pathname.startsWith("/unreplied") ? "page" : undefined
+              }
+              className={cn(
+                "relative flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
+                collapsed ? "justify-center px-2 py-2" : "gap-3 px-3 py-2",
+                pathname.startsWith("/unreplied")
+                  ? "bg-zinc-900/90 text-zinc-100"
+                  : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
+              )}
+            >
+              <MessageSquareWarning className="h-4 w-4 shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate">Followups</span>
+                  {unrepliedAsksCount > 0 ? (
+                    <span
+                      className="shrink-0 tabular-nums rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-200 ring-1 ring-violet-500/35"
+                      title={`${unrepliedAsksCount} open followup${
+                        unrepliedAsksCount === 1 ? "" : "s"
+                      }`}
+                    >
+                      {unrepliedAsksCount > 9 ? "9+" : unrepliedAsksCount}
+                    </span>
+                  ) : null}
+                </>
+              )}
+              {collapsed && unrepliedAsksCount > 0 ? (
+                <span
+                  className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-violet-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                  title={`${unrepliedAsksCount} open followup${
+                    unrepliedAsksCount === 1 ? "" : "s"
+                  }`}
+                />
+              ) : null}
+            </Link>
+          </div>
         </div>
-        {NAV_GROUPS.map((group, groupIndex) => (
-          <div
-            key={group.title}
-            className={cn(
-              groupIndex > 0 && "pt-3"
-            )}
-          >
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title} className="pt-3">
             <h2
               className={cn(
                 "px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500",
@@ -315,6 +326,18 @@ export function Sidebar({
                     title={collapsed ? collapsedHint : undefined}
                     aria-label={collapsed ? collapsedHint : undefined}
                     aria-current={isActive ? "page" : undefined}
+                    onClick={
+                      item.href === "/atlas"
+                        ? (e) => {
+                            if (pathname === "/atlas") {
+                              e.preventDefault();
+                              window.dispatchEvent(
+                                new CustomEvent(ATLAS_RESET_TO_COMPANIES_EVENT)
+                              );
+                            }
+                          }
+                        : undefined
+                    }
                     className={cn(
                       "relative flex items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
                       collapsed
@@ -343,16 +366,6 @@ export function Sidebar({
                               : unattendedNewHireCount}
                           </span>
                         ) : null}
-                        {item.href === "/unreplied" && unrepliedAsksCount > 0 ? (
-                          <span
-                            className="shrink-0 tabular-nums rounded-full bg-violet-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-violet-200 ring-1 ring-violet-500/35"
-                            title={`${unrepliedAsksCount} open followup${
-                              unrepliedAsksCount === 1 ? "" : "s"
-                            }`}
-                          >
-                            {unrepliedAsksCount > 9 ? "9+" : unrepliedAsksCount}
-                          </span>
-                        ) : null}
                       </>
                     )}
                     {collapsed &&
@@ -363,16 +376,6 @@ export function Sidebar({
                         title={`${unattendedNewHireCount} new hire${
                           unattendedNewHireCount === 1 ? "" : "s"
                         } without a pilot project`}
-                      />
-                    ) : null}
-                    {collapsed &&
-                    item.href === "/unreplied" &&
-                    unrepliedAsksCount > 0 ? (
-                      <span
-                        className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-violet-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
-                        title={`${unrepliedAsksCount} open followup${
-                          unrepliedAsksCount === 1 ? "" : "s"
-                        }`}
                       />
                     ) : null}
                   </Link>

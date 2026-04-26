@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   ExternalLink,
   Sparkles,
@@ -38,6 +40,8 @@ import type {
 } from "@/lib/types/tracker";
 
 interface AtlasMilestonePanelProps {
+  /** In-app "now" for due-date phrases — same value the atlas canvas used. */
+  asOf: Date;
   milestone: Milestone;
   project: ProjectWithMilestones;
   owner: Person | undefined;
@@ -60,6 +64,12 @@ interface AtlasMilestonePanelProps {
    * likelihood & draft prompts match what the Roadmap page produces.
    */
   siblingMilestones: Milestone[];
+  /**
+   * Same chronological order as the atlas path (`positionMilestones`) so
+   * prev/next match the canvas and keyboard.
+   */
+  milestonePathOrder: Milestone[];
+  onNavigateMilestone: (milestoneId: string) => void;
   onClose: () => void;
 }
 
@@ -73,7 +83,8 @@ interface AtlasMilestonePanelProps {
  * panel exposes a "Draft new Slack thread" flow identical to Roadmap's.
  *
  * Panel structure (top → bottom):
- *  - Header: milestone title + priority pill + close.
+ *  - Header: optional prev/next chevrons (path order, no wrap) + title +
+ *    priority pill + close.
  *  - Due-date hero: big relative "in 5 days" / "2 days ago" + absolute date.
  *  - Mark done toggle.
  *  - Slack thread preview (auto-opens the full-fat popover on mount).
@@ -81,6 +92,7 @@ interface AtlasMilestonePanelProps {
  *  - Footer: Open in Slack / Open in Roadmap.
  */
 export function AtlasMilestonePanel({
+  asOf,
   milestone,
   project,
   owner,
@@ -92,6 +104,8 @@ export function AtlasMilestonePanel({
   companyLogoPath,
   people,
   siblingMilestones,
+  milestonePathOrder,
+  onNavigateMilestone,
   onClose,
 }: AtlasMilestonePanelProps) {
   const isDone = milestone.status === "Done";
@@ -164,10 +178,10 @@ export function AtlasMilestonePanel({
   // Due-date hero: relative phrase (green→amber→rose by horizon) + absolute
   // date. Uses the same horizon classification as Roadmap's milestone chip.
   const dueHorizon: MilestoneDueHorizon = milestone.targetDate.trim()
-    ? getMilestoneDueHorizon(milestone.targetDate)
+    ? getMilestoneDueHorizon(milestone.targetDate, asOf)
     : "none";
   const dueRelative = milestone.targetDate.trim()
-    ? formatRelativeCalendarDate(milestone.targetDate)
+    ? formatRelativeCalendarDate(milestone.targetDate, asOf)
     : "";
   const dueAbsolute = milestone.targetDate.trim()
     ? formatCalendarDateHint(milestone.targetDate)
@@ -179,34 +193,95 @@ export function AtlasMilestonePanel({
   const ownerAvatar = owner?.profilePicturePath?.trim() ?? "";
   const companyLogo = companyLogoPath.trim();
 
+  const pathIndex = milestonePathOrder.findIndex((m) => m.id === milestone.id);
+  const pathCount = milestonePathOrder.length;
+  const canGoPrev = pathIndex > 0;
+  const canGoNext = pathIndex >= 0 && pathIndex < pathCount - 1;
+  const positionLabel =
+    pathIndex >= 0 && pathCount > 0 ? `${pathIndex + 1} / ${pathCount}` : null;
+
   return (
     <aside
       ref={spotlightRef}
       className="pointer-events-auto absolute right-4 top-24 bottom-20 z-20 flex w-[28rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/95 shadow-2xl backdrop-blur"
       aria-label={`Milestone ${milestone.name}`}
     >
-      <header className="flex items-start justify-between gap-3 border-b border-zinc-800/80 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-zinc-500">
-              Milestone
-            </p>
-            {project.priority ? (
-              <PriorityPillInline priority={project.priority} />
-            ) : null}
+      <header className="border-b border-zinc-800/80 px-3 py-2.5">
+        <div className="flex items-start gap-2">
+          {pathCount > 1 ? (
+            <div className="mt-0.5 flex shrink-0 flex-col items-center gap-1.5 pr-0.5">
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canGoPrev || pathIndex <= 0) return;
+                    const next = milestonePathOrder[pathIndex - 1]!;
+                    onNavigateMilestone(next.id);
+                  }}
+                  disabled={!canGoPrev}
+                  aria-label="Previous milestone in sequence"
+                  title="Previous milestone"
+                  className={cn(
+                    "inline-flex h-8 w-8 items-center justify-center rounded-md border text-zinc-300 transition-colors",
+                    canGoPrev
+                      ? "border-zinc-700/80 bg-zinc-900/50 hover:border-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-100"
+                      : "cursor-not-allowed border-zinc-800/60 text-zinc-600"
+                  )}
+                >
+                  <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canGoNext) return;
+                    const next = milestonePathOrder[pathIndex + 1]!;
+                    onNavigateMilestone(next.id);
+                  }}
+                  disabled={!canGoNext}
+                  aria-label="Next milestone in sequence"
+                  title="Next milestone"
+                  className={cn(
+                    "inline-flex h-8 w-8 items-center justify-center rounded-md border text-zinc-300 transition-colors",
+                    canGoNext
+                      ? "border-zinc-700/80 bg-zinc-900/50 hover:border-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-100"
+                      : "cursor-not-allowed border-zinc-800/60 text-zinc-600"
+                  )}
+                >
+                  <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+                </button>
+              </div>
+              {positionLabel ? (
+                <p
+                  className="font-mono text-[8px] uppercase tracking-[0.2em] text-zinc-600"
+                  aria-hidden
+                >
+                  {positionLabel}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="min-w-0 flex-1 pt-0.5">
+            <div className="flex items-center gap-2">
+              <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-zinc-500">
+                Milestone
+              </p>
+              {project.priority ? (
+                <PriorityPillInline priority={project.priority} />
+              ) : null}
+            </div>
+            <h2 className="mt-1 truncate pr-1 text-sm font-medium text-zinc-100">
+              {milestone.name}
+            </h2>
           </div>
-          <h2 className="mt-1 truncate text-sm font-medium text-zinc-100">
-            {milestone.name}
-          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close milestone panel"
+            className="mt-0.5 shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close milestone panel"
-          className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">

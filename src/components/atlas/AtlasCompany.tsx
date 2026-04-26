@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { ProjectStatus, ProjectWithMilestones } from "@/lib/types/tracker";
 import type { LaidCompany } from "./atlas-types";
 
@@ -9,6 +12,11 @@ interface AtlasCompanyProps {
   isDimmed: boolean;
   /** True at overview level (shows logo + stats inside the circle). */
   showLabel: boolean;
+  /**
+   * Server snapshot "today" (YYYY-MM-DD) for overdue checks — must match
+   * SSR and first client render to avoid hydration mismatches in SVG copy.
+   */
+  asOfYmd: string;
   /**
    * Current camera scale. Text labels (fallback name + stats line) are
    * wrapped in counter-scaled groups so they stay at a fixed on-screen size
@@ -84,14 +92,6 @@ function SvgLayersIcon({
   );
 }
 
-/** YYYY-MM-DD comparison for "is overdue" — done as plain string compare. */
-function todayYmd(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
 /** Color for one project status pip. */
 const STATUS_PIP_COLOR: Record<ProjectStatus, string> = {
   Done: "#7ba68a",
@@ -105,8 +105,8 @@ const STATUS_PIP_COLOR: Record<ProjectStatus, string> = {
 
 /**
  * Map an activity score (0–100) to a momentum band: color (used by gauge +
- * count number), and a soft glow color (used by hover drop-shadow on the
- * outer stroke).
+ * count number), and a very faint state halo (optional drop-shadow on the
+ * disc, kept minimal).
  */
 function momentumBand(activity: number): {
   color: string;
@@ -116,21 +116,21 @@ function momentumBand(activity: number): {
   if (activity >= 55) {
     return {
       color: "#10b981",
-      glow: "rgba(16, 185, 129, 0.35)",
+      glow: "rgba(16, 185, 129, 0.28)",
       countColor: "#a7f3d0",
     };
   }
   if (activity >= 30) {
     return {
       color: "#d4a857",
-      glow: "rgba(212, 168, 87, 0.32)",
+      glow: "rgba(212, 168, 87, 0.24)",
       countColor: "#fde68a",
     };
   }
   if (activity >= 1) {
     return {
       color: "#c06a6a",
-      glow: "rgba(192, 106, 106, 0.30)",
+      glow: "rgba(192, 106, 106, 0.22)",
       countColor: "#fca5a5",
     };
   }
@@ -167,7 +167,8 @@ function arcPath(
  * - **Logo** fills the disc when present (clipped circle), or italic name
  *   fallback when there is no logo asset.
  * - **Goals + projects** — same iconography as the Roadmap company row
- *   (`Target` + goal count, `Layers` + non-mirror project count); no words.
+ *   (`Target` + goal count, `Layers` + non-mirror project count); always
+ *   shown, including 0/0 (slightly dimmed when both are zero).
  * - Bottom **momentum gauge** — coloured arc whose length tracks the
  *   company's activity score and whose colour reflects the band
  *   (emerald → amber → rose). A faint full-track arc behind it gives the
@@ -189,6 +190,7 @@ export function AtlasCompany({
   isFocused,
   isDimmed,
   showLabel,
+  asOfYmd,
   scale,
   onClick,
 }: AtlasCompanyProps) {
@@ -197,7 +199,8 @@ export function AtlasCompany({
     (sum, g) => sum + g.projects.filter((p) => !p.isMirror).length,
     0
   );
-  const clickable = company.projectCount > 0;
+  /** Every company is drillable — even with zero goals / projects (empty L1 is fine). */
+  const clickable = true;
   const stuckTotal = company.atRiskCount + company.stuckCount;
   const hasProjects = company.projectCount > 0;
   const hasRisk = stuckTotal > 0 && hasProjects;
@@ -213,10 +216,10 @@ export function AtlasCompany({
   const hasSpotlight =
     company.company.goals.some((g) => g.spotlight) ||
     projects.some((p) => p.spotlight);
-  const today = todayYmd();
   const hasOverdue = projects.some((p) =>
     p.milestones.some(
-      (m) => m.status !== "Done" && m.targetDate && m.targetDate < today
+      (m) =>
+        m.status !== "Done" && m.targetDate && m.targetDate < asOfYmd
     )
   );
 
@@ -312,95 +315,116 @@ export function AtlasCompany({
   const showOverviewChrome = showLabel && !isFocused;
 
   const isClickable = clickable && !isFocused;
-  /** Icons on the stats pill: light stroke on near-black fill. */
-  const statPillIconStroke = hasRisk ? "#fda4a4" : "#a1a1aa";
-  const statPillTextFill = hasRisk ? "#fee2e2" : "#f4f4f5";
+  const [hover, setHover] = useState(false);
+  const isHovering = Boolean(hover && isClickable && !isDimmed);
+  const statsPillIsEmpty = goalCount === 0 && roadmapProjectCount === 0;
+  /** Icons on the stats pill: at-risk = rose; all-zero = dimmed; else default. */
+  const statPillIconStroke = hasRisk
+    ? "#fda4a4"
+    : statsPillIsEmpty
+      ? "#52525b"
+      : "#a1a1aa";
+  const statPillTextFill = hasRisk
+    ? "#fee2e2"
+    : statsPillIsEmpty
+      ? "#a1a1aa"
+      : "#f4f4f5";
 
-  const goalProjectStatsRow = !hasProjects
-    ? null
-    : (() => {
-        const iconS = 10;
-        const betweenPairs = 10;
-        const iconTextGap = 4;
-        const charW = countFontSize * 0.55;
-        const textW = (n: number) => String(n).length * charW;
-        const pairW = (n: number) => iconS + iconTextGap + textW(n);
-        const rowW =
-          pairW(goalCount) + betweenPairs + pairW(roadmapProjectCount);
-        const padX = 12;
-        const pillW = rowW + padX * 2;
-        const pillH = 22;
-        const rowLeft = -rowW / 2;
-        const bottomY = company.cy + company.r * 0.6;
-        const xTargets = rowLeft;
-        const xTargetNum = xTargets + iconS + iconTextGap;
-        const xLayers = xTargets + pairW(goalCount) + betweenPairs;
-        const xLayerNum = xLayers + iconS + iconTextGap;
-        return (
+  const goalProjectStatsRow = (() => {
+    const iconS = 10;
+    const betweenPairs = 10;
+    const iconTextGap = 4;
+    const charW = countFontSize * 0.55;
+    const textW = (n: number) => String(n).length * charW;
+    const pairW = (n: number) => iconS + iconTextGap + textW(n);
+    const rowW =
+      pairW(goalCount) + betweenPairs + pairW(roadmapProjectCount);
+    const padX = 12;
+    const pillW = rowW + padX * 2;
+    const pillH = 22;
+    const rowLeft = -rowW / 2;
+    const bottomY = company.cy + company.r * 0.6;
+    const xTargets = rowLeft;
+    const xTargetNum = xTargets + iconS + iconTextGap;
+    const xLayers = xTargets + pairW(goalCount) + betweenPairs;
+    const xLayerNum = xLayers + iconS + iconTextGap;
+    return (
+      <g
+        className="atlas-fade"
+        style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
+        transform={`translate(${company.cx} ${company.cy}) scale(${inv}) translate(${-company.cx} ${-company.cy})`}
+      >
+        <g transform={`translate(${company.cx} ${bottomY})`}>
+          <rect
+            x={-pillW / 2}
+            y={-pillH / 2}
+            width={pillW}
+            height={pillH}
+            rx={6}
+            fill="#09090b"
+            fillOpacity={0.9}
+            stroke="#3f3f46"
+            strokeWidth={1}
+            strokeOpacity={statsPillIsEmpty ? 0.7 : 0.95}
+            vectorEffect="non-scaling-stroke"
+          />
           <g
-            className="atlas-fade"
-            style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
-            transform={`translate(${company.cx} ${company.cy}) scale(${inv}) translate(${-company.cx} ${-company.cy})`}
+            className="tabular-nums"
+            fontSize={countFontSize}
+            fontWeight={600}
+            fill={statPillTextFill}
           >
-            <g transform={`translate(${company.cx} ${bottomY})`}>
-              <rect
-                x={-pillW / 2}
-                y={-pillH / 2}
-                width={pillW}
-                height={pillH}
-                rx={6}
-                fill="#09090b"
-                fillOpacity={0.9}
-                stroke="#3f3f46"
-                strokeWidth={1}
-                strokeOpacity={0.95}
-                vectorEffect="non-scaling-stroke"
-              />
-              <g
-                className="tabular-nums"
-                fontSize={countFontSize}
-                fontWeight={600}
-                fill={statPillTextFill}
-              >
-                <SvgTargetIcon
-                  x={xTargets}
-                  y={-iconS / 2}
-                  size={iconS}
-                  stroke={statPillIconStroke}
-                />
-                <text
-                  x={xTargetNum}
-                  y={0}
-                  textAnchor="start"
-                  dominantBaseline="middle"
-                  fill={statPillTextFill}
-                  fontSize={countFontSize}
-                  fontWeight={600}
-                >
-                  {goalCount}
-                </text>
-                <SvgLayersIcon
-                  x={xLayers}
-                  y={-iconS / 2}
-                  size={iconS}
-                  stroke={statPillIconStroke}
-                />
-                <text
-                  x={xLayerNum}
-                  y={0}
-                  textAnchor="start"
-                  dominantBaseline="middle"
-                  fill={statPillTextFill}
-                  fontSize={countFontSize}
-                  fontWeight={600}
-                >
-                  {roadmapProjectCount}
-                </text>
-              </g>
-            </g>
+            <SvgTargetIcon
+              x={xTargets}
+              y={-iconS / 2}
+              size={iconS}
+              stroke={statPillIconStroke}
+            />
+            <text
+              x={xTargetNum}
+              y={0}
+              textAnchor="start"
+              dominantBaseline="middle"
+              fill={statPillTextFill}
+              fontSize={countFontSize}
+              fontWeight={600}
+            >
+              {goalCount}
+            </text>
+            <SvgLayersIcon
+              x={xLayers}
+              y={-iconS / 2}
+              size={iconS}
+              stroke={statPillIconStroke}
+            />
+            <text
+              x={xLayerNum}
+              y={0}
+              textAnchor="start"
+              dominantBaseline="middle"
+              fill={statPillTextFill}
+              fontSize={countFontSize}
+              fontWeight={600}
+            >
+              {roadmapProjectCount}
+            </text>
           </g>
-        );
-      })();
+        </g>
+      </g>
+    );
+  })();
+
+  const baseFilter = isFocused
+    ? `drop-shadow(0 0 11px ${band.glow})`
+    : hasProjects
+      ? `drop-shadow(0 0 4px ${band.glow})`
+      : undefined;
+  /** Soft silver–sky lift on hover, layered (not replaced) on top of base. */
+  const hoverHalo =
+    isClickable && !isDimmed && isHovering
+      ? "drop-shadow(0 0 9px rgba(199, 210, 254, 0.24)) drop-shadow(0 0 3px rgba(255, 255, 255, 0.1))"
+      : undefined;
+  const discFilter = [baseFilter, hoverHalo].filter(Boolean).join(" ") || undefined;
 
   return (
     <g
@@ -413,24 +437,23 @@ export function AtlasCompany({
       style={{
         opacity: isDimmed ? 0.08 : 1,
         cursor: isClickable ? "pointer" : "default",
-        filter: isFocused
-          ? `drop-shadow(0 0 18px ${band.glow})`
-          : hasProjects
-            ? `drop-shadow(0 0 6px ${band.glow})`
-            : undefined,
-        transition: "filter 600ms ease",
+        filter: discFilter,
+        transition: "filter 220ms ease",
       }}
+      onPointerEnter={() => {
+        if (isClickable && !isDimmed) setHover(true);
+      }}
+      onPointerLeave={() => setHover(false)}
       onClick={(e) => {
         e.stopPropagation();
         if (isClickable) onClick();
       }}
     >
       <title>
-        {company.name}
-        {hasProjects
-          ? ` — ${goalCount} goal${goalCount !== 1 ? "s" : ""}, ${roadmapProjectCount} project${roadmapProjectCount !== 1 ? "s" : ""}${
-              hasRisk ? `, ${stuckTotal} at risk` : ""
-            }`
+        {company.name} — {goalCount} goal{goalCount !== 1 ? "s" : ""},{" "}
+        {roadmapProjectCount} project{roadmapProjectCount !== 1 ? "s" : ""}
+        {hasRisk && hasProjects
+          ? `, ${stuckTotal} at risk`
           : ""}
       </title>
 
@@ -474,9 +497,10 @@ export function AtlasCompany({
           r={company.r}
           fill={`url(#${fillGradientId})`}
           stroke={ATLAS_COMPANY_RING_STROKE}
-          strokeOpacity={isFocused ? 0.85 : 0.92}
-          strokeWidth={ATLAS_COMPANY_RING_WIDTH}
+          strokeOpacity={isFocused ? 0.85 : isHovering ? 0.98 : 0.92}
+          strokeWidth={isHovering ? ATLAS_COMPANY_RING_WIDTH + 0.45 : ATLAS_COMPANY_RING_WIDTH}
           vectorEffect="non-scaling-stroke"
+          style={{ transition: "stroke 200ms ease, stroke-width 200ms ease, stroke-opacity 200ms ease" }}
         />
       )}
 
@@ -488,10 +512,11 @@ export function AtlasCompany({
           r={company.r}
           fill="none"
           stroke={ATLAS_COMPANY_RING_STROKE}
-          strokeOpacity={0.95}
-          strokeWidth={ATLAS_COMPANY_RING_WIDTH}
+          strokeOpacity={isHovering ? 1 : 0.95}
+          strokeWidth={isHovering ? ATLAS_COMPANY_RING_WIDTH + 0.5 : ATLAS_COMPANY_RING_WIDTH}
           vectorEffect="non-scaling-stroke"
           pointerEvents="none"
+          style={{ transition: "stroke 200ms ease, stroke-width 200ms ease, stroke-opacity 200ms ease" }}
         />
       ) : null}
 
@@ -576,7 +601,7 @@ export function AtlasCompany({
               fill="#fbbf24"
               stroke="#fde68a"
               strokeWidth={0.3}
-              style={{ filter: "drop-shadow(0 0 3px rgba(251, 191, 36, 0.7))" }}
+              style={{ filter: "drop-shadow(0 0 2px rgba(251, 191, 36, 0.45))" }}
             />
           </g>
         </g>

@@ -14,6 +14,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Loader2,
   Pin,
   RefreshCw,
@@ -23,11 +24,13 @@ import { cn } from "@/lib/utils";
 import type { Person } from "@/lib/types/tracker";
 import {
   listPendingForReviewDashboard,
-  bulkApproveForCompany,
+  bulkApproveSlackSuggestionIds,
   type PendingWithCompanyName,
 } from "@/server/actions/slackSuggestions";
 import { SlackSuggestionRow } from "@/components/tracker/SlackSuggestionRow";
 import { SlackLogo } from "@/components/tracker/SlackLogo";
+import { CompanyFilterMultiSelect } from "@/components/tracker/CompanyFilterMultiSelect";
+import { CollapsePanel } from "@/components/tracker/CollapsePanel";
 import {
   matchesSuggestionFilter,
   type SuggestionFilterId,
@@ -544,6 +547,91 @@ function SyncAllConfirmModal({
   );
 }
 
+function ApproveBulkConfirmModal({
+  open,
+  onCancel,
+  onConfirm,
+  companyName,
+  count,
+  scopedToFilter,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  companyName: string;
+  count: number;
+  /** When filters are active, copy clarifies we only approve the listed items. */
+  scopedToFilter: boolean;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm approve all suggestions"
+    >
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="Cancel"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <div className="relative w-[min(420px,100%)] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+        <div className="space-y-2 px-5 pt-5 pb-3 text-xs leading-relaxed text-zinc-400">
+          <h3 className="text-sm font-semibold text-zinc-100">
+            Approve {count} suggestion{count === 1 ? "" : "s"} for{" "}
+            {companyName}?
+          </h3>
+          <p>
+            {scopedToFilter ? (
+              <>
+                Only the suggestions <span className="text-zinc-200">shown</span>{" "}
+                under this company (after your filters) will be applied.
+              </>
+            ) : (
+              <>
+                Every pending suggestion listed for this company on this page
+                will be applied.
+              </>
+            )}{" "}
+            This writes new goals, projects, milestones, and edits to the
+            roadmap. You can still edit the tracker afterward.
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-800 bg-zinc-950/80 px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-100 hover:bg-emerald-500/25"
+          >
+            <Check className="h-3.5 w-3.5" aria-hidden />
+            Approve all
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function CancelSyncConfirmModal({
   open,
   onKeepRunning,
@@ -666,6 +754,8 @@ function CompanyLogo({
 type PageCompany = {
   id: string;
   name: string;
+  shortName: string;
+  revenue: number;
   /** Same source as Roadmap header logos (`/uploads/...` or remote URL). */
   logoPath?: string;
   pinned?: boolean;
@@ -675,12 +765,18 @@ export function SlackSyncPage({
   people,
   companies = [],
   slackPendingByCompany = {},
+  goalNamesById = {},
+  projectGoalById = {},
 }: {
   people: Person[];
   /** All companies in Roadmap display order — pinned first, then revenue desc. */
   companies?: PageCompany[];
   /** Pending count per company (badge in the Sync dropdown). */
   slackPendingByCompany?: Record<string, number>;
+  /** goal id → goal description, so "New project on existing goal" can show the goal name. */
+  goalNamesById?: Record<string, string>;
+  /** project id → { projectName, goalName }, for milestone/edit-project context. */
+  projectGoalById?: Record<string, { projectName: string; goalName: string }>;
 }) {
   const router = useRouter();
   const [items, setItems] = useState<PendingWithCompanyName[]>([]);
@@ -689,12 +785,22 @@ export function SlackSyncPage({
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
   const syncAbortRef = useRef<AbortController | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
+  const syncMenuRef = useRef<HTMLDivElement>(null);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  const [companyFilterIds, setCompanyFilterIds] = useState<string[]>([]);
+  const [collapsedCompanyIds, setCollapsedCompanyIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  /** Accordion-style: only one suggestion across the page can be open at a time. */
+  const [openSuggestionId, setOpenSuggestionId] = useState<string | null>(null);
+  const [confirmApproveAll, setConfirmApproveAll] = useState<{
+    name: string;
+    ids: string[];
+  } | null>(null);
   const syncStartRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -719,17 +825,17 @@ export function SlackSyncPage({
     };
   }, []);
 
-  // Close the picker on outside click / Escape.
+  // Close the sync actions menu on outside click / Escape.
   useEffect(() => {
-    if (!pickerOpen) return;
+    if (!syncMenuOpen) return;
     function onDown(e: MouseEvent) {
-      if (!pickerRef.current) return;
-      if (!pickerRef.current.contains(e.target as Node)) {
-        setPickerOpen(false);
+      if (!syncMenuRef.current) return;
+      if (!syncMenuRef.current.contains(e.target as Node)) {
+        setSyncMenuOpen(false);
       }
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setPickerOpen(false);
+      if (e.key === "Escape") setSyncMenuOpen(false);
     }
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
@@ -737,7 +843,7 @@ export function SlackSyncPage({
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
     };
-  }, [pickerOpen]);
+  }, [syncMenuOpen]);
 
   // Close the filter dropdown on outside click / Escape.
   useEffect(() => {
@@ -916,10 +1022,15 @@ export function SlackSyncPage({
     syncAbortRef.current?.abort();
   }, []);
 
-  const filtered = useMemo(
-    () => items.filter((r) => matchesSuggestionFilter(r, filter)),
-    [items, filter]
-  );
+  const filtered = useMemo(() => {
+    const set =
+      companyFilterIds.length > 0 ? new Set(companyFilterIds) : null;
+    return items.filter(
+      (r) =>
+        matchesSuggestionFilter(r, filter) &&
+        (set === null || set.has(r.companyId))
+    );
+  }, [items, filter, companyFilterIds]);
 
   const byCompany = useMemo(() => {
     const m = new Map<string, PendingWithCompanyName[]>();
@@ -931,23 +1042,56 @@ export function SlackSyncPage({
     return m;
   }, [filtered]);
 
+  const companyOrder = useMemo(
+    () => new Map(companies.map((c, i) => [c.id, i] as const)),
+    [companies]
+  );
+
+  const sortedCompanyEntries = useMemo(
+    () =>
+      [...byCompany.entries()].sort(([a], [b]) => {
+        const ia = companyOrder.get(a) ?? 999_999;
+        const ib = companyOrder.get(b) ?? 999_999;
+        return ia - ib;
+      }),
+    [byCompany, companyOrder]
+  );
+
+  const logoByCompanyId = useMemo(
+    () => new Map(companies.map((c) => [c.id, c.logoPath] as const)),
+    [companies]
+  );
+
+  const companyPendingCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of items) {
+      m.set(r.companyId, (m.get(r.companyId) ?? 0) + 1);
+    }
+    return m;
+  }, [items]);
+
   const chipCounts = useMemo(() => {
+    const companySet =
+      companyFilterIds.length > 0 ? new Set(companyFilterIds) : null;
+    const scoped = items.filter(
+      (r) => companySet === null || companySet.has(r.companyId)
+    );
     const out: Record<SuggestionFilterId, number> = {
-      all: items.length,
+      all: scoped.length,
       new: 0,
       edits: 0,
       status: 0,
       dates: 0,
       owner: 0,
     };
-    for (const r of items) {
+    for (const r of scoped) {
       for (const { id } of FILTER_LABELS) {
         if (id === "all") continue;
         if (matchesSuggestionFilter(r, id)) out[id] += 1;
       }
     }
     return out;
-  }, [items]);
+  }, [items, companyFilterIds]);
 
   const pendingTotal = items.length;
 
@@ -956,10 +1100,7 @@ export function SlackSyncPage({
       <div className="sticky top-0 z-30 -mx-6 mb-6 border-b border-zinc-800/80 bg-zinc-950/90 px-6 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-5xl items-center gap-3">
           <h1 className="flex shrink-0 items-center gap-2 text-sm font-semibold text-zinc-100">
-            <SlackLogo
-              className="h-4 w-4 opacity-80 grayscale"
-              alt=""
-            />
+            <SlackLogo className="h-4 w-4 shrink-0" alt="" />
             Slack Sync
           </h1>
           <p className="hidden min-w-0 flex-1 truncate text-xs text-zinc-400 lg:block">
@@ -967,103 +1108,139 @@ export function SlackSyncPage({
             {pendingTotal} pending across the portfolio
           </p>
           <div className="ml-auto flex h-8 shrink-0 items-center gap-2">
-            <div ref={pickerRef} className="relative inline-flex items-stretch">
+            <div ref={syncMenuRef} className="relative inline-flex">
               <button
                 type="button"
-                onClick={() => {
-                  if (syncing) {
-                    setConfirmCancelOpen(true);
-                    return;
-                  }
-                  setConfirmAllOpen(true);
-                }}
+                onClick={() => setSyncMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={syncMenuOpen}
+                aria-label="Slack sync actions"
+                title="Choose how to run Slack sync"
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-l-md border px-3 text-xs font-medium transition-colors",
+                  "inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 pr-2 text-xs font-medium transition-colors",
                   syncing
                     ? "border-rose-500/40 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20"
                     : "border-cyan-500/30 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
                 )}
-                title={
-                  syncing
-                    ? "Cancel the in-progress sync"
-                    : "Sync Slack roadmap for every company (same pipeline as the daily cron)"
-                }
               >
                 {syncing ? (
-                  <X className="h-3.5 w-3.5" aria-hidden />
+                  <Loader2
+                    className="h-3.5 w-3.5 shrink-0 animate-spin"
+                    aria-hidden
+                  />
                 ) : (
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                  <RefreshCw className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 )}
-                {syncing ? "Cancel sync" : "Sync all companies"}
+                <span className="max-w-[10rem] truncate sm:max-w-none">
+                  {syncing ? "Syncing…" : "Slack sync"}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 text-cyan-200/80 transition-transform duration-150",
+                    syncMenuOpen && "rotate-180",
+                    syncing && "text-rose-200/80"
+                  )}
+                  aria-hidden
+                />
               </button>
-              <button
-                type="button"
-                onClick={() => setPickerOpen((v) => !v)}
-                disabled={syncing || companies.length === 0}
-                aria-haspopup="menu"
-                aria-expanded={pickerOpen}
-                title="Sync a specific company"
-                className={cn(
-                  "inline-flex h-8 items-center justify-center rounded-r-md border border-l-0 border-cyan-500/30 bg-cyan-500/10 px-2 text-cyan-100 transition-colors hover:bg-cyan-500/20",
-                  "disabled:cursor-not-allowed disabled:opacity-60"
-                )}
-              >
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-              </button>
-              {pickerOpen ? (
+              {syncMenuOpen ? (
                 <div
                   role="menu"
-                  className="absolute right-0 top-full z-10 mt-1.5 max-h-[60vh] w-72 overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl ring-1 ring-black/30"
+                  aria-label="Slack sync actions"
+                  className="absolute right-0 top-full z-10 mt-1.5 w-72 overflow-hidden overscroll-contain rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl ring-1 ring-black/30"
                 >
-                  <div className="sticky top-0 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 backdrop-blur">
-                    Sync a specific company
-                  </div>
-                  <ul className="py-1">
-                    {companies.length === 0 ? (
-                      <li className="px-3 py-2 text-xs text-zinc-500">
-                        No companies.
+                  {syncing ? (
+                    <ul className="py-1">
+                      <li>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            setConfirmCancelOpen(true);
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-rose-200 hover:bg-rose-500/10"
+                        >
+                          <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Cancel sync
+                        </button>
                       </li>
-                    ) : (
-                      companies.map((c) => {
-                        const n = slackPendingByCompany[c.id] ?? 0;
-                        return (
-                          <li key={c.id}>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              onClick={() => {
-                                setPickerOpen(false);
-                                void runSync({
-                                  companyIds: [c.id],
-                                  scopeLabel: c.name,
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-900"
-                            >
-                              <CompanyLogo
-                                logoPath={c.logoPath}
-                                name={c.name}
-                              />
-                              <span className="min-w-0 flex-1 truncate">
-                                {c.name}
-                              </span>
-                              {c.pinned ? (
-                                <Pin
-                                  className="h-3 w-3 shrink-0 text-amber-400/85"
-                                  aria-label="Pinned"
-                                />
-                              ) : null}
-                              {n > 0 ? (
-                                <span className="shrink-0 tabular-nums rounded-full bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/30">
-                                  {n > 9 ? "9+" : n}
-                                </span>
-                              ) : null}
-                            </button>
-                          </li>
-                        );
-                      })
-                    )}
-                  </ul>
+                    </ul>
+                  ) : (
+                    <>
+                      <ul className="py-1">
+                        <li>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              setConfirmAllOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-900"
+                          >
+                            <RefreshCw
+                              className="h-3.5 w-3.5 shrink-0 text-cyan-300/80"
+                              aria-hidden
+                            />
+                            Sync all companies
+                          </button>
+                        </li>
+                      </ul>
+                      <div className="border-t border-zinc-800" />
+                      <div className="max-h-[min(50vh,22rem)] overflow-y-auto overscroll-contain">
+                        <div className="sticky top-0 border-b border-zinc-800/80 bg-zinc-950/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 backdrop-blur">
+                          One company
+                        </div>
+                        <ul className="py-1">
+                          {companies.length === 0 ? (
+                            <li className="px-3 py-2 text-xs text-zinc-500">
+                              No companies.
+                            </li>
+                          ) : (
+                            companies.map((c) => {
+                              const n = slackPendingByCompany[c.id] ?? 0;
+                              return (
+                                <li key={c.id}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      setSyncMenuOpen(false);
+                                      void runSync({
+                                        companyIds: [c.id],
+                                        scopeLabel: c.name,
+                                      });
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-900"
+                                  >
+                                    <CompanyLogo
+                                      logoPath={c.logoPath}
+                                      name={c.name}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate">
+                                      {c.name}
+                                    </span>
+                                    {c.pinned ? (
+                                      <Pin
+                                        className="h-3 w-3 shrink-0 text-amber-400/85"
+                                        aria-label="Pinned"
+                                      />
+                                    ) : null}
+                                    {n > 0 ? (
+                                      <span className="shrink-0 tabular-nums rounded-full bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/30">
+                                        {n > 9 ? "9+" : n}
+                                      </span>
+                                    ) : null}
+                                  </button>
+                                </li>
+                              );
+                            })
+                          )}
+                        </ul>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -1076,7 +1253,19 @@ export function SlackSyncPage({
           <SyncProgressPanel syncing={syncing} progress={syncProgress} />
         ) : null}
 
-        <div ref={filterMenuRef} className="relative">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          <div className="min-w-0 flex-1 sm:max-w-[16rem]">
+            <CompanyFilterMultiSelect
+              companies={companies.map((c) => ({
+                ...c,
+                logoPath: c.logoPath ?? "",
+              }))}
+              selectedIds={companyFilterIds}
+              onChange={setCompanyFilterIds}
+              optionCounts={companyPendingCounts}
+            />
+          </div>
+          <div ref={filterMenuRef} className="relative min-w-0 flex-1">
           <button
             type="button"
             onClick={() => setFilterMenuOpen((v) => !v)}
@@ -1158,6 +1347,7 @@ export function SlackSyncPage({
               </ul>
             </div>
           ) : null}
+          </div>
         </div>
 
         {loading ? (
@@ -1167,46 +1357,102 @@ export function SlackSyncPage({
             Nothing in this filter.
           </p>
         ) : (
-          <div className="space-y-8">
-            {[...byCompany.entries()].map(([cid, rows]) => (
-              <section key={cid}>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                    {rows[0]?.companyName ?? cid}
-                    <span className="ml-2 tabular-nums text-zinc-600">
-                      ({rows.length})
-                    </span>
-                  </h3>
-                  <button
-                    type="button"
-                    className="text-[11px] text-violet-400 hover:underline"
-                    onClick={async () => {
-                      const r = await bulkApproveForCompany(cid);
-                      if (r.errors.length) {
-                        toast.error(r.errors.slice(0, 2).join("; "));
-                      } else {
-                        toast.success(`Approved ${r.count} for company`);
+          <div className="space-y-4">
+            {sortedCompanyEntries.map(([cid, rows]) => {
+              const expanded = !collapsedCompanyIds.has(cid);
+              const companyName = rows[0]?.companyName ?? cid;
+              return (
+                <section
+                  key={cid}
+                  className={cn(
+                    "group/company overflow-hidden rounded-xl border border-zinc-800/80 bg-zinc-900/30 transition-colors duration-150 motion-reduce:transition-none",
+                    "hover:border-zinc-700/80 hover:bg-zinc-900/50",
+                    expanded && "border-zinc-700/70 bg-zinc-900/50"
+                  )}
+                >
+                  <div className="flex items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollapsedCompanyIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(cid)) next.delete(cid);
+                          else next.add(cid);
+                          return next;
+                        });
+                      }}
+                      aria-expanded={expanded}
+                      aria-label={
+                        expanded
+                          ? `Collapse ${companyName}`
+                          : `Expand ${companyName}`
                       }
-                      await load();
-                      router.refresh();
-                    }}
+                      className="group/companyBtn flex min-w-0 flex-1 items-center gap-2.5 border-0 bg-transparent px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500 focus-visible:ring-inset"
+                    >
+                      <ChevronRight
+                        className={cn(
+                          "h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none group-hover/companyBtn:text-zinc-200",
+                          expanded && "rotate-90"
+                        )}
+                        aria-hidden
+                      />
+                      <CompanyLogo logoPath={logoByCompanyId.get(cid)} name={companyName} />
+                      <h3 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-zinc-100">
+                        {companyName}
+                      </h3>
+                      <span
+                        className="ml-1 inline-flex shrink-0 items-center rounded-full border border-zinc-700/80 bg-zinc-800/60 px-1.5 text-[10px] font-semibold leading-[1.25rem] tabular-nums text-zinc-300"
+                        title={`${rows.length} pending suggestion${rows.length === 1 ? "" : "s"}`}
+                        aria-label={`${rows.length} pending`}
+                      >
+                        {rows.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="shrink-0 self-stretch border-l border-zinc-800/60 px-3 text-[11px] font-medium text-zinc-400 transition-colors duration-150 hover:bg-violet-500/10 hover:text-violet-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:ring-inset group-hover/company:text-violet-300 motion-reduce:transition-none"
+                      onClick={() =>
+                        setConfirmApproveAll({
+                          name: companyName,
+                          ids: rows.map((r) => r.id),
+                        })
+                      }
+                      title={`Approve all ${rows.length} suggestion${rows.length === 1 ? "" : "s"} for ${companyName}`}
+                    >
+                      Approve all
+                    </button>
+                  </div>
+                  <CollapsePanel
+                    open={expanded}
+                    transitionClassName="duration-[360ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-150"
+                    innerClassName={cn(
+                      "transition-opacity duration-[300ms] ease-out motion-reduce:transition-none motion-reduce:opacity-100",
+                      expanded ? "opacity-100" : "opacity-0"
+                    )}
                   >
-                    Approve all here
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {rows.map((rec) => (
-                    <SlackSuggestionRow
-                      key={rec.id}
-                      rec={rec}
-                      people={people}
-                      compact
-                      onResolved={load}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
+                    <div className="space-y-2 border-t border-zinc-800/60 bg-zinc-950/40 p-3">
+                      {rows.map((rec) => (
+                        <SlackSuggestionRow
+                          key={rec.id}
+                          rec={rec}
+                          people={people}
+                          compact
+                          onResolved={load}
+                          goalNamesById={goalNamesById}
+                          projectGoalById={projectGoalById}
+                          expanded={openSuggestionId === rec.id}
+                          onToggle={() =>
+                            setOpenSuggestionId((prev) =>
+                              prev === rec.id ? null : rec.id
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  </CollapsePanel>
+                </section>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1227,6 +1473,32 @@ export function SlackSyncPage({
         onConfirm={() => {
           setConfirmCancelOpen(false);
           cancelSync();
+        }}
+      />
+      <ApproveBulkConfirmModal
+        open={confirmApproveAll !== null}
+        companyName={confirmApproveAll?.name ?? ""}
+        count={confirmApproveAll?.ids.length ?? 0}
+        scopedToFilter={
+          filter !== "all" || companyFilterIds.length > 0
+        }
+        onCancel={() => setConfirmApproveAll(null)}
+        onConfirm={async () => {
+          const ctx = confirmApproveAll;
+          setConfirmApproveAll(null);
+          if (!ctx || ctx.ids.length === 0) return;
+          const r = await bulkApproveSlackSuggestionIds(ctx.ids);
+          if (r.errors.length) {
+            toast.error(r.errors.slice(0, 2).join("; "));
+          } else {
+            toast.success(
+              r.count === 1
+                ? "Approved 1 suggestion"
+                : `Approved ${r.count} suggestions`
+            );
+          }
+          await load();
+          router.refresh();
         }}
       />
     </div>

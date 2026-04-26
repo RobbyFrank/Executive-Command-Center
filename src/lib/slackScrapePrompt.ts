@@ -142,6 +142,7 @@ export function buildSlackScrapeSystemPrompt(
 Today's date is ${today}.
 
 RULES:
+- The transcript already excludes bot/automation messages — every line is from a human teammate.
 - Propose net-new goals and projects that are not already well represented. Deduplicate aggressively.
 - You may also propose the edit kinds above when evidence is clear.
 - If nothing is worth adding or changing, return an empty JSON array [].
