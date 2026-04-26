@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { logSlackRoadmapSync } from "@/lib/slackRoadmapSyncLog";
 import { getRepository } from "@/server/repository";
 import { runSlackSyncPipelineForCompany } from "@/server/actions/slackRoadmapSync/pipeline";
 
@@ -44,6 +46,15 @@ export async function GET(request: Request) {
 
   try {
     const data = await getRepository().load();
+    const batchId = randomUUID();
+    let okCount = 0;
+    let failCount = 0;
+    logSlackRoadmapSync("info", {
+      event: "cron_batch_start",
+      logTrigger: "cron",
+      batchId,
+      companyCount: data.companies.length,
+    });
     const results: {
       companyId: string;
       ok: boolean;
@@ -52,24 +63,57 @@ export async function GET(request: Request) {
     }[] = [];
 
     for (const c of data.companies) {
+      const correlationId = randomUUID();
       const r = await runSlackSyncPipelineForCompany(c.id, {
         days: 2,
         includeThreads: true,
+        correlationId,
+        logTrigger: "cron",
+        batchId,
       });
       if (r.ok) {
+        okCount += 1;
         results.push({
           companyId: c.id,
           ok: true,
           pendingCount: r.pending.length,
         });
+        logSlackRoadmapSync("info", {
+          event: "cron_company_ok",
+          logTrigger: "cron",
+          batchId,
+          correlationId,
+          companyId: c.id,
+          companyName: c.name,
+          pendingCount: r.pending.length,
+        });
       } else {
+        failCount += 1;
         results.push({
           companyId: c.id,
           ok: false,
           error: r.error,
         });
+        logSlackRoadmapSync("error", {
+          event: "cron_company_failed",
+          logTrigger: "cron",
+          batchId,
+          correlationId,
+          companyId: c.id,
+          companyName: c.name,
+          error: r.error,
+        });
       }
     }
+
+    logSlackRoadmapSync("info", {
+      event: "cron_batch_done",
+      logTrigger: "cron",
+      batchId,
+      companyCount: data.companies.length,
+      okCount,
+      failCount,
+    });
 
     return NextResponse.json({
       ok: true,

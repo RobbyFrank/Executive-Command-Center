@@ -96,7 +96,8 @@ function departmentColor(name: string): string {
   return color;
 }
 
-const PROJECT_TYPE_COLOR: Record<string, string> = {
+/** Color per project type — exported so the Atlas can chip-tag goals by their dominant project type. */
+export const PROJECT_TYPE_COLOR: Record<string, string> = {
   Engineering: ATLAS_PALETTE[0]!,
   Product: ATLAS_PALETTE[1]!,
   Sales: ATLAS_PALETTE[2]!,

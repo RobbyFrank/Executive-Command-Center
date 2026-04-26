@@ -1,5 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { randomUUID } from "node:crypto";
 import { getAnthropicModel } from "@/lib/anthropicModel";
+import {
+  logSlackRoadmapSync,
+  logSlackRoadmapSyncLongText,
+} from "@/lib/slackRoadmapSyncLog";
 import type { SlackScrapeSuggestion } from "@/lib/schemas/tracker";
 import { SlackScrapeSuggestionSchema } from "@/lib/schemas/tracker";
 import {
@@ -46,11 +51,61 @@ function formatMessagesForChannel(
   return lines.join("\n");
 }
 
-function extractJsonArray(raw: string): unknown {
+/**
+ * Best-effort recovery from common ways Claude can wander off the strict
+ * "ONLY a JSON array" instruction:
+ *  - wrapped in a ```json fenced block (with or without `json`)
+ *  - prefixed/suffixed by prose like "Here are the suggestions: [...]"
+ *  - wrapped as `{"suggestions": [...]}` or `{"items": [...]}`
+ *  - apologetic empty replies ("I cannot…") → treated as "no suggestions"
+ *
+ * Throws with a diagnostic message (including a sample of `raw`) when
+ * everything fails, so the failure surfaces in the UI's failed-list and
+ * server logs instead of just "Model did not return valid JSON".
+ */
+function extractJsonArray(raw: string): unknown[] {
   const t = raw.trim();
+  if (t.length === 0) {
+    throw new Error("Model returned an empty response (0 chars).");
+  }
+
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = fence ? fence[1]!.trim() : t;
-  return JSON.parse(jsonStr) as unknown;
+  const candidate = fence ? fence[1]!.trim() : t;
+
+  let parseError: unknown = null;
+  try {
+    const v = JSON.parse(candidate) as unknown;
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      for (const key of ["suggestions", "items", "results", "data"]) {
+        const inner = o[key];
+        if (Array.isArray(inner)) return inner;
+      }
+    }
+  } catch (e) {
+    parseError = e;
+  }
+
+  const firstBracket = candidate.indexOf("[");
+  const lastBracket = candidate.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    const slice = candidate.slice(firstBracket, lastBracket + 1);
+    try {
+      const v = JSON.parse(slice) as unknown;
+      if (Array.isArray(v)) return v;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  const sample = t.length > 400 ? `${t.slice(0, 400)}…` : t;
+  const reason =
+    parseError instanceof Error ? parseError.message : "no JSON array found";
+  throw new Error(
+    `Model did not return a JSON array (${t.length} chars; ${reason}). ` +
+      `Output starts with: ${JSON.stringify(sample)}`
+  );
 }
 
 function buildChannelNameById(
@@ -92,6 +147,18 @@ export type RunSlackRoadmapSyncOptions = {
   /** Pass tracker; if omitted, loads from getRepository. */
   trackerData?: TrackerData;
   signal?: AbortSignal;
+  /**
+   * Correlates all log lines for this invocation in Vercel. Defaults to a new UUID.
+   * Parent jobs (cron, “Sync all”) should pass one id per company.
+   */
+  correlationId?: string;
+  /**
+   * Where this run was triggered: `cron`, `api-sync-all`, `api-scrape`, or custom.
+   * Included in every log line for filtering.
+   */
+  logTrigger?: string;
+  /** When set, groups multiple companies in one Vercel request (e.g. nightly cron). */
+  batchId?: string;
 };
 
 /**
@@ -114,6 +181,9 @@ export async function runSlackRoadmapSyncForCompany(
     onChannelDone,
     signal,
   } = options;
+  const correlationId = options.correlationId ?? randomUUID();
+  const logTrigger = options.logTrigger ?? "run";
+  const batchId = options.batchId;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new Error("ANTHROPIC_API_KEY is not configured");
@@ -126,7 +196,18 @@ export async function runSlackRoadmapSyncForCompany(
     throw new Error("Company not found");
   }
 
+  const companyName = data.companies.find((c) => c.id === companyId)?.name;
+
   if (channelIds.length === 0) {
+    logSlackRoadmapSync("info", {
+      event: "run_skip",
+      reason: "no_channels",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+    });
     return { suggestions: [], rejected: 0, channelNameById: new Map() };
   }
 
@@ -136,6 +217,15 @@ export async function runSlackRoadmapSyncForCompany(
 
   const list = await fetchSlackChannels();
   if (!list.ok) {
+    logSlackRoadmapSync("error", {
+      event: "slack_channels_list_failed",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+      error: list.error,
+    });
     throw new Error(list.error);
   }
 
@@ -144,6 +234,20 @@ export async function runSlackRoadmapSyncForCompany(
     companyId,
     list.channels
   );
+
+  const modelId = getAnthropicModel();
+  logSlackRoadmapSync("info", {
+    event: "run_start",
+    correlationId,
+    logTrigger,
+    batchId,
+    companyId,
+    companyName,
+    channelCount: channelIds.length,
+    days: Math.min(90, Math.max(1, Math.floor(days))),
+    includeThreads,
+    model: modelId,
+  });
 
   const transcriptParts: string[] = [];
   const messageAuthors = new Map<string, string>();
@@ -158,6 +262,17 @@ export async function runSlackRoadmapSyncForCompany(
       maxMessages: 500,
     });
     if (!hist.ok) {
+      logSlackRoadmapSync("warn", {
+        event: "channel_history_failed",
+        correlationId,
+        logTrigger,
+        batchId,
+        companyId,
+        companyName,
+        channelId,
+        channelName: name0,
+        error: hist.error,
+      });
       onChannelDone?.({
         channelId,
         name: name0,
@@ -182,6 +297,17 @@ export async function runSlackRoadmapSyncForCompany(
       block += th.extraLines;
     }
     transcriptParts.push(block);
+    logSlackRoadmapSync("info", {
+      event: "channel_history_ok",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+      channelId,
+      channelName: name,
+      messageCount: hist.messages.length,
+    });
     onChannelDone?.({
       channelId,
       name,
@@ -191,11 +317,30 @@ export async function runSlackRoadmapSyncForCompany(
   }
 
   if (transcriptParts.length === 0) {
+    logSlackRoadmapSync("warn", {
+      event: "run_skip",
+      reason: "all_channel_fetches_failed",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+    });
     return { suggestions: [], rejected: 0, channelNameById };
   }
 
   let slackTranscript = transcriptParts.join("\n");
   slackTranscript = capTranscript(slackTranscript, MAX_TRANSCRIPT_CHARS);
+  logSlackRoadmapSync("info", {
+    event: "transcript_ready",
+    correlationId,
+    logTrigger,
+    batchId,
+    companyId,
+    companyName,
+    transcriptChars: slackTranscript.length,
+    maxTranscriptChars: MAX_TRANSCRIPT_CHARS,
+  });
 
   const existingBlock = buildExistingRoadmapBlock(data, companyId);
   const peopleBlock = buildPeopleRosterBlock(data.people);
@@ -212,36 +357,98 @@ export async function runSlackRoadmapSyncForCompany(
       "Analyze the Slack transcript and return ONLY the JSON array of suggestions as specified.",
   };
   const modelParams = {
-    model: getAnthropicModel(),
+    model: modelId,
     max_tokens: 8192,
     system: systemPrompt,
     messages: [userMsg],
   };
 
-  let textOut: string;
+  let finalMessage: {
+    id: string;
+    content: Array<{ type: string; text?: string }>;
+    usage: {
+      input_tokens: number | null;
+      output_tokens: number;
+      cache_creation_input_tokens?: number | null;
+      cache_read_input_tokens?: number | null;
+    };
+    stop_reason: string | null;
+  };
   if (onModelTextChunk) {
     const modelStream = anthropic.messages.stream(modelParams);
     modelStream.on("text", (d: string) => {
       if (d) onModelTextChunk(d);
     });
-    const finalMessage = await modelStream.finalMessage();
-    const b0 = finalMessage.content[0];
-    textOut = b0?.type === "text" ? b0.text : "";
+    finalMessage = await modelStream.finalMessage();
   } else {
-    const finalMessage = await anthropic.messages.create(modelParams);
-    const b0 = finalMessage.content[0];
-    textOut = b0?.type === "text" ? b0.text : "";
+    finalMessage = await anthropic.messages.create(modelParams);
   }
 
-  let parsed: unknown;
+  const b0 = finalMessage.content[0];
+  const textOut: string = b0?.type === "text" ? (b0.text ?? "") : "";
+  const contentBlockTypes = finalMessage.content.map((b) => b.type);
+  const textBlocks = finalMessage.content.filter((b) => b.type === "text")
+    .length;
+  logSlackRoadmapSync("info", {
+    event: "model_response",
+    correlationId,
+    logTrigger,
+    batchId,
+    companyId,
+    companyName,
+    messageId: finalMessage.id,
+    model: modelId,
+    outputChars: textOut.length,
+    textBlocks,
+    contentBlockTypes,
+    stopReason: finalMessage.stop_reason,
+    inputTokens: finalMessage.usage?.input_tokens,
+    outputTokens: finalMessage.usage?.output_tokens,
+    cacheCreationInputTokens: finalMessage.usage?.cache_creation_input_tokens,
+    cacheReadInputTokens: finalMessage.usage?.cache_read_input_tokens,
+  });
+  if (!textOut.length) {
+    logSlackRoadmapSync("warn", {
+      event: "model_no_text_block",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+      firstBlockType: b0?.type,
+      contentBlockTypes,
+    });
+  }
+
+  let parsed: unknown[] = [];
   try {
     parsed = extractJsonArray(textOut);
-  } catch {
-    throw new Error("Model did not return valid JSON");
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error("Model JSON must be an array");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logSlackRoadmapSync("error", {
+      event: "model_json_parse_failed",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName,
+      message: msg,
+      model: modelId,
+      outputChars: textOut.length,
+    });
+    logSlackRoadmapSyncLongText(
+      "error",
+      {
+        event: "model_raw_output",
+        correlationId,
+        logTrigger,
+        batchId,
+        companyId,
+        companyName,
+      },
+      textOut
+    );
+    throw new Error(msg);
   }
 
   const suggestions: SlackScrapeSuggestion[] = [];
@@ -265,6 +472,18 @@ export async function runSlackRoadmapSyncForCompany(
     people: data.people,
     channelNameById,
     messageAuthors,
+  });
+
+  logSlackRoadmapSync("info", {
+    event: "run_complete",
+    correlationId,
+    logTrigger,
+    batchId,
+    companyId,
+    companyName,
+    parsedItemCount: parsed.length,
+    acceptedCount: suggestions.length,
+    schemaRejectedOrInvalidCount: rejected,
   });
 
   return { suggestions, rejected, channelNameById };

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { v4 as uuid } from "uuid";
 import { revalidateTag } from "next/cache";
+import { logSlackRoadmapSync } from "@/lib/slackRoadmapSyncLog";
 import { getRepository } from "@/server/repository";
 import { ECC_SLACK_SUGGESTIONS_TAG } from "@/lib/cache-tags";
 import { mutateSlackSuggestions } from "@/server/repository/slack-suggestions-storage";
@@ -111,9 +113,15 @@ export async function runSlackSyncPipelineForCompany(
   options: {
     days: number;
     includeThreads: boolean;
-    onModelTextChunk?: (t: string) => void;
-    signal?: AbortSignal;
-  } & SlackSyncProgressCallbacks
+  onModelTextChunk?: (t: string) => void;
+  signal?: AbortSignal;
+  /** Per-company id for Vercel logs; generated if omitted. */
+  correlationId?: string;
+  /** e.g. `cron`, `api-sync-all`, `api-scrape`. */
+  logTrigger?: string;
+  /** Groups many companies in one request (cron / Sync all). */
+  batchId?: string;
+} & SlackSyncProgressCallbacks
 ): Promise<
   | {
       ok: true;
@@ -129,18 +137,48 @@ export async function runSlackSyncPipelineForCompany(
     onChannelDone,
   } = options;
 
+  const correlationId = options.correlationId ?? randomUUID();
+  const logTrigger = options.logTrigger ?? "pipeline";
+  const batchId = options.batchId;
+  const pipelineT0 = Date.now();
+
   const rate = await checkAiRateLimit();
   if (!rate.ok) {
+    logSlackRoadmapSync("warn", {
+      event: "pipeline_rate_limited",
+      phase: "first",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+    });
     return { ok: false, error: "AI rate limit" };
   }
 
   const data = await getRepository().load();
   const company = data.companies.find((c) => c.id === companyId);
   if (!company) {
+    logSlackRoadmapSync("warn", {
+      event: "pipeline_company_missing",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+    });
     return { ok: false, error: "Company not found" };
   }
 
   onStage?.("starting");
+  logSlackRoadmapSync("info", {
+    event: "pipeline_start",
+    correlationId,
+    logTrigger,
+    batchId,
+    companyId,
+    companyName: company.name,
+    days: options.days,
+    includeThreads: options.includeThreads,
+  });
   await mutateSlackSuggestions((draft) => {
     stripDefunctPendingForCompany(data, companyId)(draft);
   });
@@ -150,6 +188,15 @@ export async function runSlackSyncPipelineForCompany(
     companyId
   );
   if (chErr) {
+    logSlackRoadmapSync("error", {
+      event: "pipeline_resolve_channels_failed",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName: company.name,
+      error: chErr,
+    });
     return { ok: false, error: chErr };
   }
   onChannelTotal?.(channelIds.length);
@@ -159,11 +206,33 @@ export async function runSlackSyncPipelineForCompany(
       replacePendingForCompany(companyId, [])(draft);
     });
     revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
+    const durationMs = Date.now() - pipelineT0;
+    logSlackRoadmapSync("info", {
+      event: "pipeline_ok",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName: company.name,
+      reason: "no_slack_channels",
+      durationMs,
+      freshCount: 0,
+      pendingCount: 0,
+    });
     return { ok: true, fresh: [], pending: [] };
   }
 
   const rate2 = await checkAiRateLimit();
   if (!rate2.ok) {
+    logSlackRoadmapSync("warn", {
+      event: "pipeline_rate_limited",
+      phase: "second",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName: company.name,
+    });
     return { ok: false, error: "AI rate limit (second pass)" };
   }
 
@@ -186,6 +255,9 @@ export async function runSlackSyncPipelineForCompany(
       onChannelDone,
       trackerData: data,
       signal: options.signal,
+      correlationId,
+      logTrigger,
+      batchId,
     });
 
     onStage?.("reconciling");
@@ -203,9 +275,33 @@ export async function runSlackSyncPipelineForCompany(
     });
     revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
 
+    const durationMs = Date.now() - pipelineT0;
+    logSlackRoadmapSync("info", {
+      event: "pipeline_ok",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName: company.name,
+      durationMs,
+      freshCount: fresh.length,
+      pendingCount: pending.length,
+    });
     return { ok: true, fresh, pending };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    const stack = e instanceof Error ? e.stack : undefined;
+    logSlackRoadmapSync("error", {
+      event: "pipeline_failed",
+      correlationId,
+      logTrigger,
+      batchId,
+      companyId,
+      companyName: company.name,
+      durationMs: Date.now() - pipelineT0,
+      error: message,
+      stack,
+    });
     return { ok: false, error: message };
   }
 }

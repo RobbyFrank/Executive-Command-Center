@@ -10,7 +10,7 @@ import {
   getSlackMessagePermalink,
 } from "@/lib/slack";
 import type { Person } from "@/lib/types/tracker";
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { ECC_TRACKER_DATA_TAG } from "@/lib/cache-tags";
 import {
   looksLikeSlackGuidelinesOnboardingWelcome,
@@ -321,7 +321,7 @@ export async function detectAndCreateNewHiresFromSlack(): Promise<
   }
 
   if (added.length > 0 || backfilled.length > 0) {
-    updateTag(ECC_TRACKER_DATA_TAG);
+    revalidateTag(ECC_TRACKER_DATA_TAG, { expire: 0 });
   }
 
   return { ok: true, added, backfilled, skippedReasons };

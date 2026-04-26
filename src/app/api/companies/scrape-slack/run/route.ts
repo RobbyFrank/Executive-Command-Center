@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   aiRateLimitExceededResponse,
   checkAiRateLimit,
 } from "@/lib/ai-rate-limit";
+import { logSlackRoadmapSync } from "@/lib/slackRoadmapSyncLog";
 import type { SlackScanStreamPayload } from "@/lib/slack-scrape-stream-types";
 import { runSlackRoadmapSyncForCompany } from "@/server/actions/slackRoadmapSync/run";
 import {
@@ -125,6 +127,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Company not found" }, { status: 404 });
   }
 
+  const companyName = data.companies.find((c) => c.id === companyId)?.name;
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -133,10 +136,31 @@ export async function POST(req: Request) {
       };
 
       let completed = 0;
+      const batchId = randomUUID();
+      const correlationId = randomUUID();
 
       try {
+        logSlackRoadmapSync("info", {
+          event: "api_scrape_start",
+          logTrigger: "api-scrape",
+          batchId,
+          correlationId,
+          companyId,
+          companyName,
+          channelCount: channelIds.length,
+          days,
+          includeThreads,
+        });
         const list = await fetchSlackChannels();
         if (!list.ok) {
+          logSlackRoadmapSync("error", {
+            event: "api_scrape_slack_list_failed",
+            logTrigger: "api-scrape",
+            batchId,
+            correlationId,
+            companyId,
+            error: list.error,
+          });
           write({ type: "error", message: list.error });
           return;
         }
@@ -164,6 +188,9 @@ export async function POST(req: Request) {
           channelIds,
           days,
           includeThreads,
+          correlationId,
+          logTrigger: "api-scrape",
+          batchId,
           onModelTextChunk: (d) => {
             if (d) write({ type: "progress", phase: "model", chunk: d });
           },
@@ -239,6 +266,18 @@ export async function POST(req: Request) {
           }
         }
 
+        logSlackRoadmapSync("info", {
+          event: "api_scrape_done",
+          logTrigger: "api-scrape",
+          batchId,
+          correlationId,
+          companyId,
+          companyName,
+          suggestionCount: suggestions.length,
+          rejected,
+          reconcileFailed,
+          pendingWritten: (pendingForCompany?.length ?? 0) > 0,
+        });
         write({
           type: "done",
           suggestions,
@@ -247,9 +286,21 @@ export async function POST(req: Request) {
           reconcileFailed,
         });
       } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack : undefined;
+        logSlackRoadmapSync("error", {
+          event: "api_scrape_failed",
+          logTrigger: "api-scrape",
+          batchId,
+          correlationId,
+          companyId,
+          companyName,
+          error: message,
+          stack,
+        });
         write({
           type: "error",
-          message: e instanceof Error ? e.message : String(e),
+          message,
         });
       } finally {
         controller.close();

@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import {
   aiRateLimitExceededResponse,
   checkAiRateLimit,
 } from "@/lib/ai-rate-limit";
+import { logSlackRoadmapSync } from "@/lib/slackRoadmapSyncLog";
 import type {
   SlackScanAllStage,
   SlackScanAllStreamPayload,
@@ -104,7 +106,16 @@ export async function POST(req: Request) {
         });
       };
 
+      const batchId = randomUUID();
       try {
+        logSlackRoadmapSync("info", {
+          event: "api_sync_all_start",
+          logTrigger: "api-sync-all",
+          batchId,
+          companyCount: companies.length,
+          /** True when the request body included a `companyIds` array filter. */
+          companyFilterApplied: filterIds != null,
+        });
         for (let i = 0; i < companies.length; i += 1) {
           if (req.signal.aborted) break;
           const c = companies[i]!;
@@ -119,6 +130,9 @@ export async function POST(req: Request) {
             days: 2,
             includeThreads: true,
             signal: req.signal,
+            correlationId: randomUUID(),
+            logTrigger: "api-sync-all",
+            batchId,
             onStage: (s) => {
               currentStage = s;
               emit(i, c);
@@ -160,6 +174,14 @@ export async function POST(req: Request) {
           emit(i + 1, null);
         }
 
+        logSlackRoadmapSync("info", {
+          event: "api_sync_all_done",
+          logTrigger: "api-sync-all",
+          batchId,
+          companyCount: companies.length,
+          okCount,
+          failCount,
+        });
         write({
           type: "done",
           total: companies.length,
@@ -168,9 +190,18 @@ export async function POST(req: Request) {
           results,
         });
       } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack : undefined;
+        logSlackRoadmapSync("error", {
+          event: "api_sync_all_fatal",
+          logTrigger: "api-sync-all",
+          batchId,
+          error: message,
+          stack,
+        });
         write({
           type: "error",
-          message: e instanceof Error ? e.message : String(e),
+          message,
         });
       } finally {
         controller.close();

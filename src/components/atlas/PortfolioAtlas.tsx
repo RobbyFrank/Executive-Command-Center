@@ -28,6 +28,7 @@ import {
 } from "./atlas-layout";
 import { calendarDaysFromTodayYmd } from "@/lib/relativeCalendarDate";
 import { cn } from "@/lib/utils";
+import { PROJECT_TYPE_COLOR } from "./atlas-activity";
 import type {
   CameraTarget,
   GroupingKey,
@@ -53,6 +54,68 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
 }
 
+/** All-caps goal names: word-aware wrap, up to {@link GOAL_LABEL_MAX_LINES} lines. */
+const GOAL_LABEL_MAX_CHARS_PER_LINE = 26;
+const GOAL_LABEL_MAX_LINES = 3;
+
+/**
+ * Word-aware wrap a goal label to at most `maxLines` lines of `maxLineLen`
+ * characters each. The last line truncates with "…" if the remainder
+ * doesn't fit.
+ */
+function splitGoalLabelName(
+  upper: string,
+  maxLineLen: number,
+  maxLines: number = GOAL_LABEL_MAX_LINES
+): string[] {
+  const t = upper.trim();
+  if (t.length === 0) return [""];
+  const lines: string[] = [];
+  let rest = t;
+  while (rest.length > 0 && lines.length < maxLines) {
+    if (rest.length <= maxLineLen) {
+      lines.push(rest);
+      break;
+    }
+    const isLast = lines.length === maxLines - 1;
+    if (isLast) {
+      lines.push(truncate(rest, maxLineLen));
+      break;
+    }
+    const head = rest.slice(0, maxLineLen);
+    const breakAt = Math.max(
+      head.lastIndexOf(" "),
+      head.lastIndexOf("/"),
+      head.lastIndexOf(":")
+    );
+    const cut = breakAt > 2 ? breakAt : maxLineLen;
+    lines.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trimStart();
+  }
+  return lines.length === 0 ? [""] : lines;
+}
+
+/**
+ * Dominant project-type within a goal — used as a "category" tag above the
+ * goal name. Falls back to `null` when the goal has no projects.
+ */
+function dominantProjectType(group: LaidGroup): string | null {
+  if (group.projects.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const p of group.projects) {
+    counts.set(p.type, (counts.get(p.type) ?? 0) + 1);
+  }
+  let bestType: string | null = null;
+  let bestCount = 0;
+  for (const [t, c] of counts) {
+    if (c > bestCount) {
+      bestCount = c;
+      bestType = t;
+    }
+  }
+  return bestType;
+}
+
 /** Euclidean distance between two 2D points (used for hit-testing circles). */
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.hypot(x1 - x2, y1 - y2);
@@ -70,21 +133,51 @@ function seededRandom(seed: string, salt: number): number {
 }
 
 /**
- * Build a per-company drift style: a unique amplitude (±4 viewBox units),
- * duration (7–13s), and negative delay (so each company's loop is out of
- * phase from t=0). Used by the `.atlas-drift` keyframes.
+ * Build a per-company SMIL drift descriptor — an orbital wander with four
+ * distinct stops so the motion never reads as back-and-forth on a single
+ * axis. Each company gets unique offsets, duration (8–14s), and a negative
+ * begin time so its phase is out of sync with its siblings. SMIL is used
+ * (rather than CSS keyframes) because animating `transform` on SVG `<g>`
+ * elements via CSS has historically been unreliable across engines —
+ * `<animateTransform>` is purpose-built for SVG and works everywhere.
  */
-function driftStyleFor(seed: string): React.CSSProperties {
-  const dx = (seededRandom(seed, 1) * 2 - 1) * 4;
-  const dy = (seededRandom(seed, 2) * 2 - 1) * 3;
-  const dur = 7 + seededRandom(seed, 3) * 6;
-  const delay = -seededRandom(seed, 4) * dur;
+interface DriftDescriptor {
+  /** Space-separated translation values for SMIL (5 stops: 0, A, B, A', 0). */
+  values: string;
+  dur: string;
+  begin: string;
+}
+
+function driftDescriptorFor(seed: string): DriftDescriptor {
+  const ax = (seededRandom(seed, 1) * 2 - 1) * 10;
+  const ay = (seededRandom(seed, 2) * 2 - 1) * 8;
+  const bx = (seededRandom(seed, 5) * 2 - 1) * 8;
+  const by = (seededRandom(seed, 6) * 2 - 1) * 10;
+  // Small kicker stop based on A so the orbit isn't a closed rectangle.
+  const cx = ax * -0.55;
+  const cy = ay * 0.55;
+  const dur = 8 + seededRandom(seed, 3) * 6;
+  const beginOffset = -seededRandom(seed, 4) * dur;
+  const fmt = (n: number) => n.toFixed(2);
   return {
-    ["--atlas-dx" as string]: `${dx.toFixed(2)}px`,
-    ["--atlas-dy" as string]: `${dy.toFixed(2)}px`,
-    ["--atlas-dur" as string]: `${dur.toFixed(2)}s`,
-    ["--atlas-delay" as string]: `${delay.toFixed(2)}s`,
-  } as React.CSSProperties;
+    values: `0 0; ${fmt(ax)} ${fmt(ay)}; ${fmt(bx)} ${fmt(by)}; ${fmt(cx)} ${fmt(cy)}; 0 0`,
+    dur: `${dur.toFixed(2)}s`,
+    begin: `${beginOffset.toFixed(2)}s`,
+  };
+}
+
+/**
+ * Read the *live* translate applied to the company drift <g> (SMIL
+ * `animateTransform` updates `transform.animVal` in supporting browsers).
+ */
+function readDriftTranslate(g: SVGGElement): { tx: number; ty: number } {
+  const t = g.transform;
+  if (!t) return { tx: 0, ty: 0 };
+  const list =
+    t.animVal.numberOfItems > 0 ? t.animVal : t.baseVal;
+  if (list.numberOfItems === 0) return { tx: 0, ty: 0 };
+  const m = list.getItem(0).matrix;
+  return { tx: m.e, ty: m.f };
 }
 
 /**
@@ -124,6 +217,17 @@ interface UserCamera {
 
 const MIN_CAMERA_SCALE = 0.7;
 const MAX_CAMERA_SCALE = 14;
+/**
+ * At company-only focus, wheel zoom-out pops to the portfolio when scale
+ * falls below this fraction of the focus “natural” scale. Lower = user must
+ * zoom out further before leaving the company view.
+ */
+const ZOOM_OUT_TO_PORTFOLIO_FRAC = 0.68;
+/**
+ * Wheel zoom uses `exp(-deltaY / WHEEL_ZOOM_SENSITIVITY)`. Larger values
+ * make each scroll step change scale more gently (was 400 originally).
+ */
+const WHEEL_ZOOM_SENSITIVITY = 800;
 /** Distance (px) of pointer movement required to treat pointerdown/up as a drag (not a click). */
 const DRAG_THRESHOLD_PX = 4;
 
@@ -138,6 +242,22 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
    * one-to-one camera updates, so this stays false during drag.
    */
   const [isWheelZooming, setIsWheelZooming] = useState(false);
+  /**
+   * Overview only: freeze SMIL drift at the current translate + timeline
+   * position so hover pauses without snapping to the origin.
+   */
+  const [driftHoverFreeze, setDriftHoverFreeze] = useState<{
+    id: string;
+    tx: number;
+    ty: number;
+    resumeT: number;
+  } | null>(null);
+  /**
+   * After unhover, `begin` for the next `<animateTransform>` must match
+   * `getCurrentTime()` at freeze so motion continues. Cleared when drilling
+   * into a company (focus path).
+   */
+  const driftBeginOverrideSecRef = useRef<Record<string, number>>({});
 
   /**
    * Switching grouping invalidates the bucket key in `focusPath[1]` (and
@@ -235,12 +355,10 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     setFocusPath((prev) => (prev.length === 0 ? prev : prev.slice(0, -1)));
   }, []);
 
-  /** Snap the camera back to the current focus (clears any user-driven pan/zoom). */
-  const snapToFocus = useCallback(() => {
-    setUserCamera(null);
-  }, []);
-
-  /** Full overview — clears focus path and camera override. */
+  /**
+   * Portfolio overview — clears manual pan/zoom and drill-down. Works from any
+   * zoom level or focus depth.
+   */
   const fitToAll = useCallback(() => {
     setUserCamera(null);
     setFocusPath([]);
@@ -249,7 +367,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   const crumbs: AtlasCrumb[] = [
     {
       label: "Portfolio",
-      onClick: () => setFocusPath([]),
+      onClick: fitToAll,
       active: focusPath.length === 0,
     },
   ];
@@ -398,9 +516,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
 
     if (currentLevel === 1 && inner && focusedCompany) {
       const hitGroup = inner.groups.find(
-        (g) =>
-          g.projectCount > 0 &&
-          dist(g.cx, g.cy, cursor.x, cursor.y) <= g.r
+        (g) => dist(g.cx, g.cy, cursor.x, cursor.y) <= g.r
       );
       if (hitGroup) {
         setFocusPath([focusedCompany.id, hitGroup.bucketKey]);
@@ -499,12 +615,36 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       if (!cursor) return;
       lastCursorSvg.current = cursor;
 
-      const factor = Math.exp(-e.deltaY / 400);
+      const factor = Math.exp(-e.deltaY / WHEEL_ZOOM_SENSITIVITY);
       const nextScale = Math.max(
         MIN_CAMERA_SCALE,
         Math.min(MAX_CAMERA_SCALE, baseScale * factor)
       );
       if (nextScale === baseScale) return;
+
+      // Company (goals) view only: scroll-zoom out past the "natural" framing
+      // for this company returns to the full portfolio, matching the zoom-in
+      // affordance in reverse.
+      if (
+        focusPath.length === 1 &&
+        e.deltaY > 0 &&
+        focusedCompany
+      ) {
+        const naturalScale =
+          Math.min(CANVAS_W, CANVAS_H) / (focusedCompany.r * 2.9);
+        if (nextScale < naturalScale * ZOOM_OUT_TO_PORTFOLIO_FRAC) {
+          if (wheelIdleTimer.current) {
+            clearTimeout(wheelIdleTimer.current);
+            wheelIdleTimer.current = null;
+          }
+          wheelTargetRef.current = null;
+          setIsWheelZooming(false);
+          setUserCamera(null);
+          setFocusPath([]);
+          return;
+        }
+      }
+
       // Keep the cursor's SVG point under the cursor after scaling.
       // On-screen constraint: tx + scale*cursor.x stays constant →
       // tx' = tx + (scale - nextScale) * cursor.x, same for y.
@@ -530,7 +670,15 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
 
       scheduleAutoDescend();
     },
-    [clientToSvgWithCamera, scale, scheduleAutoDescend, tx, ty]
+    [
+      clientToSvgWithCamera,
+      focusPath,
+      focusedCompany,
+      scale,
+      scheduleAutoDescend,
+      tx,
+      ty,
+    ]
   );
 
   const handlePointerDown = useCallback(
@@ -641,6 +789,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     setIsWheelZooming(false);
   }, [focusPath]);
 
+  useEffect(() => {
+    if (focusPath.length > 0) {
+      setDriftHoverFreeze(null);
+      driftBeginOverrideSecRef.current = {};
+    }
+  }, [focusPath]);
+
   // React attaches wheel handlers as passive by default, so we can't
   // `preventDefault` from `onWheel`. Attach a native non-passive wheel
   // handler so wheel-zooming over the Atlas never scrolls the page/
@@ -707,14 +862,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           return;
         }
         if (focusPath.length === 2 && focusedCompany && focusedGroup && inner) {
-          // Cycle groups with projects (skip empty ones — nothing inside to look at).
-          const populated = inner.groups.filter((g) => g.projectCount > 0);
-          const idx = populated.findIndex(
+          const allGroups = inner.groups;
+          const idx = allGroups.findIndex(
             (g) => g.bucketKey === focusedGroup.bucketKey
           );
-          if (idx < 0 || populated.length === 0) return;
-          const nextIdx = (idx + dir + populated.length) % populated.length;
-          const next = populated[nextIdx]!;
+          if (idx < 0 || allGroups.length === 0) return;
+          const nextIdx = (idx + dir + allGroups.length) % allGroups.length;
+          const next = allGroups[nextIdx]!;
           e.preventDefault();
           setUserCamera(null);
           setFocusPath([focusedCompany.id, next.bucketKey]);
@@ -777,8 +931,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           return;
         }
         if (focusPath.length === 1 && focusedCompany && inner) {
-          const populated = inner.groups.filter((g) => g.projectCount > 0);
-          const first = populated[0];
+          const first = inner.groups[0];
           if (!first) return;
           e.preventDefault();
           setUserCamera(null);
@@ -877,20 +1030,6 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
             radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%),
             #07070a;
         }
-        @keyframes atlas-drift {
-          from { transform: translate(0px, 0px); }
-          to   { transform: translate(var(--atlas-dx, 0px), var(--atlas-dy, 0px)); }
-        }
-        .atlas-drift {
-          animation: atlas-drift var(--atlas-dur, 9s) ease-in-out infinite alternate;
-          animation-delay: var(--atlas-delay, 0s);
-          transform-box: fill-box;
-          transform-origin: center;
-          will-change: transform;
-        }
-        .atlas-drift[data-drift-paused="true"] {
-          animation-play-state: paused;
-        }
         @keyframes atlas-pulse-soft {
           0%, 100% { opacity: 0.55; }
           50%      { opacity: 1; }
@@ -972,18 +1111,63 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           {companies.map((company) => {
             const isFocused = focusedCompany?.id === company.id;
             const isDimmed = Boolean(focusedCompany) && !isFocused;
-            // Pause drift entirely once a company is focused — the focused
-            // bubble must stay aligned with the camera target, and
-            // off-screen siblings drifting consumes battery for nothing.
-            const driftPaused = level > 0;
+            // Stop SMIL when drilling in; on overview, freeze at hover
+            // without snapping (static translate + restorable begin time).
+            const drift = driftDescriptorFor(company.id);
+            const beginOverride = driftBeginOverrideSecRef.current[company.id];
+            const beginForAnim =
+              beginOverride != null
+                ? `-${beginOverride.toFixed(4)}s`
+                : drift.begin;
+            const hoverThis =
+              level === 0 && driftHoverFreeze?.id === company.id;
+            const showDriftAnim = level === 0 && !hoverThis;
+            const driftTransform = hoverThis
+              ? `translate(${driftHoverFreeze!.tx} ${driftHoverFreeze!.ty})`
+              : undefined;
 
             return (
               <g key={company.id}>
                 <g
-                  className="atlas-drift"
-                  data-drift-paused={driftPaused ? "true" : undefined}
-                  style={driftStyleFor(company.id)}
+                  transform={driftTransform}
+                  onPointerEnter={(e) => {
+                    if (level !== 0) return;
+                    if (isDimmed) return;
+                    const g = e.currentTarget as SVGGElement;
+                    const anim = g.querySelector("animateTransform");
+                    if (!anim) return;
+                    const resumeT = (anim as SVGAnimationElement).getCurrentTime();
+                    if (!Number.isFinite(resumeT)) return;
+                    const { tx, ty } = readDriftTranslate(g);
+                    setDriftHoverFreeze({ id: company.id, tx, ty, resumeT });
+                  }}
+                  onPointerLeave={() => {
+                    setDriftHoverFreeze((prev) => {
+                      if (prev?.id === company.id) {
+                        driftBeginOverrideSecRef.current[company.id] =
+                          prev.resumeT;
+                        return null;
+                      }
+                      return prev;
+                    });
+                  }}
                 >
+                  {showDriftAnim ? (
+                    <animateTransform
+                      key={`${company.id}-drift-${beginForAnim}`}
+                      attributeName="transform"
+                      attributeType="XML"
+                      type="translate"
+                      values={drift.values}
+                      keyTimes="0;0.25;0.5;0.75;1"
+                      calcMode="spline"
+                      keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1"
+                      dur={drift.dur}
+                      begin={beginForAnim}
+                      repeatCount="indefinite"
+                      additive="sum"
+                    />
+                  ) : null}
                   <AtlasCompany
                     company={company}
                     isFocused={isFocused}
@@ -1020,8 +1204,8 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         </g>
       </svg>
 
-      {/* Floating zoom controls (bottom-right). */}
-      <div className="pointer-events-auto absolute bottom-6 right-6 z-10 flex flex-col gap-1">
+      {/* Floating zoom controls (right edge, vertically centered — avoids the bottom chat FAB). */}
+      <div className="pointer-events-auto absolute right-6 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1">
         <button
           type="button"
           onClick={() => zoomAroundCenter(1.3, { scale, tx, ty }, setUserCamera)}
@@ -1043,23 +1227,12 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         <button
           type="button"
           onClick={fitToAll}
-          aria-label="Fit all companies"
-          title="Fit all"
+          aria-label="Fit portfolio overview"
+          title="Fit portfolio — show all companies (clears pan, zoom, and drill-down)"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
         >
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
-        {isUserDriven ? (
-          <button
-            type="button"
-            onClick={snapToFocus}
-            aria-label="Snap back to focus"
-            title="Snap back to focus"
-            className="mt-1 inline-flex h-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 px-2 font-mono text-[9px] uppercase tracking-[0.24em] text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
-          >
-            Snap
-          </button>
-        ) : null}
       </div>
 
       {milestonePanelProps ? (
@@ -1123,14 +1296,36 @@ function renderCompanyInner(args: {
 
   const showGroupLabels = level === 1;
 
+  const focusLogoPath = company.company.logoPath?.trim() ?? "";
+  const focusCenterLogoR = company.r * 0.24;
+
   return (
     <g>
+      {level >= 1 && focusLogoPath ? (
+        <g pointerEvents="none">
+          <defs>
+            <clipPath id={`atlas-focus-logo-${company.id}`}>
+              <circle cx={company.cx} cy={company.cy} r={focusCenterLogoR} />
+            </clipPath>
+          </defs>
+          <image
+            href={focusLogoPath}
+            x={company.cx - focusCenterLogoR}
+            y={company.cy - focusCenterLogoR}
+            width={focusCenterLogoR * 2}
+            height={focusCenterLogoR * 2}
+            clipPath={`url(#atlas-focus-logo-${company.id})`}
+            preserveAspectRatio="xMidYMid slice"
+            opacity={0.38}
+          />
+        </g>
+      ) : null}
+
       {inner.groups.map((group) => {
         const isGroupFocused = focusedGroup?.bucketKey === group.bucketKey;
         const isGroupDimmed = Boolean(focusedGroup) && !isGroupFocused;
         const isEmpty = group.projectCount === 0;
-        // Empty goals can't be drilled into — there's nothing inside.
-        const clickable = level === 1 && !isGroupFocused && !isEmpty;
+        const clickable = level === 1 && !isGroupFocused;
 
         // Label placement: push outward along the ray from the company
         // center through the group center. This guarantees each goal's
@@ -1153,10 +1348,50 @@ function renderCompanyInner(args: {
             : nx > 0
               ? "start"
               : "end";
-        const countSuffix = isEmpty
-          ? ""
-          : ` · ${group.projectCount}`;
-        const rawLabel = `${truncate(group.label, 28).toUpperCase()}${countSuffix}`;
+        const nameLines = splitGoalLabelName(
+          group.label.toUpperCase().trim(),
+          GOAL_LABEL_MAX_CHARS_PER_LINE
+        );
+        // Project count rides on its own line (same style as title).
+        const titleLines: string[] = [...nameLines];
+        if (!isEmpty) {
+          titleLines.push(` · ${group.projectCount}`);
+        }
+        const lineHeight = 12;
+        const titleNLines = titleLines.length;
+
+        // Type chip — dominant ProjectType for non-empty goals; subtle "—"
+        // chip for empty ones so the row reads consistently across goals.
+        const goalType = dominantProjectType(group);
+        const chipLabel = goalType ? goalType.toUpperCase() : null;
+        const chipColor = goalType
+          ? (PROJECT_TYPE_COLOR[goalType] ?? group.color)
+          : group.color;
+        const chipFontSize = 8;
+        const chipPadX = 6;
+        const chipPadY = 3;
+        const chipCharW = chipFontSize * 0.62;
+        const chipTextW = chipLabel ? chipLabel.length * chipCharW : 0;
+        const chipW = chipLabel ? chipTextW + chipPadX * 2 : 0;
+        const chipH = chipLabel ? chipFontSize + chipPadY * 2 : 0;
+        const chipGap = chipLabel ? 6 : 0;
+
+        // Vertical layout: chip then title, centered around `labelY`.
+        const blockH = (chipLabel ? chipH + chipGap : 0) + titleNLines * lineHeight;
+        const blockTop = labelY - blockH / 2;
+        const chipCenterY = chipLabel ? blockTop + chipH / 2 : 0;
+        const titleFirstY = chipLabel
+          ? blockTop + chipH + chipGap + lineHeight * 0.5
+          : titleNLines > 1
+            ? blockTop + lineHeight * 0.5
+            : labelY;
+        // Chip x: align to the same anchor as the title text.
+        const chipX =
+          anchor === "start"
+            ? labelX
+            : anchor === "end"
+              ? labelX - chipW
+              : labelX - chipW / 2;
 
         return (
           <g
@@ -1164,9 +1399,7 @@ function renderCompanyInner(args: {
             className="atlas-fade"
             data-atlas-interactive={clickable ? "true" : undefined}
             style={{
-              // Empty goals are rendered at a lower baseline opacity so the
-              // eye goes to the goals with actual work in them first.
-              opacity: isGroupDimmed ? 0.1 : isEmpty ? 0.45 : 1,
+              opacity: isGroupDimmed ? 0.1 : 1,
               cursor: clickable ? "pointer" : "default",
             }}
             onClick={(e) => {
@@ -1180,9 +1413,9 @@ function renderCompanyInner(args: {
               cy={group.cy}
               r={group.r}
               fill={group.color}
-              fillOpacity={isEmpty ? 0 : 0.04}
+              fillOpacity={0.04}
               stroke={group.color}
-              strokeOpacity={isEmpty ? 0.2 : 0.35}
+              strokeOpacity={0.35}
               strokeWidth={1.2}
               strokeDasharray="4 4"
               vectorEffect="non-scaling-stroke"
@@ -1192,18 +1425,56 @@ function renderCompanyInner(args: {
               className="atlas-fade"
               transform={counterScaleTransform(group.cx, group.cy, scale)}
             >
+              {chipLabel ? (
+                <g>
+                  <rect
+                    x={chipX}
+                    y={chipCenterY - chipH / 2}
+                    width={chipW}
+                    height={chipH}
+                    rx={chipH / 2}
+                    fill={chipColor}
+                    fillOpacity={0.18}
+                    stroke={chipColor}
+                    strokeOpacity={0.7}
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <text
+                    x={chipX + chipW / 2}
+                    y={chipCenterY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={chipFontSize}
+                    fill={chipColor}
+                    letterSpacing={1.4}
+                    fontWeight={600}
+                  >
+                    {chipLabel}
+                  </text>
+                </g>
+              ) : null}
               <text
                 x={labelX}
-                y={labelY}
+                y={titleFirstY}
                 textAnchor={anchor}
-                dominantBaseline="middle"
+                dominantBaseline={titleNLines > 1 || chipLabel ? "alphabetic" : "middle"}
                 fontSize={10}
                 fill={group.color}
-                fillOpacity={isEmpty ? 0.55 : 1}
                 letterSpacing={1.1}
                 fontWeight={500}
               >
-                {rawLabel}
+                {titleNLines > 1 || chipLabel
+                  ? titleLines.map((line, i) => (
+                      <tspan
+                        key={i}
+                        x={labelX}
+                        dy={i === 0 ? 0 : lineHeight}
+                      >
+                        {line}
+                      </tspan>
+                    ))
+                  : titleLines[0]}
               </text>
             </g>
           </g>

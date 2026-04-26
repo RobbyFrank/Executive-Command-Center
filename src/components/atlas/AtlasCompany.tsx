@@ -20,6 +20,70 @@ interface AtlasCompanyProps {
   onClick: () => void;
 }
 
+/** Roadmap /company row: Target + value (lucide `target` paths, 24×24). */
+function SvgTargetIcon({
+  x,
+  y,
+  size,
+  stroke = "#52525b",
+}: {
+  x: number;
+  y: number;
+  size: number;
+  stroke?: string;
+}) {
+  return (
+    <svg
+      x={x}
+      y={y}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={stroke}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+}
+
+/** Roadmap /company row: Layers + value (lucide `layers` paths, 24×24). */
+function SvgLayersIcon({
+  x,
+  y,
+  size,
+  stroke = "#52525b",
+}: {
+  x: number;
+  y: number;
+  size: number;
+  stroke?: string;
+}) {
+  return (
+    <svg
+      x={x}
+      y={y}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={stroke}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
+      <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
+      <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
+    </svg>
+  );
+}
+
 /** YYYY-MM-DD comparison for "is overdue" — done as plain string compare. */
 function todayYmd(): string {
   const d = new Date();
@@ -73,6 +137,10 @@ function momentumBand(activity: number): {
   return { color: "#3f3f46", glow: "rgba(0,0,0,0)", countColor: "#a1a1aa" };
 }
 
+/** Outer ring — read against the starfield and over full-bleed logos. */
+const ATLAS_COMPANY_RING_STROKE = "#94a3b8";
+const ATLAS_COMPANY_RING_WIDTH = 2;
+
 /** Build an SVG path arc between two angles (degrees, SVG y-down) on a circle. */
 function arcPath(
   cx: number,
@@ -95,9 +163,11 @@ function arcPath(
 /**
  * Company outer circle + logo + compact icon/colour signals.
  *
- * Visual language at the overview (icons + colour, never new text):
- * - Centered **logo** (or italic name fallback) identifies the company.
- * - Tiny **project count** number whose colour reflects the momentum band.
+ * Visual language at the overview (icons + colour, minimal text):
+ * - **Logo** fills the disc when present (clipped circle), or italic name
+ *   fallback when there is no logo asset.
+ * - **Goals + projects** — same iconography as the Roadmap company row
+ *   (`Target` + goal count, `Layers` + non-mirror project count); no words.
  * - Bottom **momentum gauge** — coloured arc whose length tracks the
  *   company's activity score and whose colour reflects the band
  *   (emerald → amber → rose). A faint full-track arc behind it gives the
@@ -122,6 +192,11 @@ export function AtlasCompany({
   scale,
   onClick,
 }: AtlasCompanyProps) {
+  const goalCount = company.company.goals.length;
+  const roadmapProjectCount = company.company.goals.reduce(
+    (sum, g) => sum + g.projects.filter((p) => !p.isMirror).length,
+    0
+  );
   const clickable = company.projectCount > 0;
   const stuckTotal = company.atRiskCount + company.stuckCount;
   const hasProjects = company.projectCount > 0;
@@ -147,11 +222,10 @@ export function AtlasCompany({
 
   const band = momentumBand(company.activity);
 
-  // Logo fills ~55% of the circle's radius (in viewBox units — grows with
-  // the circle, unlike the count number which is counter-scaled). Nudged
-  // slightly upward to leave room for the count below it.
-  const logoR = company.r * 0.55;
-  const logoCy = company.cy - company.r * 0.08;
+  /** Logo image covers the full disc in portfolio overview (clipped to r). */
+  const useFullBleedLogo = hasLogo && showLabel && !isFocused;
+  /** Vertically nudge italic name on logo-less discs. */
+  const nameFallbackCy = company.cy - company.r * 0.08;
 
   // Counter-scaled text group uses on-screen viewBox units for offsets and
   // font sizes. 1 SVG unit inside the wrapper == 1 on-screen pixel.
@@ -238,6 +312,96 @@ export function AtlasCompany({
   const showOverviewChrome = showLabel && !isFocused;
 
   const isClickable = clickable && !isFocused;
+  /** Icons on the stats pill: light stroke on near-black fill. */
+  const statPillIconStroke = hasRisk ? "#fda4a4" : "#a1a1aa";
+  const statPillTextFill = hasRisk ? "#fee2e2" : "#f4f4f5";
+
+  const goalProjectStatsRow = !hasProjects
+    ? null
+    : (() => {
+        const iconS = 10;
+        const betweenPairs = 10;
+        const iconTextGap = 4;
+        const charW = countFontSize * 0.55;
+        const textW = (n: number) => String(n).length * charW;
+        const pairW = (n: number) => iconS + iconTextGap + textW(n);
+        const rowW =
+          pairW(goalCount) + betweenPairs + pairW(roadmapProjectCount);
+        const padX = 12;
+        const pillW = rowW + padX * 2;
+        const pillH = 22;
+        const rowLeft = -rowW / 2;
+        const bottomY = company.cy + company.r * 0.6;
+        const xTargets = rowLeft;
+        const xTargetNum = xTargets + iconS + iconTextGap;
+        const xLayers = xTargets + pairW(goalCount) + betweenPairs;
+        const xLayerNum = xLayers + iconS + iconTextGap;
+        return (
+          <g
+            className="atlas-fade"
+            style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
+            transform={`translate(${company.cx} ${company.cy}) scale(${inv}) translate(${-company.cx} ${-company.cy})`}
+          >
+            <g transform={`translate(${company.cx} ${bottomY})`}>
+              <rect
+                x={-pillW / 2}
+                y={-pillH / 2}
+                width={pillW}
+                height={pillH}
+                rx={6}
+                fill="#09090b"
+                fillOpacity={0.9}
+                stroke="#3f3f46"
+                strokeWidth={1}
+                strokeOpacity={0.95}
+                vectorEffect="non-scaling-stroke"
+              />
+              <g
+                className="tabular-nums"
+                fontSize={countFontSize}
+                fontWeight={600}
+                fill={statPillTextFill}
+              >
+                <SvgTargetIcon
+                  x={xTargets}
+                  y={-iconS / 2}
+                  size={iconS}
+                  stroke={statPillIconStroke}
+                />
+                <text
+                  x={xTargetNum}
+                  y={0}
+                  textAnchor="start"
+                  dominantBaseline="middle"
+                  fill={statPillTextFill}
+                  fontSize={countFontSize}
+                  fontWeight={600}
+                >
+                  {goalCount}
+                </text>
+                <SvgLayersIcon
+                  x={xLayers}
+                  y={-iconS / 2}
+                  size={iconS}
+                  stroke={statPillIconStroke}
+                />
+                <text
+                  x={xLayerNum}
+                  y={0}
+                  textAnchor="start"
+                  dominantBaseline="middle"
+                  fill={statPillTextFill}
+                  fontSize={countFontSize}
+                  fontWeight={600}
+                >
+                  {roadmapProjectCount}
+                </text>
+              </g>
+            </g>
+          </g>
+        );
+      })();
+
   return (
     <g
       className="atlas-fade"
@@ -264,16 +428,19 @@ export function AtlasCompany({
       <title>
         {company.name}
         {hasProjects
-          ? ` — ${company.projectCount} project${company.projectCount === 1 ? "" : "s"}${
+          ? ` — ${goalCount} goal${goalCount !== 1 ? "s" : ""}, ${roadmapProjectCount} project${roadmapProjectCount !== 1 ? "s" : ""}${
               hasRisk ? `, ${stuckTotal} at risk` : ""
             }`
           : ""}
       </title>
 
       <defs>
-        {/* Soft inner-glass gradient for the bubble fill — slightly lighter
-            top-left, darker bottom-right edge. Gives a premium glassy feel
-            without an SVG filter. */}
+        {useFullBleedLogo ? (
+          <clipPath id={clipId}>
+            <circle cx={company.cx} cy={company.cy} r={company.r} />
+          </clipPath>
+        ) : null}
+        {/* Soft inner-glass gradient for logo-less bubbles. */}
         <radialGradient
           id={fillGradientId}
           cx="35%"
@@ -288,16 +455,45 @@ export function AtlasCompany({
         </radialGradient>
       </defs>
 
-      <circle
-        cx={company.cx}
-        cy={company.cy}
-        r={company.r}
-        fill={`url(#${fillGradientId})`}
-        stroke="#3f3f46"
-        strokeOpacity={isFocused ? 0.45 : 0.7}
-        strokeWidth={1}
-        vectorEffect="non-scaling-stroke"
-      />
+      {useFullBleedLogo ? (
+        <g clipPath={`url(#${clipId})`}>
+          <circle cx={company.cx} cy={company.cy} r={company.r} fill="#18181b" />
+          <image
+            href={logoPath}
+            x={company.cx - company.r}
+            y={company.cy - company.r}
+            width={company.r * 2}
+            height={company.r * 2}
+            preserveAspectRatio="xMidYMid slice"
+          />
+        </g>
+      ) : (
+        <circle
+          cx={company.cx}
+          cy={company.cy}
+          r={company.r}
+          fill={`url(#${fillGradientId})`}
+          stroke={ATLAS_COMPANY_RING_STROKE}
+          strokeOpacity={isFocused ? 0.85 : 0.92}
+          strokeWidth={ATLAS_COMPANY_RING_WIDTH}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+
+      {/* Prominent border under gauge / at-risk / pips so that chrome stays on top. */}
+      {useFullBleedLogo ? (
+        <circle
+          cx={company.cx}
+          cy={company.cy}
+          r={company.r}
+          fill="none"
+          stroke={ATLAS_COMPANY_RING_STROKE}
+          strokeOpacity={0.95}
+          strokeWidth={ATLAS_COMPANY_RING_WIDTH}
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="none"
+        />
+      ) : null}
 
       {/* Bottom momentum gauge — track + bar. Hidden once focused. */}
       {showOverviewChrome && hasProjects ? (
@@ -407,71 +603,28 @@ export function AtlasCompany({
         </g>
       ) : null}
 
-      {/* Logo (or fallback name) — only visible at overview level. */}
-      <g
-        className="atlas-fade"
-        style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
-      >
-        {hasLogo ? (
-          <>
-            <defs>
-              <clipPath id={clipId}>
-                <circle cx={company.cx} cy={logoCy} r={logoR} />
-              </clipPath>
-            </defs>
-            <image
-              href={logoPath}
-              x={company.cx - logoR}
-              y={logoCy - logoR}
-              width={logoR * 2}
-              height={logoR * 2}
-              clipPath={`url(#${clipId})`}
-              preserveAspectRatio="xMidYMid slice"
-            />
-          </>
-        ) : (
-          <g
-            transform={`translate(${company.cx} ${logoCy}) scale(${inv}) translate(${-company.cx} ${-logoCy})`}
-          >
-            <text
-              x={company.cx}
-              y={logoCy + nameFontSize * 0.35}
-              textAnchor="middle"
-              fontSize={nameFontSize}
-              fill="#e4e4e7"
-              fontStyle="italic"
-              fontWeight={500}
-            >
-              {company.name}
-            </text>
-          </g>
-        )}
-      </g>
-
-      {/* Tiny project-count number — shown only when the company has
-          projects. Silent companies intentionally render no caption. Color
-          is driven by the momentum band so a quick glance reads "healthy"
-          (mint), "watch" (amber), or "trouble" (rose). */}
-      {hasProjects ? (
+      {/* Italic name fallback when there is no logo — only in overview. */}
+      {!hasLogo && showLabel ? (
         <g
           className="atlas-fade"
-          style={{ opacity: showLabel ? 1 : 0, pointerEvents: "none" }}
-          transform={`translate(${company.cx} ${company.cy}) scale(${inv}) translate(${-company.cx} ${-company.cy})`}
+          style={{ pointerEvents: "none" }}
+          transform={`translate(${company.cx} ${nameFallbackCy}) scale(${inv}) translate(${-company.cx} ${-nameFallbackCy})`}
         >
           <text
             x={company.cx}
-            y={company.cy + company.r * 0.62}
+            y={nameFallbackCy + nameFontSize * 0.35}
             textAnchor="middle"
-            fontSize={countFontSize}
-            fontWeight={600}
-            fill={hasRisk ? "#fca5a5" : band.countColor}
-            letterSpacing={0.4}
-            className="tabular-nums"
+            fontSize={nameFontSize}
+            fill="#e4e4e7"
+            fontStyle="italic"
+            fontWeight={500}
           >
-            {company.projectCount}
+            {company.name}
           </text>
         </g>
       ) : null}
+
+      {goalProjectStatsRow}
     </g>
   );
 }

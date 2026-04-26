@@ -36,7 +36,7 @@ The pipeline streams over **NDJSON** with `currentStage`, `channels.{total,done,
 
 - **Key:** `ecc:slackSuggestions:data` (see `src/server/repository/slack-suggestions-storage.ts`).
 - **Shape:** `SlackSuggestionsData` — per-company arrays of `SlackSuggestionRecord` plus `rejectedKeysByCompany` for user rejections.
-- **Invalidation:** `updateTag(ECC_SLACK_SUGGESTIONS_TAG)` so dashboard counts and lists stay fresh.
+- **Invalidation:** After the pipeline writes the queue, `runSlackSyncPipelineForCompany` calls `revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 })` (required for Route Handlers and crons; Next.js 16 only allows `updateTag` inside Server Actions). From the UI, `src/server/actions/slackSuggestions.ts` uses `updateTag`: **approve** refreshes both `ECC_SLACK_SUGGESTIONS_TAG` and `ECC_TRACKER_DATA_TAG`; **reject** refreshes only the suggestions tag.
 - **Dedupe:** `computeSlackSuggestionDedupeKey(companyId, payload)` (`src/lib/slackSuggestionDedupe.ts`) — new suggestions with the same key **replace** older pending ones; **rejected** keys are filtered on reconcile.
 
 ## Suggestion kinds (Pass 1 output)

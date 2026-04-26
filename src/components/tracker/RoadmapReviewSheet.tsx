@@ -67,15 +67,24 @@ type SyncResult = {
   error?: string;
 };
 
+type SyncCompanyEntry = {
+  id: string;
+  name: string;
+  logoPath?: string;
+};
+
 type SyncProgress = {
   total: number;
   completed: number;
   okCount: number;
   failCount: number;
+  currentCompanyId?: string;
   currentCompanyName?: string;
   currentStage?: SlackScanAllStage;
   channels?: { total: number; done: number; failed: number; current?: string };
   results: SyncResult[];
+  /** Companies in this run, in the order the server processes them. Used to show a per-company list. */
+  scopedCompanies?: SyncCompanyEntry[];
   /** When set, the current run is scoped to a single company (label only). */
   scopeLabel?: string;
   /** When the run finished. */
@@ -87,6 +96,163 @@ function formatEta(seconds: number): string {
   if (seconds < 60) return `~${Math.max(1, Math.round(seconds))}s`;
   const m = Math.round(seconds / 60);
   return `~${m}m`;
+}
+
+type CompanyRowStatus = "queued" | "in_progress" | "done" | "failed";
+
+type CompanyProgressRow = {
+  entry: SyncCompanyEntry;
+  status: CompanyRowStatus;
+  result?: SyncResult;
+};
+
+/**
+ * Order: completed (in stream order), then in-progress, then queued.
+ * Falls back to a name-only stub when results reference companies not in the
+ * scoped list (shouldn't happen but defends against client/server drift).
+ */
+function buildCompanyProgressRows(progress: SyncProgress): CompanyProgressRow[] {
+  const scoped = progress.scopedCompanies ?? [];
+  const scopedById = new Map(scoped.map((c) => [c.id, c]));
+  const seenInResults = new Set<string>();
+  const rows: CompanyProgressRow[] = [];
+
+  for (const r of progress.results) {
+    seenInResults.add(r.companyId);
+    rows.push({
+      entry: scopedById.get(r.companyId) ?? {
+        id: r.companyId,
+        name: r.companyName,
+      },
+      status: r.ok ? "done" : "failed",
+      result: r,
+    });
+  }
+
+  if (
+    progress.currentCompanyId &&
+    !seenInResults.has(progress.currentCompanyId)
+  ) {
+    rows.push({
+      entry: scopedById.get(progress.currentCompanyId) ?? {
+        id: progress.currentCompanyId,
+        name: progress.currentCompanyName ?? progress.currentCompanyId,
+      },
+      status: "in_progress",
+    });
+  }
+
+  for (const c of scoped) {
+    if (seenInResults.has(c.id)) continue;
+    if (c.id === progress.currentCompanyId) continue;
+    rows.push({ entry: c, status: "queued" });
+  }
+
+  return rows;
+}
+
+function CompanyProgressRowItem({
+  row,
+  stage,
+  channels,
+}: {
+  row: CompanyProgressRow;
+  stage?: SlackScanAllStage;
+  channels?: SyncProgress["channels"];
+}) {
+  const { entry, status, result } = row;
+  let icon: React.ReactNode;
+  let detail: React.ReactNode;
+  switch (status) {
+    case "in_progress": {
+      icon = (
+        <Loader2
+          className="h-3 w-3 shrink-0 animate-spin text-cyan-300"
+          aria-hidden
+        />
+      );
+      const label = STAGE_LABELS[stage ?? "starting"];
+      const channelHint =
+        stage === "history" && channels
+          ? ` (${channels.done}/${channels.total})`
+          : "";
+      detail = (
+        <span className="truncate text-zinc-300">
+          {label}
+          {channelHint}
+        </span>
+      );
+      break;
+    }
+    case "done": {
+      icon = (
+        <CheckCircle2
+          className="h-3 w-3 shrink-0 text-emerald-300"
+          aria-hidden
+        />
+      );
+      const n = result?.pendingCount ?? 0;
+      detail =
+        n > 0 ? (
+          <span className="text-emerald-300">
+            {n} new
+          </span>
+        ) : (
+          <span className="text-zinc-500">No new</span>
+        );
+      break;
+    }
+    case "failed": {
+      icon = (
+        <AlertTriangle
+          className="h-3 w-3 shrink-0 text-rose-300"
+          aria-hidden
+        />
+      );
+      detail = (
+        <span
+          className="truncate text-rose-300/85"
+          title={result?.error}
+        >
+          {result?.error ?? "Failed"}
+        </span>
+      );
+      break;
+    }
+    default: {
+      icon = (
+        <span
+          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-600"
+          aria-hidden
+        />
+      );
+      detail = <span className="text-zinc-500">Queued</span>;
+    }
+  }
+
+  return (
+    <li className="flex items-center gap-2 py-0.5">
+      <span className="flex w-3 shrink-0 items-center justify-center">
+        {icon}
+      </span>
+      <CompanyLogo logoPath={entry.logoPath} name={entry.name} />
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate font-medium",
+          status === "in_progress"
+            ? "text-zinc-100"
+            : status === "queued"
+              ? "text-zinc-400"
+              : "text-zinc-200"
+        )}
+      >
+        {entry.name}
+      </span>
+      <span className="ml-auto min-w-0 max-w-[55%] truncate text-right text-[10px]">
+        {detail}
+      </span>
+    </li>
+  );
 }
 
 function SyncProgressPanel({
@@ -101,9 +267,10 @@ function SyncProgressPanel({
   const fraction = total > 0 ? completed / total : 0;
   const remaining = Math.max(0, total - completed);
   const etaSeconds = remaining * SECONDS_PER_COMPANY_ESTIMATE;
-  const stageLabel = progress.currentStage
-    ? STAGE_LABELS[progress.currentStage]
-    : null;
+  const companyRows = useMemo(
+    () => buildCompanyProgressRows(progress),
+    [progress]
+  );
 
   return (
     <div className="mt-3 space-y-2 rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2.5 text-[11px]">
@@ -142,37 +309,6 @@ function SyncProgressPanel({
           }}
         />
       </div>
-      {syncing && progress.currentCompanyName ? (
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1.5 text-zinc-300">
-            <Loader2
-              className="h-3 w-3 shrink-0 animate-spin text-cyan-300"
-              aria-hidden
-            />
-            <span className="truncate font-medium">
-              {progress.currentCompanyName}
-            </span>
-            {stageLabel ? (
-              <span className="truncate text-zinc-500">
-                — {stageLabel}
-                {progress.currentStage === "history" && progress.channels
-                  ? ` (${progress.channels.done}/${progress.channels.total})`
-                  : null}
-              </span>
-            ) : null}
-          </div>
-          {progress.currentStage === "history" && progress.channels?.current ? (
-            <div className="ml-4 truncate text-zinc-500">
-              #{progress.channels.current}
-              {progress.channels.failed > 0 ? (
-                <span className="ml-1 text-amber-400/80">
-                  · {progress.channels.failed} ch failed
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
         <span className="inline-flex items-center gap-1 text-emerald-300">
           <CheckCircle2 className="h-3 w-3" aria-hidden />
@@ -193,23 +329,29 @@ function SyncProgressPanel({
             new pending
           </span>
         ) : null}
+        {syncing &&
+        progress.currentStage === "history" &&
+        progress.channels?.current ? (
+          <span className="ml-auto truncate text-zinc-500">
+            #{progress.channels.current}
+            {progress.channels.failed > 0 ? (
+              <span className="ml-1 text-amber-400/80">
+                · {progress.channels.failed} ch failed
+              </span>
+            ) : null}
+          </span>
+        ) : null}
       </div>
-      {!syncing && progress.failCount > 0 ? (
-        <ul className="space-y-0.5 border-t border-zinc-800 pt-2 text-[10px] text-rose-200/85">
-          {progress.results
-            .filter((r) => !r.ok)
-            .slice(0, 3)
-            .map((r) => (
-              <li key={r.companyId} className="truncate">
-                <span className="font-medium">{r.companyName}:</span>{" "}
-                <span className="text-rose-300/80">{r.error}</span>
-              </li>
-            ))}
-          {progress.results.filter((r) => !r.ok).length > 3 ? (
-            <li className="text-rose-300/60">
-              + {progress.results.filter((r) => !r.ok).length - 3} more
-            </li>
-          ) : null}
+      {companyRows.length > 0 ? (
+        <ul className="max-h-64 space-y-0.5 overflow-y-auto border-t border-zinc-800/80 pt-2 text-[11px]">
+          {companyRows.map((row) => (
+            <CompanyProgressRowItem
+              key={row.entry.id}
+              row={row}
+              stage={progress.currentStage}
+              channels={progress.channels}
+            />
+          ))}
         </ul>
       ) : null}
       {syncing ? (
@@ -552,12 +694,19 @@ export function RoadmapReviewSheet({
       setSyncing(true);
       setSlackQueueSyncing(true);
       syncStartRef.current = Date.now();
+      const filterSet = opts.companyIds
+        ? new Set(opts.companyIds)
+        : null;
+      const scopedCompanies: SyncCompanyEntry[] = companies
+        .filter((c) => (filterSet ? filterSet.has(c.id) : true))
+        .map((c) => ({ id: c.id, name: c.name, logoPath: c.logoPath }));
       setSyncProgress({
-        total: 0,
+        total: scopedCompanies.length,
         completed: 0,
         okCount: 0,
         failCount: 0,
         results: [],
+        scopedCompanies,
         scopeLabel: opts.scopeLabel,
       });
       const ac = new AbortController();
@@ -599,10 +748,12 @@ export function RoadmapReviewSheet({
               completed: e.completed,
               okCount: e.okCount,
               failCount: e.failCount,
+              currentCompanyId: e.currentCompanyId,
               currentCompanyName: e.currentCompanyName,
               currentStage: e.currentStage,
               channels: e.channels,
               results: e.results,
+              scopedCompanies: prev?.scopedCompanies,
               scopeLabel: prev?.scopeLabel,
             }));
             if (e.results.length > lastResultsLen) {
@@ -617,6 +768,7 @@ export function RoadmapReviewSheet({
               okCount: e.okCount,
               failCount: e.failCount,
               results: e.results,
+              scopedCompanies: prev?.scopedCompanies,
               scopeLabel: prev?.scopeLabel,
               finishedAt: Date.now(),
             }));
@@ -658,7 +810,14 @@ export function RoadmapReviewSheet({
         syncStartRef.current = null;
       }
     },
-    [syncing, load, router, setSlackQueueSyncing, setSlackQueueSyncProgress]
+    [
+      companies,
+      syncing,
+      load,
+      router,
+      setSlackQueueSyncing,
+      setSlackQueueSyncProgress,
+    ]
   );
 
   const cancelSync = useCallback(() => {

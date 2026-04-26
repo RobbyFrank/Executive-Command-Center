@@ -12,7 +12,14 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `npm ci`, then `npm run lint`, 
 
 ## Dashboard caching
 
-Roadmap (`/`), Companies (`/companies`), and Team (`/team`) load tracker data via `unstable_cache` in `src/server/tracker-page-data.ts` with tag `ecc-tracker-data`. Mutations in `src/server/actions/tracker.ts` and `uploads.ts` call `updateTag("ecc-tracker-data")` so cached reads refresh after writes. Pending **Slack Roadmap** suggestion counts and lists use tag **`ecc-slack-suggestions`** (`ECC_SLACK_SUGGESTIONS_TAG`); the scrape pipeline and suggestion actions call `updateTag` on that tag when the queue changes.
+Roadmap (`/`), Companies (`/companies`), and Team (`/team`) load tracker data via `unstable_cache` in `src/server/tracker-page-data.ts` with tag `ecc-tracker-data`.
+
+**Invalidating that cache** depends on where the code runs:
+
+- **Server Actions** (for example `src/server/actions/tracker.ts`, `uploads.ts`, `auth-admin.ts`, and approve/reject in `slackSuggestions.ts`) call `updateTag(ECC_TRACKER_DATA_TAG)` so the next request sees fresh data (read-your-own-writes).
+- **Route Handlers and crons** cannot use `updateTag` in Next.js 16; they must call `revalidateTag(ECC_TRACKER_DATA_TAG, { expire: 0 })` instead. The onboarding detector does this after it creates or backfills people (`src/server/actions/onboarding/detectNewHires.ts`), because it is invoked from `GET /api/cron/onboarding-detector`.
+
+Pending **Slack Roadmap** suggestion counts and lists use tag **`ecc-slack-suggestions`** (`ECC_SLACK_SUGGESTIONS_TAG`). The Slack sync pipeline (`src/server/actions/slackRoadmapSync/pipeline.ts`) calls `revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 })` after queue writes (cron and on-demand scrape). Human approve/reject in `slackSuggestions.ts` uses `updateTag` on that tag (and on `ecc-tracker-data` when applying suggestions changes the tracker).
 
 ## Dashboard UI preferences
 
@@ -89,3 +96,5 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 ## Roadmap Slack scan (cron)
 
 `GET /api/cron/slack-roadmap-sync` runs daily at **`0 0 * * *` (UTC midnight)** in `vercel.json`. Same **`Authorization: Bearer ${CRON_SECRET}`** pattern. The job iterates **companies** and runs the shared Slack Roadmap pipeline: recent **2-day** history with **thread replies**, two Anthropic passes (suggest + reconcile), dedupe/supersession, and writes the per-company **pending** queue to Redis key **`ecc:slackSuggestions:data`**. The UI (Roadmap scan dialog + nav sheet) is for **human approve/reject**; rejects store dedupe keys so they do not re-queue trivially. Full runbook: [roadmap-slack-scrape.md](roadmap-slack-scrape.md).
+
+**Vercel logs:** The pipeline logs structured **JSON one line at a time** to stdout. In the Vercel project → *Logs* (or the Runtime Logs for a specific deployment), search for **`ecc:slackRoadmapSync`**. Each line includes a `source` of that value, a stable `event` (for example `cron_batch_start`, `model_response`, `model_json_parse_failed`, `pipeline_ok`), plus **`batchId`** (nightly run or a single “Sync all” request) and **`correlationId`** (one per company) so you can follow one failure end-to-end. If the model returns non-JSON, look for `model_json_parse_failed` and chunked `model_raw_output` events with the same ids.
