@@ -16,10 +16,29 @@ export function countPendingByCompany(
   return { total, byCompany };
 }
 
+/**
+ * Best-available "last sync" timestamp derived from existing records:
+ * the max of `lastSeenAt` across **all** items. The pipeline writes a fresh
+ * `lastSeenAt = now` for every suggestion it (re)creates, so this captures
+ * the most recent successful run for any company without adding a schema field.
+ */
+function lastSyncedAtFromItems(
+  data: Pick<SlackSuggestionsData, "items">
+): string | null {
+  let max = "";
+  for (const it of data.items) {
+    if (typeof it.lastSeenAt === "string" && it.lastSeenAt > max) {
+      max = it.lastSeenAt;
+    }
+  }
+  return max || null;
+}
+
 export const getCachedSlackPendingStats = unstable_cache(
   async () => {
     const doc = await readSlackSuggestions();
-    return countPendingByCompany(doc);
+    const counts = countPendingByCompany(doc);
+    return { ...counts, lastSyncedAt: lastSyncedAtFromItems(doc) };
   },
   ["ecc-slack-pending-stats"],
   { tags: [ECC_SLACK_SUGGESTIONS_TAG] }

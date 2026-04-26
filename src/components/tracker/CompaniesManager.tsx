@@ -27,6 +27,8 @@ import {
   updateCompany,
   deleteCompany,
 } from "@/server/actions/tracker";
+import { fetchCompanyLogoFromWebsite } from "@/server/actions/uploads";
+import { toast } from "sonner";
 import { CompanyDescriptionGenerateExtras } from "./CompanyDescriptionGenerateExtras";
 import { RoadmapViewProvider } from "./roadmap-view-context";
 import { PageToolbar } from "./PageToolbar";
@@ -176,6 +178,39 @@ function CompaniesManagerInner({
   async function handleTogglePin(company: Company) {
     await updateCompany(company.id, { pinned: !company.pinned });
     router.refresh();
+  }
+
+  /**
+   * Save the website, then (when this company has no logo yet) try to grab one
+   * by scraping the homepage. Runs after the website save returns so the cell
+   * collapses immediately without waiting for the network fetch.
+   */
+  async function handleSaveCompanyWebsite(
+    company: Company,
+    nextWebsiteRaw: string
+  ): Promise<void> {
+    const previousWebsite = (company.website ?? "").trim();
+    const nextWebsite = nextWebsiteRaw.trim();
+    await updateCompany(company.id, { website: nextWebsite });
+
+    const hasLogo = (company.logoPath ?? "").trim().length > 0;
+    const websiteChanged = nextWebsite !== previousWebsite;
+    if (!nextWebsite || hasLogo || !websiteChanged) return;
+
+    // Run in the background — the user shouldn't wait for an HTTP fetch.
+    void (async () => {
+      try {
+        const r = await fetchCompanyLogoFromWebsite(company.id);
+        if (r.ok) {
+          toast.success(`Pulled logo from ${nextWebsite}`);
+          router.refresh();
+        }
+        // Quietly swallow the "no logo found" / network-error cases; the user
+        // can still upload a logo manually.
+      } catch {
+        /* best-effort */
+      }
+    })();
   }
 
   const tierGroups = useMemo(
@@ -354,7 +389,7 @@ function CompaniesManagerInner({
                       <InlineEditCell
                         value={company.website ?? ""}
                         onSave={(website) =>
-                          updateCompany(company.id, { website })
+                          handleSaveCompanyWebsite(company, website)
                         }
                         placeholder="https://…"
                         formatDisplay={formatWebsiteFaviconDisplay}

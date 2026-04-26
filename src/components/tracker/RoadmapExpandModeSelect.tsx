@@ -121,7 +121,9 @@ export function RoadmapExpandModeSelect({
           setOpen((o) => !o);
         }}
         className={cn(
-          filterSelectTriggerButtonClass(open, expandPreset !== null),
+          filterSelectTriggerButtonClass(open, expandPreset !== null, {
+            selectionAccent: "hoverOnly",
+          }),
           "inline-flex max-w-full min-h-[2.25rem] w-max items-center py-1.5 pl-2.5 pr-2 font-medium transition-colors",
           viewLocked &&
             "cursor-default border-zinc-600/90 bg-zinc-900/90 text-zinc-100",

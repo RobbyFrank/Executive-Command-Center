@@ -151,22 +151,19 @@ function sniffImageMime(buf: Buffer): string | null {
 }
 
 /**
- * Download a remote image and store it in Vercel Blob (same layout as manual person uploads).
- * Used by Slack import; requires BLOB_READ_WRITE_TOKEN.
+ * Download a remote image and store it in the same place as a manual upload.
+ * Falls back to writing under `public/uploads/...` when Vercel Blob is not configured (local dev).
  */
-export async function savePersonProfileFromRemoteUrl(args: {
-  personId: string;
+export async function saveImageFromRemoteUrl(args: {
+  kind: "company" | "person";
+  entityId: string;
   imageUrl: string;
+  /** Network timeout for downloading the source image. Defaults to 30s. */
+  timeoutMs?: number;
 }): Promise<SaveUploadResult> {
-  if (!blobUploadsEnabled()) {
-    return {
-      ok: false,
-      error:
-        "Vercel Blob is not configured. Set BLOB_READ_WRITE_TOKEN to store profile photos.",
-    };
-  }
+  const { kind, entityId, imageUrl, timeoutMs = 30_000 } = args;
 
-  const url = args.imageUrl?.trim();
+  const url = imageUrl?.trim();
   if (!url) {
     return { ok: false, error: "No image URL" };
   }
@@ -176,16 +173,22 @@ export async function savePersonProfileFromRemoteUrl(args: {
     res = await fetch(url, {
       redirect: "follow",
       cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        // Some hosts (e.g. site CDNs) reject default fetch UA; pretend to be a real browser.
+        "User-Agent":
+          "Mozilla/5.0 (compatible; ExecutiveCommandCenter/1.0; +image-fetch)",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
     });
   } catch {
-    return { ok: false, error: "Could not download profile image (network error)." };
+    return { ok: false, error: "Could not download image (network error)." };
   }
 
   if (!res.ok) {
     return {
       ok: false,
-      error: `Could not download profile image (${res.status}).`,
+      error: `Could not download image (${res.status}).`,
     };
   }
 
@@ -211,14 +214,38 @@ export async function savePersonProfileFromRemoteUrl(args: {
   }
 
   const ext = MIME_TO_EXT[mime];
-  const safe = sanitizeId(args.personId);
-  const pathname = `uploads/people/${safe}.${ext}`;
+  const safe = sanitizeId(entityId);
+  const sub = kind === "company" ? "companies" : "people";
 
-  const blob = await put(pathname, buf, {
-    access: "public",
-    token: process.env.BLOB_READ_WRITE_TOKEN,
-    addRandomSuffix: true,
+  if (blobUploadsEnabled()) {
+    const pathname = `uploads/${sub}/${safe}.${ext}`;
+    const blob = await put(pathname, buf, {
+      access: "public",
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: true,
+    });
+    return { ok: true, webPath: blob.url };
+  }
+
+  const webPath = `/uploads/${sub}/${safe}.${ext}`;
+  const absDir = join(process.cwd(), "public", "uploads", sub);
+  const absFile = join(absDir, `${safe}.${ext}`);
+  await mkdir(absDir, { recursive: true });
+  await writeFile(absFile, buf);
+  return { ok: true, webPath };
+}
+
+/**
+ * Download a Slack profile photo and store it (Vercel Blob in prod; local in dev).
+ * Wrapper around `saveImageFromRemoteUrl` for backwards compatibility.
+ */
+export async function savePersonProfileFromRemoteUrl(args: {
+  personId: string;
+  imageUrl: string;
+}): Promise<SaveUploadResult> {
+  return saveImageFromRemoteUrl({
+    kind: "person",
+    entityId: args.personId,
+    imageUrl: args.imageUrl,
   });
-
-  return { ok: true, webPath: blob.url };
 }

@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { getRepository } from "@/server/repository";
 import { ECC_SLACK_SUGGESTIONS_TAG } from "@/lib/cache-tags";
 import { mutateSlackSuggestions } from "@/server/repository/slack-suggestions-storage";
@@ -158,7 +158,7 @@ export async function runSlackSyncPipelineForCompany(
     await mutateSlackSuggestions((draft) => {
       replacePendingForCompany(companyId, [])(draft);
     });
-    updateTag(ECC_SLACK_SUGGESTIONS_TAG);
+    revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
     return { ok: true, fresh: [], pending: [] };
   }
 
@@ -201,7 +201,7 @@ export async function runSlackSyncPipelineForCompany(
     await mutateSlackSuggestions((draft) => {
       replacePendingForCompany(companyId, pending)(draft);
     });
-    updateTag(ECC_SLACK_SUGGESTIONS_TAG);
+    revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
 
     return { ok: true, fresh, pending };
   } catch (e) {
@@ -245,7 +245,7 @@ export async function reconcileAndReplaceFromFresh(
     await mutateSlackSuggestions((draft) => {
       replacePendingForCompany(companyId, pending)(draft);
     });
-    updateTag(ECC_SLACK_SUGGESTIONS_TAG);
+    revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
     return { ok: true, pending };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

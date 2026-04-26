@@ -17,6 +17,7 @@ import { AtlasGroupingToggle } from "./AtlasGroupingToggle";
 import { AtlasMilestone } from "./AtlasMilestone";
 import { AtlasMilestonePanel } from "./AtlasMilestonePanel";
 import { AtlasProject } from "./AtlasProject";
+import { AtlasStarfield } from "./AtlasStarfield";
 import {
   CANVAS_H,
   CANVAS_W,
@@ -55,6 +56,35 @@ function truncate(s: string, max: number): string {
 /** Euclidean distance between two 2D points (used for hit-testing circles). */
 function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.hypot(x1 - x2, y1 - y2);
+}
+
+/** Deterministic 0–1 PRNG from a string seed + numeric salt (FNV-1a). */
+function seededRandom(seed: string, salt: number): number {
+  let h = 2166136261;
+  const combined = `${seed}:${salt}`;
+  for (let i = 0; i < combined.length; i++) {
+    h ^= combined.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 100_000) / 100_000;
+}
+
+/**
+ * Build a per-company drift style: a unique amplitude (±4 viewBox units),
+ * duration (7–13s), and negative delay (so each company's loop is out of
+ * phase from t=0). Used by the `.atlas-drift` keyframes.
+ */
+function driftStyleFor(seed: string): React.CSSProperties {
+  const dx = (seededRandom(seed, 1) * 2 - 1) * 4;
+  const dy = (seededRandom(seed, 2) * 2 - 1) * 3;
+  const dur = 7 + seededRandom(seed, 3) * 6;
+  const delay = -seededRandom(seed, 4) * dur;
+  return {
+    ["--atlas-dx" as string]: `${dx.toFixed(2)}px`,
+    ["--atlas-dy" as string]: `${dy.toFixed(2)}px`,
+    ["--atlas-dur" as string]: `${dur.toFixed(2)}s`,
+    ["--atlas-delay" as string]: `${delay.toFixed(2)}s`,
+  } as React.CSSProperties;
 }
 
 /**
@@ -101,6 +131,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   const [focusPath, setFocusPath] = useState<FocusPath>([]);
   const [grouping, setGroupingState] = useState<GroupingKey>("goal");
   const [userCamera, setUserCamera] = useState<UserCamera | null>(null);
+  /**
+   * True while the user is actively wheel-zooming. Adds a short CSS
+   * transition on the camera transform so wheel events produce a smooth
+   * chase rather than a choppy jump. Pointer-drag still wants instant
+   * one-to-one camera updates, so this stays false during drag.
+   */
+  const [isWheelZooming, setIsWheelZooming] = useState(false);
 
   /**
    * Switching grouping invalidates the bucket key in `focusPath[1]` (and
@@ -271,18 +308,33 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
   } | null>(null);
   const autoDescendTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCursorSvg = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * Rolling target for wheel-zoom. Each wheel event stacks its zoom on
+   * the *target* (not on the currently rendered camera) so rapid events
+   * accumulate correctly even though the camera lags behind via the CSS
+   * transition. Cleared when the user drags, clicks, or wheel idles.
+   */
+  const wheelTargetRef = useRef<UserCamera | null>(null);
+  const wheelIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Convert a clientX/Y point into SVG viewBox coordinates using the current camera. */
-  const clientToSvg = useCallback(
-    (clientX: number, clientY: number): { x: number; y: number } | null => {
+  /**
+   * Convert a clientX/Y point into SVG-space coords given an explicit camera
+   * (scale, tx, ty). The wheel handler uses this with the rolling target
+   * camera (not the currently rendered one) so cursor-anchoring stays
+   * consistent under rapid zoom events.
+   */
+  const clientToSvgWithCamera = useCallback(
+    (
+      clientX: number,
+      clientY: number,
+      camScale: number,
+      camTx: number,
+      camTy: number
+    ): { x: number; y: number } | null => {
       const svg = svgRef.current;
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return null;
-      // viewBox units the rect covers — viewBox is always fixed at
-      // CANVAS_W × CANVAS_H because `preserveAspectRatio="xMidYMid meet"`
-      // (SVG default). We compute the visible viewBox region after the
-      // aspect-ratio fit, then map the pixel point in.
       const vbAspect = CANVAS_W / CANVAS_H;
       const rectAspect = rect.width / rect.height;
       let visW: number;
@@ -290,7 +342,6 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       let offsetX: number;
       let offsetY: number;
       if (rectAspect > vbAspect) {
-        // Rect is wider than the viewBox aspect — viewBox is pillarboxed.
         visH = rect.height;
         visW = visH * vbAspect;
         offsetX = (rect.width - visW) / 2;
@@ -303,15 +354,20 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       }
       const px = clientX - rect.left - offsetX;
       const py = clientY - rect.top - offsetY;
-      // Point in untransformed viewBox coords.
       const vbX = (px / visW) * CANVAS_W;
       const vbY = (py / visH) * CANVAS_H;
-      // Undo camera transform to get the SVG-space point.
-      const x = (vbX - tx) / scale;
-      const y = (vbY - ty) / scale;
+      const x = (vbX - camTx) / camScale;
+      const y = (vbY - camTy) / camScale;
       return { x, y };
     },
-    [scale, tx, ty]
+    []
+  );
+
+  /** Convert a clientX/Y point into SVG viewBox coordinates using the current camera. */
+  const clientToSvg = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } | null =>
+      clientToSvgWithCamera(clientX, clientY, scale, tx, ty),
+    [clientToSvgWithCamera, scale, tx, ty]
   );
 
   const runAutoDescend = useCallback(() => {
@@ -413,30 +469,68 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       // non-passive; the attribute-style handler is already non-passive in
       // React 18+ for wheel. Guard with stopPropagation anyway.
       e.stopPropagation();
-      const point = clientToSvg(e.clientX, e.clientY);
-      if (!point) return;
-      lastCursorSvg.current = point;
+
+      // Base everything on the rolling wheel target (or the current
+      // effective camera if none yet). This is critical for rapid wheel
+      // events: each event stacks on the target rather than the currently
+      // rendered camera, so a flick of the wheel actually goes where it
+      // should instead of plateauing because the rendered scale hasn't
+      // caught up yet.
+      const baseScale = wheelTargetRef.current?.scale ?? scale;
+      const baseTx =
+        wheelTargetRef.current
+          ? CANVAS_W / 2 - wheelTargetRef.current.cx * wheelTargetRef.current.scale
+          : tx;
+      const baseTy =
+        wheelTargetRef.current
+          ? CANVAS_H / 2 - wheelTargetRef.current.cy * wheelTargetRef.current.scale
+          : ty;
+
+      // Cursor in SVG-space relative to the target (not the currently
+      // rendered camera) so anchoring stays consistent across rapid wheel
+      // events.
+      const cursor = clientToSvgWithCamera(
+        e.clientX,
+        e.clientY,
+        baseScale,
+        baseTx,
+        baseTy
+      );
+      if (!cursor) return;
+      lastCursorSvg.current = cursor;
+
       const factor = Math.exp(-e.deltaY / 400);
       const nextScale = Math.max(
         MIN_CAMERA_SCALE,
-        Math.min(MAX_CAMERA_SCALE, scale * factor)
+        Math.min(MAX_CAMERA_SCALE, baseScale * factor)
       );
-      if (nextScale === scale) return;
+      if (nextScale === baseScale) return;
       // Keep the cursor's SVG point under the cursor after scaling.
       // On-screen constraint: tx + scale*cursor.x stays constant →
       // tx' = tx + (scale - nextScale) * cursor.x, same for y.
-      // Re-derive user camera (cx, cy) from (tx, ty, nextScale):
-      // cx = (CANVAS_W / 2 - tx') / nextScale.
-      const newTx = tx + (scale - nextScale) * point.x;
-      const newTy = ty + (scale - nextScale) * point.y;
-      setUserCamera({
+      const newTx = baseTx + (baseScale - nextScale) * cursor.x;
+      const newTy = baseTy + (baseScale - nextScale) * cursor.y;
+      const nextTarget: UserCamera = {
         cx: (CANVAS_W / 2 - newTx) / nextScale,
         cy: (CANVAS_H / 2 - newTy) / nextScale,
         scale: nextScale,
-      });
+      };
+      wheelTargetRef.current = nextTarget;
+      setUserCamera(nextTarget);
+      setIsWheelZooming(true);
+
+      // Reset the wheel idle timer — when the wheel stops emitting events
+      // for a beat, drop the smoothing class so subsequent drags feel
+      // direct.
+      if (wheelIdleTimer.current) clearTimeout(wheelIdleTimer.current);
+      wheelIdleTimer.current = setTimeout(() => {
+        wheelTargetRef.current = null;
+        setIsWheelZooming(false);
+      }, 220);
+
       scheduleAutoDescend();
     },
-    [clientToSvg, scale, scheduleAutoDescend, tx, ty]
+    [clientToSvgWithCamera, scale, scheduleAutoDescend, tx, ty]
   );
 
   const handlePointerDown = useCallback(
@@ -448,6 +542,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       if (target && target !== e.currentTarget && target.closest("[data-atlas-interactive=true]")) {
         return;
       }
+      // Drag must feel direct — drop any wheel-zoom smoothing first.
+      if (wheelIdleTimer.current) {
+        clearTimeout(wheelIdleTimer.current);
+        wheelIdleTimer.current = null;
+      }
+      wheelTargetRef.current = null;
+      if (isWheelZooming) setIsWheelZooming(false);
       // Derive the current on-screen camera center from the effective
       // transform so dragging out of a focus-driven camera continues smoothly.
       const originCx = (CANVAS_W / 2 - tx) / scale;
@@ -461,7 +562,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       };
       (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
     },
-    [scale, tx, ty]
+    [isWheelZooming, scale, tx, ty]
   );
 
   const handlePointerMove = useCallback(
@@ -521,12 +622,24 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
     [popLevel]
   );
 
-  // Cleanup debounce timer on unmount.
+  // Cleanup debounce timers on unmount.
   useEffect(() => {
     return () => {
       if (autoDescendTimer.current) clearTimeout(autoDescendTimer.current);
+      if (wheelIdleTimer.current) clearTimeout(wheelIdleTimer.current);
     };
   }, []);
+
+  // When the focus path changes (any click that descends/pops), drop any
+  // in-flight wheel-zoom smoothing so the focus snap reads cleanly.
+  useEffect(() => {
+    if (wheelIdleTimer.current) {
+      clearTimeout(wheelIdleTimer.current);
+      wheelIdleTimer.current = null;
+    }
+    wheelTargetRef.current = null;
+    setIsWheelZooming(false);
+  }, [focusPath]);
 
   // React attaches wheel handlers as passive by default, so we can't
   // `preventDefault` from `onWheel`. Attach a native non-passive wheel
@@ -752,22 +865,61 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       <style>{`
         .atlas-fade { transition: opacity 600ms ease; }
         .atlas-camera { transition: transform 900ms cubic-bezier(0.7, 0, 0.2, 1); transform-origin: 0 0; }
+        /* Short transition used while wheel-zooming. Each new wheel event
+           re-targets the transform; CSS interpolates from the currently
+           rendered position to the new target, giving a smooth chase
+           feel rather than the instant jump that produces wheel choppy. */
+        .atlas-camera-smooth { transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); transform-origin: 0 0; }
         .atlas-surface {
           background:
-            radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.06), transparent 60%),
-            radial-gradient(circle at 80% 70%, rgba(139, 92, 246, 0.05), transparent 55%),
-            #09090b;
+            radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.05), transparent 55%),
+            radial-gradient(circle at 80% 70%, rgba(139, 92, 246, 0.045), transparent 50%),
+            radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%),
+            #07070a;
+        }
+        @keyframes atlas-drift {
+          from { transform: translate(0px, 0px); }
+          to   { transform: translate(var(--atlas-dx, 0px), var(--atlas-dy, 0px)); }
+        }
+        .atlas-drift {
+          animation: atlas-drift var(--atlas-dur, 9s) ease-in-out infinite alternate;
+          animation-delay: var(--atlas-delay, 0s);
+          transform-box: fill-box;
+          transform-origin: center;
+          will-change: transform;
+        }
+        .atlas-drift[data-drift-paused="true"] {
+          animation-play-state: paused;
+        }
+        @keyframes atlas-pulse-soft {
+          0%, 100% { opacity: 0.55; }
+          50%      { opacity: 1; }
+        }
+        .atlas-pulse-soft {
+          animation: atlas-pulse-soft 2.6s ease-in-out infinite;
+        }
+        @keyframes atlas-spark-pulse {
+          0%, 100% { opacity: 0.7; transform: scale(1); }
+          50%      { opacity: 1;   transform: scale(1.08); }
+        }
+        .atlas-spark-pulse {
+          animation: atlas-spark-pulse 3.2s ease-in-out infinite;
+          transform-box: fill-box;
+          transform-origin: center;
         }
       `}</style>
 
       <div className="atlas-surface pointer-events-none absolute inset-0" />
+      <AtlasStarfield className="pointer-events-none absolute inset-0" />
 
       {/* Header (top-left) */}
-      <div className="pointer-events-none absolute left-6 top-6 z-10 select-none">
-        <p className="font-mono text-[9px] uppercase tracking-[0.3em] text-zinc-500">
+      <div className="pointer-events-none absolute left-6 top-5 z-10 select-none">
+        <p className="font-mono text-[9px] uppercase tracking-[0.34em] text-zinc-500/80">
           Portfolio atlas
         </p>
-        <h1 className="mt-0.5 text-lg italic text-zinc-100">Momentum map</h1>
+        <h1 className="mt-0 text-base italic tracking-tight text-zinc-100">
+          Momentum map
+        </h1>
       </div>
 
       {/* Grouping toggle (top, centered) */}
@@ -785,7 +937,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
       </div>
 
       {/* Hint (bottom center) */}
-      <div className="pointer-events-none absolute bottom-6 left-1/2 z-10 -translate-x-1/2 font-mono text-[9px] uppercase tracking-[0.3em] text-zinc-500">
+      <div className="pointer-events-none absolute bottom-6 left-1/2 z-10 -translate-x-1/2 font-mono text-[9px] uppercase tracking-[0.36em] text-zinc-500/60">
         {HINTS[Math.min(level, HINTS.length - 1)]}
       </div>
 
@@ -805,7 +957,13 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
         aria-label="Portfolio atlas canvas"
       >
         <g
-          className={isUserDriven ? undefined : "atlas-camera"}
+          className={
+            !isUserDriven
+              ? "atlas-camera"
+              : isWheelZooming
+                ? "atlas-camera-smooth"
+                : undefined
+          }
           style={{
             transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
             transformOrigin: "0 0",
@@ -814,20 +972,30 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           {companies.map((company) => {
             const isFocused = focusedCompany?.id === company.id;
             const isDimmed = Boolean(focusedCompany) && !isFocused;
+            // Pause drift entirely once a company is focused — the focused
+            // bubble must stay aligned with the camera target, and
+            // off-screen siblings drifting consumes battery for nothing.
+            const driftPaused = level > 0;
 
             return (
               <g key={company.id}>
-                <AtlasCompany
-                  company={company}
-                  isFocused={isFocused}
-                  isDimmed={isDimmed}
-                  showLabel={level === 0}
-                  scale={scale}
-                  onClick={() => {
-                    setUserCamera(null);
-                    setFocusPath([company.id]);
-                  }}
-                />
+                <g
+                  className="atlas-drift"
+                  data-drift-paused={driftPaused ? "true" : undefined}
+                  style={driftStyleFor(company.id)}
+                >
+                  <AtlasCompany
+                    company={company}
+                    isFocused={isFocused}
+                    isDimmed={isDimmed}
+                    showLabel={level === 0}
+                    scale={scale}
+                    onClick={() => {
+                      setUserCamera(null);
+                      setFocusPath([company.id]);
+                    }}
+                  />
+                </g>
 
                 {isFocused && inner
                   ? renderCompanyInner({
@@ -859,7 +1027,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           onClick={() => zoomAroundCenter(1.3, { scale, tx, ty }, setUserCamera)}
           aria-label="Zoom in"
           title="Zoom in"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950/80 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -868,7 +1036,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           onClick={() => zoomAroundCenter(1 / 1.3, { scale, tx, ty }, setUserCamera)}
           aria-label="Zoom out"
           title="Zoom out"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950/80 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
@@ -877,7 +1045,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
           onClick={fitToAll}
           aria-label="Fit all companies"
           title="Fit all"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950/80 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-zinc-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
         >
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
@@ -887,7 +1055,7 @@ export function PortfolioAtlas({ hierarchy, people }: PortfolioAtlasProps) {
             onClick={snapToFocus}
             aria-label="Snap back to focus"
             title="Snap back to focus"
-            className="mt-1 inline-flex h-7 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950/80 px-2 font-mono text-[9px] uppercase tracking-[0.22em] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-100"
+            className="mt-1 inline-flex h-7 items-center justify-center rounded-md border border-zinc-800/60 bg-zinc-950/60 px-2 font-mono text-[9px] uppercase tracking-[0.24em] text-zinc-400 backdrop-blur-sm transition-colors hover:border-zinc-600 hover:bg-zinc-950/90 hover:text-zinc-100"
           >
             Snap
           </button>

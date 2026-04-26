@@ -13,7 +13,10 @@ export function SlackLogo({ className, alt = "" }: SlackLogoProps) {
       alt={alt}
       width={16}
       height={16}
-      className={cn("h-4 w-4 shrink-0 object-contain", className)}
+      className={cn(
+        "block h-4 w-4 shrink-0 object-contain object-center",
+        className
+      )}
       aria-hidden={alt ? undefined : true}
     />
   );

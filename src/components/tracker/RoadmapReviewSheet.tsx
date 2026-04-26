@@ -14,12 +14,9 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  Clock,
-  Info,
   Loader2,
   Pin,
   RefreshCw,
-  Server,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -215,6 +212,11 @@ function SyncProgressPanel({
           ) : null}
         </ul>
       ) : null}
+      {syncing ? (
+        <p className="border-t border-zinc-800/80 pt-2 text-[10px] leading-snug text-amber-200/75">
+          Keep this tab open. Closing or refreshing cancels the sync.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -256,50 +258,23 @@ function SyncAllConfirmModal({
         aria-label="Cancel"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
       />
-      <div className="relative w-[min(440px,100%)] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-        <div className="flex items-start gap-3 border-b border-zinc-800 px-5 py-4">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500/15 text-cyan-200">
-            <RefreshCw className="h-4 w-4" aria-hidden />
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-zinc-100">
-              Sync Slack for all {companyCount} companies?
-            </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              This is the same job that runs automatically every night at
-              midnight UTC.
-            </p>
-          </div>
+      <div className="relative w-[min(400px,100%)] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+        <div className="space-y-2 px-5 pt-5 pb-3 text-xs leading-relaxed text-zinc-400">
+          <h3 className="text-sm font-semibold text-zinc-100">
+            Sync Slack for all {companyCount} companies?
+          </h3>
+          <p>
+            Reads the last 2 days of Slack per company and refreshes the
+            review queue with new suggestions.{" "}
+            <span className="text-zinc-200">~{etaLabel.replace(/^~/, "")}.</span>
+          </p>
+          <p>
+            The work runs on our server, but progress is streamed to this tab —
+            <span className="text-zinc-300"> refreshing the page cancels the run</span>.
+            The same job runs automatically every night, so this is just a
+            manual refresh.
+          </p>
         </div>
-        <ul className="space-y-2.5 px-5 py-4 text-xs text-zinc-300">
-          <li className="flex items-start gap-2">
-            <Server className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
-            <span>
-              Runs <span className="text-zinc-100">on the server</span> (not
-              your browser). You can close this panel at any time and the job
-              keeps going. If you reload the page or click{" "}
-              <span className="text-zinc-100">Cancel</span>, the run is aborted.
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
-            <span>
-              For each company we read the last <strong>2 days</strong> of
-              Slack history (with thread replies), call Claude twice
-              (suggest + reconcile), and save pending suggestions to the
-              review queue. Estimate:{" "}
-              <span className="text-zinc-100">{etaLabel}</span> total.
-            </span>
-          </li>
-          <li className="flex items-start gap-2">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
-            <span>
-              Existing pending items you have already <em>rejected</em> are
-              filtered out. <em>Approved</em> items have already been written
-              to the roadmap and won&apos;t be re-suggested.
-            </span>
-          </li>
-        </ul>
         <div className="flex items-center justify-end gap-2 border-t border-zinc-800 bg-zinc-950/80 px-5 py-3">
           <button
             type="button"
@@ -315,6 +290,93 @@ function SyncAllConfirmModal({
           >
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
             Start sync
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function CancelSyncConfirmModal({
+  open,
+  onKeepRunning,
+  onConfirm,
+  progress,
+}: {
+  open: boolean;
+  onKeepRunning: () => void;
+  onConfirm: () => void;
+  progress: SyncProgress | null;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onKeepRunning();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onKeepRunning]);
+
+  if (!open) return null;
+
+  const completed = progress?.completed ?? 0;
+  const total = progress?.total ?? 0;
+  const remaining = Math.max(0, total - completed);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Cancel Slack sync"
+    >
+      <button
+        type="button"
+        onClick={onKeepRunning}
+        aria-label="Keep running"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <div className="relative w-[min(400px,100%)] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+        <div className="space-y-2 px-5 pt-5 pb-3 text-xs leading-relaxed text-zinc-400">
+          <h3 className="text-sm font-semibold text-zinc-100">Cancel sync?</h3>
+          <p>
+            {total > 0 ? (
+              <>
+                <span className="text-zinc-200">
+                  {completed}/{total}
+                </span>{" "}
+                done
+                {remaining > 0 ? (
+                  <>
+                    {" — "}
+                    <span className="text-zinc-300">
+                      {remaining} {remaining === 1 ? "company" : "companies"} left
+                    </span>
+                  </>
+                ) : null}
+                . Already-finished companies stay in the queue.
+              </>
+            ) : (
+              "Stop the in-progress sync. Anything completed so far stays in the queue."
+            )}
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-800 bg-zinc-950/80 px-5 py-3">
+          <button
+            type="button"
+            onClick={onKeepRunning}
+            className="rounded-md px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            Keep running
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/15 px-3 py-1.5 text-xs font-medium text-rose-100 hover:bg-rose-500/25"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+            Cancel sync
           </button>
         </div>
       </div>
@@ -373,7 +435,8 @@ export function RoadmapReviewSheet({
   /** Pending count per company (badge in the Sync dropdown). */
   slackPendingByCompany?: Record<string, number>;
 }) {
-  const { open, closeSheet } = useRoadmapReview();
+  const { open, closeSheet, setSlackQueueSyncing, setSlackQueueSyncProgress } =
+    useRoadmapReview();
   const router = useRouter();
   const [items, setItems] = useState<PendingWithCompanyName[]>([]);
   const [loading, setLoading] = useState(false);
@@ -386,6 +449,7 @@ export function RoadmapReviewSheet({
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [confirmAllOpen, setConfirmAllOpen] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const syncStartRef = useRef<number | null>(null);
 
   // Render the slide-over after `open` becomes true so the enter transition runs.
@@ -426,6 +490,21 @@ export function RoadmapReviewSheet({
       syncAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!syncing) {
+      setSlackQueueSyncProgress(null);
+      return;
+    }
+    if (!syncProgress) {
+      setSlackQueueSyncProgress({ total: 0, completed: 0 });
+      return;
+    }
+    setSlackQueueSyncProgress({
+      total: syncProgress.total,
+      completed: syncProgress.completed,
+    });
+  }, [syncing, syncProgress, setSlackQueueSyncProgress]);
 
   // Close the picker on outside click / Escape.
   useEffect(() => {
@@ -471,6 +550,7 @@ export function RoadmapReviewSheet({
     async (opts: { companyIds?: string[]; scopeLabel?: string } = {}) => {
       if (syncing) return;
       setSyncing(true);
+      setSlackQueueSyncing(true);
       syncStartRef.current = Date.now();
       setSyncProgress({
         total: 0,
@@ -499,6 +579,9 @@ export function RoadmapReviewSheet({
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffered = "";
+        // Refresh the visible queue every time another company finishes,
+        // so suggestions appear progressively instead of only at the end.
+        let lastResultsLen = 0;
 
         const handleEvent = (line: string) => {
           const trimmed = line.trim();
@@ -522,6 +605,10 @@ export function RoadmapReviewSheet({
               results: e.results,
               scopeLabel: prev?.scopeLabel,
             }));
+            if (e.results.length > lastResultsLen) {
+              lastResultsLen = e.results.length;
+              void load();
+            }
           } else if (evt.type === "done") {
             const e = evt;
             setSyncProgress((prev) => ({
@@ -565,12 +652,13 @@ export function RoadmapReviewSheet({
         }
         toast.error(e instanceof Error ? e.message : "Sync failed");
       } finally {
+        setSlackQueueSyncing(false);
         setSyncing(false);
         syncAbortRef.current = null;
         syncStartRef.current = null;
       }
     },
-    [syncing, load, router]
+    [syncing, load, router, setSlackQueueSyncing, setSlackQueueSyncProgress]
   );
 
   const cancelSync = useCallback(() => {
@@ -654,7 +742,7 @@ export function RoadmapReviewSheet({
                   type="button"
                   onClick={() => {
                     if (syncing) {
-                      cancelSync();
+                      setConfirmCancelOpen(true);
                       return;
                     }
                     setConfirmAllOpen(true);
@@ -904,6 +992,15 @@ export function RoadmapReviewSheet({
         onConfirm={() => {
           setConfirmAllOpen(false);
           void runSync();
+        }}
+      />
+      <CancelSyncConfirmModal
+        open={confirmCancelOpen}
+        progress={syncProgress}
+        onKeepRunning={() => setConfirmCancelOpen(false)}
+        onConfirm={() => {
+          setConfirmCancelOpen(false);
+          cancelSync();
         }}
       />
     </div>,

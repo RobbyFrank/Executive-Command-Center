@@ -71,6 +71,7 @@ export default async function DashboardLayout({
             unattendedNewHireCount={unattendedNewHireCount}
             unrepliedAsksCount={unrepliedAsksCount}
             pendingSlackSuggestionsCount={slackPending.total}
+            slackLastSyncedAt={slackPending.lastSyncedAt}
           />
           <main className="relative min-h-0 min-w-0 flex-1 overflow-auto px-6 pb-6 pt-0">
             <div className="relative z-10 min-h-0">{children}</div>

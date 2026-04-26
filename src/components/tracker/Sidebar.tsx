@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { logoutAction } from "@/server/actions/auth";
 import {
   LayoutDashboard,
@@ -13,11 +13,13 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquareWarning,
-  Inbox,
+  Loader2,
   Orbit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatSlackSyncAge } from "@/lib/formatSlackSyncAge";
 import { useRoadmapReview } from "./RoadmapReviewContext";
+import { SlackLogo } from "./SlackLogo";
 import {
   SIDEBAR_COLLAPSED_PREF_KEY,
   readSidebarCollapsedLocalStorage,
@@ -64,6 +66,8 @@ export function Sidebar({
   unattendedNewHireCount = 0,
   unrepliedAsksCount = 0,
   pendingSlackSuggestionsCount = 0,
+  /** ISO time of latest `lastSeenAt` in the Slack suggestions store (see stats helper). */
+  slackLastSyncedAt = null,
 }: {
   displayName: string;
   /** Same source as Team roster (`/uploads/…` or remote blob URL). */
@@ -76,11 +80,44 @@ export function Sidebar({
   unrepliedAsksCount?: number;
   /** Pending Slack → roadmap items awaiting your approval. */
   pendingSlackSuggestionsCount?: number;
+  slackLastSyncedAt?: string | null;
 }) {
   const pathname = usePathname();
-  const { openSheet } = useRoadmapReview();
+  const { openSheet, slackQueueSyncing, slackQueueSyncProgress } =
+    useRoadmapReview();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [profilePhotoBroken, setProfilePhotoBroken] = useState(false);
+  /** Bumps every minute so the “2m ago” label stays fresh while the app is open. */
+  const [syncAgeTick, setSyncAgeTick] = useState(0);
+
+  useEffect(() => {
+    if (!slackLastSyncedAt) return;
+    const id = window.setInterval(
+      () => setSyncAgeTick((n) => n + 1),
+      60_000
+    );
+    return () => window.clearInterval(id);
+  }, [slackLastSyncedAt]);
+
+  const syncAgeLabel = useMemo(() => {
+    void syncAgeTick;
+    return formatSlackSyncAge(slackLastSyncedAt);
+  }, [slackLastSyncedAt, syncAgeTick]);
+
+  const syncAgeTitle =
+    slackLastSyncedAt && !Number.isNaN(new Date(slackLastSyncedAt).getTime())
+      ? `Last sync ${new Date(slackLastSyncedAt).toLocaleString()}`
+      : undefined;
+
+  const syncPercentLabel = (() => {
+    if (!slackQueueSyncing) return null;
+    const t = slackQueueSyncProgress?.total ?? 0;
+    const c = slackQueueSyncProgress?.completed ?? 0;
+    if (t > 0) {
+      return Math.min(100, Math.max(0, Math.round((c / t) * 100)));
+    }
+    return 0;
+  })();
 
   // Apply browser preference before paint (localStorage wins; seed from server cookie if unset).
   // Keeps cookie aligned so the next full reload matches without a flash.
@@ -207,6 +244,97 @@ export function Sidebar({
       </div>
 
       <nav className="relative z-10 flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto p-3">
+        <div className={cn("mb-3 border-b border-zinc-800/70 pb-3")}>
+          <button
+            type="button"
+            onClick={openSheet}
+            title={
+              collapsed
+                ? slackQueueSyncing
+                  ? `Syncing ${syncPercentLabel ?? 0}% — keep this tab open`
+                  : "Slack — sync & review"
+                : undefined
+            }
+            aria-label={
+              slackQueueSyncing
+                ? "Slack sync in progress"
+                : "Open Slack sync and review"
+            }
+            aria-busy={slackQueueSyncing}
+            className={cn(
+              "group relative flex w-full items-center rounded-md text-sm transition-colors motion-reduce:transition-none",
+              collapsed
+                ? "justify-center px-2 py-2"
+                : "gap-3 px-3 py-2",
+              slackQueueSyncing
+                ? "bg-cyan-500/10 text-cyan-100 ring-1 ring-cyan-500/25 hover:bg-cyan-500/15"
+                : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
+            )}
+          >
+            {slackQueueSyncing ? (
+              <Loader2
+                className="h-4 w-4 shrink-0 animate-spin"
+                aria-hidden
+              />
+            ) : (
+              <SlackLogo
+                className="h-4 w-4 opacity-80 grayscale group-hover:opacity-100"
+                alt=""
+              />
+            )}
+            {!collapsed && (
+              <>
+                <span className="min-w-0 flex-1">
+                  <span className="flex w-full min-w-0 items-baseline justify-between gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-left text-zinc-200">
+                      {slackQueueSyncing
+                        ? `Syncing — ${syncPercentLabel}%`
+                        : "Sync"}
+                    </span>
+                    {slackQueueSyncing ? (
+                      <span
+                        className="shrink-0 text-[9px] text-zinc-500"
+                        title="In progress"
+                      >
+                        …
+                      </span>
+                    ) : syncAgeLabel ? (
+                      <span
+                        className="shrink-0 text-[9px] tabular-nums leading-none text-zinc-500/90"
+                        title={syncAgeTitle}
+                      >
+                        {syncAgeLabel}
+                      </span>
+                    ) : null}
+                  </span>
+                </span>
+                {pendingSlackSuggestionsCount > 0 ? (
+                  <span
+                    className="shrink-0 tabular-nums rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/35"
+                    title={`${pendingSlackSuggestionsCount} pending Slack suggestions`}
+                  >
+                    {pendingSlackSuggestionsCount > 9
+                      ? "9+"
+                      : pendingSlackSuggestionsCount}
+                  </span>
+                ) : null}
+              </>
+            )}
+            {collapsed &&
+            !slackQueueSyncing &&
+            pendingSlackSuggestionsCount > 0 ? (
+              <span
+                className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-cyan-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
+                title="Pending Slack suggestions"
+              />
+            ) : null}
+          </button>
+          {slackQueueSyncing && !collapsed ? (
+            <p className="mt-2 rounded-md border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-amber-200/90">
+              Sync in progress — don&apos;t close or refresh this tab.
+            </p>
+          ) : null}
+        </div>
         {NAV_GROUPS.map((group, groupIndex) => (
           <div
             key={group.title}
@@ -230,12 +358,7 @@ export function Sidebar({
                     : pathname.startsWith(item.href);
                 const collapsedHint = item.label;
                 return (
-                  <div
-                    key={item.href}
-                    className={cn(
-                      item.href === "/" && collapsed && "relative"
-                    )}
-                  >
+                  <div key={item.href}>
                   <Link
                     href={item.href}
                     title={collapsed ? collapsedHint : undefined}
@@ -257,21 +380,6 @@ export function Sidebar({
                         <span className="min-w-0 flex-1 truncate">
                           {item.label}
                         </span>
-                        {item.href === "/" ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              openSheet();
-                            }}
-                            className="shrink-0 rounded p-0.5 text-cyan-400/90 hover:bg-cyan-500/15 hover:text-cyan-200"
-                            title="Open Slack review queue"
-                            aria-label="Open Slack review queue"
-                          >
-                            <Inbox className="h-3.5 w-3.5" aria-hidden />
-                          </button>
-                        ) : null}
                         {item.href === "/team" && unattendedNewHireCount > 0 ? (
                           <span
                             className="shrink-0 tabular-nums rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 ring-1 ring-amber-500/35"
@@ -293,23 +401,6 @@ export function Sidebar({
                           >
                             {unrepliedAsksCount > 9 ? "9+" : unrepliedAsksCount}
                           </span>
-                        ) : null}
-                        {item.href === "/" && pendingSlackSuggestionsCount > 0 ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              openSheet();
-                            }}
-                            className="shrink-0 tabular-nums rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-200 ring-1 ring-cyan-500/35 hover:bg-cyan-500/30"
-                            title="Open Slack review queue"
-                            aria-label={`${pendingSlackSuggestionsCount} pending Slack suggestions — open review queue`}
-                          >
-                            {pendingSlackSuggestionsCount > 9
-                              ? "9+"
-                              : pendingSlackSuggestionsCount}
-                          </button>
                         ) : null}
                       </>
                     )}
@@ -333,30 +424,7 @@ export function Sidebar({
                         }`}
                       />
                     ) : null}
-                    {collapsed &&
-                    item.href === "/" &&
-                    pendingSlackSuggestionsCount > 0 ? (
-                      <span
-                        className="absolute right-2 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-cyan-400 shadow-[0_0_0_2px_rgba(9,9,11,1)]"
-                        title="Pending Slack review"
-                      />
-                    ) : null}
                   </Link>
-                    {item.href === "/" && collapsed ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openSheet();
-                        }}
-                        className="absolute bottom-0.5 right-0.5 z-10 rounded p-0.5 text-cyan-400/90 shadow-[0_0_0_2px_rgba(9,9,11,1)] hover:bg-cyan-500/20 hover:text-cyan-100"
-                        title="Open Slack review queue"
-                        aria-label="Open Slack review queue"
-                      >
-                        <Inbox className="h-3 w-3" aria-hidden />
-                      </button>
-                    ) : null}
                   </div>
                 );
               })}

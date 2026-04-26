@@ -834,10 +834,10 @@ export function TrackerView({
               title="When off: hides Done milestones, Done projects (except projects with no milestones), and goals that only have completed work. Goals with no projects always stay visible."
               onClick={() => setShowCompletedProjects((v) => !v)}
               className={cn(
-                "flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-md border px-2.5 py-1.5 text-left text-sm font-medium transition-[border-color,background-color,color,box-shadow] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 motion-reduce:transition-none",
+                "flex min-h-[2.25rem] w-full items-center gap-2.5 rounded-md border border-zinc-700 px-2.5 py-1.5 text-left text-sm font-medium transition-[border-color,background-color,color,box-shadow] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 motion-reduce:transition-none",
                 showCompletedProjects
-                  ? "border-emerald-500/45 bg-emerald-950/35 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)] hover:border-emerald-400/45 focus-visible:border-emerald-400/50 focus-visible:ring-emerald-400/15"
-                  : "border-zinc-700 bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
+                  ? "bg-emerald-950/35 text-zinc-100 shadow-none hover:border-emerald-400/45 hover:shadow-[inset_0_0_0_1px_rgba(16,185,129,0.1)] focus-visible:border-emerald-400/50 focus-visible:ring-emerald-400/15"
+                  : "bg-zinc-900/80 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-800/90 hover:text-zinc-200 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
               )}
             >
               <span
@@ -871,10 +871,10 @@ export function TrackerView({
                   : "Focus — only one goal and one project expanded; opening another closes the rest"
             }
             className={cn(
-              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm font-medium transition-[border-color,background-color,color] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
+              "inline-flex min-h-[2.25rem] shrink-0 items-center gap-2 rounded-md border border-zinc-700 px-2.5 py-1.5 text-sm font-medium transition-[border-color,background-color,color] duration-150 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
               focusMode
-                ? "border-cyan-500/50 bg-cyan-950/40 text-cyan-200 hover:border-cyan-400/45 hover:bg-cyan-950/55 focus-visible:border-cyan-400/45 focus-visible:ring-cyan-400/15"
-                : "border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
+                ? "bg-cyan-950/40 text-cyan-200 hover:border-cyan-400/45 hover:bg-cyan-950/55 focus-visible:border-cyan-400/45 focus-visible:ring-cyan-400/15"
+                : "bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:border-zinc-500/45 focus-visible:ring-zinc-400/20"
             )}
             aria-pressed={focusMode}
           >

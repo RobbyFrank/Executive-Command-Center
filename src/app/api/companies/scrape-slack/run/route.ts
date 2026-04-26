@@ -12,7 +12,7 @@ import {
 import { mutateSlackSuggestions } from "@/server/repository/slack-suggestions-storage";
 import type { SlackSuggestionRecord, SlackSuggestionsData } from "@/lib/schemas/tracker";
 import { getRepository } from "@/server/repository";
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { ECC_SLACK_SUGGESTIONS_TAG } from "@/lib/cache-tags";
 import { fetchSlackChannels } from "@/lib/slack";
 import type { TrackerData } from "@/lib/types/tracker";
@@ -233,7 +233,7 @@ export async function POST(req: Request) {
           try {
             await mutateSlackSuggestions(replacePending(companyId, fallback));
             pendingForCompany = fallback;
-            updateTag(ECC_SLACK_SUGGESTIONS_TAG);
+            revalidateTag(ECC_SLACK_SUGGESTIONS_TAG, { expire: 0 });
           } catch {
             /* ignore */
           }
