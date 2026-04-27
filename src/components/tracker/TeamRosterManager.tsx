@@ -134,6 +134,7 @@ import {
   TeamRosterActionsMenu,
   type SlackRefreshScope,
 } from "./TeamRosterActionsMenu";
+import { TeamRosterViewMenu } from "./TeamRosterViewMenu";
 import { TeamOnboardingFilterSelect } from "./TeamOnboardingFilterSelect";
 import { TeamRosterGroupingSelect } from "./TeamRosterGroupingSelect";
 import {
@@ -278,6 +279,12 @@ function TeamRosterManagerInner({
     useState<TeamRosterSortMode>("autonomy");
   /** When true, founders are excluded from the roster and filter counts. */
   const [hideFounders, setHideFounders] = useState(true);
+  /**
+   * When false (the default), sensitive roster fields (Est. monthly $ and
+   * per-group salary rollups) are not rendered. Toggle in the "…" menu; state
+   * resets on each visit (not persisted).
+   */
+  const [showSensitiveData, setShowSensitiveData] = useState(false);
   const [slackImportOpen, setSlackImportOpen] = useState(false);
   const [slackBulkRefreshRunning, setSlackBulkRefreshRunning] = useState(false);
   /** Local merges from Slack refresh so the table updates before `router.refresh()` completes. */
@@ -1035,6 +1042,11 @@ function TeamRosterManagerInner({
         </label>
 
         <div className="ml-auto flex min-w-0 shrink-0 items-center justify-end gap-2">
+          <TeamRosterViewMenu
+            showSensitiveData={showSensitiveData}
+            onShowSensitiveDataChange={setShowSensitiveData}
+            disabled={slackBulkRefreshRunning}
+          />
           <TeamRosterActionsMenu
             onImportFromSlack={() => setSlackImportOpen(true)}
             onRefreshFromSlack={(scope) => void onRefreshFromSlack(scope)}
@@ -1116,7 +1128,12 @@ function TeamRosterManagerInner({
           </p>
         ) : null}
         {!(filterActive && filteredPeople.length === 0) ? (
-        <table className="w-full text-sm min-w-[1210px]">
+        <table
+          className={cn(
+            "w-full text-sm",
+            showSensitiveData ? "min-w-[1210px]" : "min-w-[1090px]"
+          )}
+        >
           <thead>
             <tr
               ref={teamColumnHeaderRef}
@@ -1144,12 +1161,14 @@ function TeamRosterManagerInner({
               >
                 Tenure
               </th>
-              <th
-                className="text-left px-3 py-3 font-medium whitespace-nowrap min-w-[7.5rem]"
-                scope="col"
-              >
-                Est. monthly ($)
-              </th>
+              {showSensitiveData ? (
+                <th
+                  className="text-left px-3 py-3 font-medium whitespace-nowrap min-w-[7.5rem]"
+                  scope="col"
+                >
+                  Est. monthly ($)
+                </th>
+              ) : null}
               <th className="text-left px-3 py-3 font-medium min-w-[220px]">
                 Workload
               </th>
@@ -1220,7 +1239,10 @@ function TeamRosterManagerInner({
                     "sticky z-10 top-[var(--team-roster-group-top,0px)] bg-[var(--surface-group-header)] shadow-[0_2px_4px_-2px_rgba(0,0,0,0.35)]"
                   )}
                 >
-                  <td colSpan={12} className="px-3 py-2.5">
+                  <td
+                    colSpan={showSensitiveData ? 12 : 11}
+                    className="px-3 py-2.5"
+                  >
                     <div className="flex min-w-0 flex-col gap-1.5">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                       {group.kind === "department" ? (
@@ -1275,7 +1297,7 @@ function TeamRosterManagerInner({
                         <span className="text-xs text-zinc-400">{label.hint}</span>
                       ) : null}
                     </div>
-                    {group.kind !== "founders" ? (
+                    {group.kind !== "founders" && showSensitiveData ? (
                       <RosterGroupSalaryStats people={groupPeople} />
                     ) : null}
                     </div>
@@ -1512,6 +1534,7 @@ function TeamRosterManagerInner({
                         />
                       )}
                     </td>
+                    {showSensitiveData ? (
                     <td className="px-3 py-2 align-middle text-left max-w-[9rem]">
                       {isFounderPerson(person) ? null : (
                         <InlineEditCell
@@ -1543,6 +1566,7 @@ function TeamRosterManagerInner({
                         />
                       )}
                     </td>
+                    ) : null}
                     <td className="px-3 py-2 align-middle">
                       {isFounderPerson(person) ? null : (
                         <WorkloadBar
